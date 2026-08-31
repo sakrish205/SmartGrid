@@ -1,8 +1,7 @@
 """Generate flat spray-paint paths on a bounding-box face.
 
-Horizontal passes sweep one in-face axis, stepping by h_mm along the other.
-Vertical passes are the same logic rotated 90° — axes are swapped.
-When v_width_mm is supplied both sets are generated (crosshatch).
+One call = one direction (horizontal OR vertical).
+For crosshatch, the caller makes two calls and gets two separate routes.
 """
 from __future__ import annotations
 import numpy as np
@@ -14,8 +13,13 @@ def generate_bbox_route(
     bounds: tuple,
     spray_width_mm: float,
     up_axis: int,
-    v_width_mm: float | None = None,
+    direction: str = 'horizontal',   # 'horizontal' | 'vertical'
 ) -> PaintRoute:
+    """Return a PaintRoute of parallel passes on the named bbox face.
+
+    direction='horizontal' — passes sweep the wide axis, step the tall axis.
+    direction='vertical'   — axes swapped (90° rotation of horizontal).
+    """
     xmin, xmax, ymin, ymax, zmin, zmax = bounds
     mins = [xmin, ymin, zmin]
     maxs = [xmax, ymax, zmax]
@@ -37,10 +41,7 @@ def generate_bbox_route(
     face_axis, face_sign = face_map[region]
     face_pos = maxs[face_axis] if face_sign > 0 else mins[face_axis]
 
-    # ── Define the two in-face axes for horizontal passes ────────────────
-    # h_pass_axis: direction each horizontal pass sweeps (the long sweep)
-    # h_step_axis: direction the robot steps between horizontal passes
-    # Vertical is simply these two swapped.
+    # Horizontal base axes for each face
     if region in ('TOP', 'BOTTOM'):
         h_pass_axis = right_axis
         h_step_axis = fwd_axis
@@ -51,41 +52,24 @@ def generate_bbox_route(
         h_pass_axis = fwd_axis
         h_step_axis = up_axis
 
-    v_pass_axis = h_step_axis   # 90° rotation
-    v_step_axis = h_pass_axis
+    if direction == 'vertical':
+        pass_axis = h_step_axis
+        step_axis = h_pass_axis
+    else:  # horizontal (default)
+        pass_axis = h_pass_axis
+        step_axis = h_step_axis
 
-    all_passes: list[PaintPass] = []
-
-    # ── Horizontal passes ────────────────────────────────────────────────
-    all_passes.extend(
-        _make_passes(
-            face_axis, face_pos,
-            step_axis=h_step_axis,
-            pass_axis=h_pass_axis,
-            step_spacing=spray_width_mm,
-            mins=mins, maxs=maxs,
-            start_id=0,
-            region=region,
-            direction='horizontal',
-        )
+    all_passes = _make_passes(
+        face_axis, face_pos,
+        step_axis=step_axis,
+        pass_axis=pass_axis,
+        step_spacing=spray_width_mm,
+        mins=mins, maxs=maxs,
+        start_id=0,
+        region=region,
+        direction=direction,
     )
 
-    # ── Vertical passes (optional — 90° of horizontal) ───────────────────
-    if v_width_mm is not None:
-        all_passes.extend(
-            _make_passes(
-                face_axis, face_pos,
-                step_axis=v_step_axis,
-                pass_axis=v_pass_axis,
-                step_spacing=v_width_mm,
-                mins=mins, maxs=maxs,
-                start_id=len(all_passes),
-                region=region,
-                direction='vertical',
-            )
-        )
-
-    # ── Connectors ───────────────────────────────────────────────────────
     connections: list[Connection] = []
     for i in range(len(all_passes) - 1):
         connections.append(Connection(
