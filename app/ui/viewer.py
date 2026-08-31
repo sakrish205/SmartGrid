@@ -113,16 +113,18 @@ class MeshViewer(QWidget):
     # ------------------------------------------------------------------
 
     def _get_vtk_iren(self):
-        """Return the raw VTK interactor (handles both pyvistaqt wrapper and raw VTK)."""
+        """Return the raw VTK interactor regardless of pyvistaqt version."""
         iren = getattr(self.plotter, 'iren', None)
         if iren is None:
             return None
-        # pyvistaqt wraps the raw VTK interactor; get it via the Qt render window
+        # pyvistaqt >= 0.11 wraps VTK interactor; the raw one is at .interactor
         raw = getattr(iren, 'interactor', None)
-        if raw is None:
-            # Older pyvistaqt: iren itself may be the raw VTK interactor
-            raw = iren
-        return raw
+        if raw is not None and hasattr(raw, 'AddObserver'):
+            return raw
+        # Fallback: iren itself might already be the raw VTK interactor
+        if hasattr(iren, 'AddObserver'):
+            return iren
+        return None
 
     def _remove_vtk_observers(self) -> None:
         raw = self._get_vtk_iren()
@@ -142,7 +144,7 @@ class MeshViewer(QWidget):
         on_click: Callable[[tuple], None],
         drag_threshold: int = 6,
     ) -> None:
-        """Install press+release observers that only fire if no drag occurred."""
+        """Install press+release observers that fire only when no drag occurred."""
         self._remove_vtk_observers()
         raw = self._get_vtk_iren()
         if raw is None:
@@ -158,7 +160,7 @@ class MeshViewer(QWidget):
             px, py = self._press_pos
             self._press_pos = None
             if abs(x - px) > drag_threshold or abs(y - py) > drag_threshold:
-                return   # was a drag (camera rotate) — ignore
+                return   # drag (camera rotate) — ignore
             on_click((x, y))
 
         self._obs_press   = raw.AddObserver('LeftButtonPressEvent',   _press,   1.0)

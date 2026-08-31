@@ -1,8 +1,8 @@
-"""Unit dropdown, spray width spinboxes, path-target toggle, Generate button."""
+"""Unit dropdown, spray width, direction selector, path-target toggle, Generate/Clear buttons."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QGroupBox, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox,
+    QGroupBox, QVBoxLayout, QFormLayout, QComboBox,
     QDoubleSpinBox, QRadioButton, QButtonGroup, QPushButton,
     QLabel, QCheckBox, QFrame,
 )
@@ -17,7 +17,7 @@ UNITS = ['mm', 'cm', 'm', 'in', 'ft']
 class ParameterPanel(QGroupBox):
     generate_requested = Signal()
     clear_requested    = Signal()
-    grid_changed       = Signal()   # emitted when show-grid toggle or widths change
+    grid_changed       = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__("Path Settings", parent)
@@ -32,7 +32,7 @@ class ParameterPanel(QGroupBox):
 
         # ── Unit ────────────────────────────────────────────────────────
         form = QFormLayout()
-        form.setSpacing(8)
+        form.setSpacing(6)
         form.setLabelAlignment(Qt.AlignRight)
 
         self._unit_combo = QComboBox()
@@ -41,32 +41,44 @@ class ParameterPanel(QGroupBox):
         self._unit_combo.currentTextChanged.connect(self._on_unit_changed)
         form.addRow(_lbl("Unit:"), self._unit_combo)
 
-        # ── Horizontal spray width (required) ───────────────────────────
+        # ── Spray width ──────────────────────────────────────────────────
         self._h_spin = _spin()
-        form.addRow(_lbl("Horiz. width:"), self._h_spin)
-
+        form.addRow(_lbl("Spray width:"), self._h_spin)
         layout.addLayout(form)
 
-        # ── Vertical width (optional) ────────────────────────────────────
-        self._v_check = QCheckBox("Vertical width (optional):")
-        self._v_check.setChecked(False)
-        self._v_check.toggled.connect(lambda on: self._v_spin.setEnabled(on))
-        layout.addWidget(self._v_check)
+        # ── Direction ────────────────────────────────────────────────────
+        layout.addWidget(_lbl("Direction:", bold=True))
 
-        self._v_spin = _spin()
-        self._v_spin.setEnabled(False)
+        dir_group = QButtonGroup(self)
+        self._h_radio  = QRadioButton("Horizontal")
+        self._v_radio  = QRadioButton("Vertical")
+        self._hv_radio = QRadioButton("Both (crosshatch)")
+        self._h_radio.setChecked(True)
+        dir_group.addButton(self._h_radio,  0)
+        dir_group.addButton(self._v_radio,  1)
+        dir_group.addButton(self._hv_radio, 2)
+        layout.addWidget(self._h_radio)
+        layout.addWidget(self._v_radio)
+        layout.addWidget(self._hv_radio)
+
+        # V width spinbox — only visible when "Both" is selected
+        self._v_label = _lbl("V width:")
+        self._v_spin  = _spin()
+        layout.addWidget(self._v_label)
         layout.addWidget(self._v_spin)
+        self._v_label.hide()
+        self._v_spin.hide()
 
-        # ── Show Grid checkbox ───────────────────────────────────────────
+        dir_group.idClicked.connect(self._on_direction_changed)
+
+        # ── Show Grid ────────────────────────────────────────────────────
         self._show_grid_check = QCheckBox("Show grid")
-        self._show_grid_check.setChecked(False)
         self._show_grid_check.toggled.connect(lambda _: self.grid_changed.emit())
         layout.addWidget(self._show_grid_check)
 
-        # ── Emit grid_changed when widths change ─────────────────────────
+        # Emit grid_changed when widths change
         self._h_spin.valueChanged.connect(lambda _: self.grid_changed.emit())
         self._v_spin.valueChanged.connect(lambda _: self.grid_changed.emit())
-        self._v_check.toggled.connect(lambda _: self.grid_changed.emit())
 
         # ── Divider ──────────────────────────────────────────────────────
         sep = QFrame()
@@ -88,7 +100,7 @@ class ParameterPanel(QGroupBox):
 
         layout.addStretch()
 
-        # ── Generate + Clear buttons ─────────────────────────────────────
+        # ── Generate button ──────────────────────────────────────────────
         self._gen_btn = QPushButton("GENERATE PATH")
         self._gen_btn.setMinimumHeight(42)
         f = QFont(); f.setBold(True); f.setPointSize(10)
@@ -101,6 +113,7 @@ class ParameterPanel(QGroupBox):
         self._gen_btn.clicked.connect(self.generate_requested.emit)
         layout.addWidget(self._gen_btn)
 
+        # ── Clear Path button ────────────────────────────────────────────
         self._clear_btn = QPushButton("Clear Path")
         self._clear_btn.setMinimumHeight(32)
         self._clear_btn.setStyleSheet(
@@ -112,11 +125,16 @@ class ParameterPanel(QGroupBox):
         self._clear_btn.clicked.connect(self.clear_requested.emit)
         layout.addWidget(self._clear_btn)
 
-        # suffix update after unit combo initialises
         self._h_spin.setSuffix('  mm')
         self._v_spin.setSuffix('  mm')
 
     # ------------------------------------------------------------------
+    def _on_direction_changed(self, btn_id: int) -> None:
+        both = (btn_id == 2)
+        self._v_label.setVisible(both)
+        self._v_spin.setVisible(both)
+        self.grid_changed.emit()
+
     def _on_unit_changed(self, new_unit: str) -> None:
         for spin in (self._h_spin, self._v_spin):
             old_mm = spin.value() * UNIT_TO_MM[self._current_unit]
@@ -130,34 +148,36 @@ class ParameterPanel(QGroupBox):
     def get_spray_width_mm(self) -> float:
         return self._h_spin.value() * UNIT_TO_MM[self._current_unit]
 
-    def get_vertical_width_mm(self) -> float | None:
-        if self._v_check.isChecked():
+    def get_v_width_mm(self) -> float | None:
+        """Return vertical width only when Both is selected."""
+        if self._hv_radio.isChecked():
             return self._v_spin.value() * UNIT_TO_MM[self._current_unit]
         return None
+
+    def get_direction(self) -> str:
+        if self._v_radio.isChecked():
+            return 'vertical'
+        if self._hv_radio.isChecked():
+            return 'both'
+        return 'horizontal'
 
     def get_path_target(self) -> str:
         return 'bbox' if self._bbox_target_radio.isChecked() else 'mesh'
 
-    def get_direction(self) -> str:
-        return 'horizontal'
+    def is_show_grid(self) -> bool:
+        return self._show_grid_check.isChecked()
 
     @property
     def current_unit(self) -> str:
         return self._current_unit
 
-    def is_show_grid(self) -> bool:
-        return self._show_grid_check.isChecked()
-
     def set_enabled(self, enabled: bool) -> None:
-        self._unit_combo.setEnabled(enabled)
-        self._h_spin.setEnabled(enabled)
-        self._v_check.setEnabled(enabled)
-        self._show_grid_check.setEnabled(enabled)
-        self._v_spin.setEnabled(enabled and self._v_check.isChecked())
-        self._bbox_target_radio.setEnabled(enabled)
-        self._mesh_target_radio.setEnabled(enabled)
-        self._gen_btn.setEnabled(enabled)
-        self._clear_btn.setEnabled(enabled)
+        for w in (self._unit_combo, self._h_spin, self._v_spin,
+                  self._h_radio, self._v_radio, self._hv_radio,
+                  self._show_grid_check,
+                  self._bbox_target_radio, self._mesh_target_radio,
+                  self._gen_btn, self._clear_btn):
+            w.setEnabled(enabled)
 
     def set_generating(self, generating: bool) -> None:
         self._gen_btn.setEnabled(not generating)
@@ -176,7 +196,6 @@ def _spin() -> QDoubleSpinBox:
 
 def _lbl(text: str, bold: bool = False) -> QLabel:
     lbl = QLabel(text)
-    f = lbl.font()
-    f.setBold(bold)
-    lbl.setFont(f)
+    if bold:
+        lbl.setStyleSheet("font-weight: bold;")
     return lbl

@@ -228,12 +228,10 @@ class MainWindow(QMainWindow):
         self.resize(1280, 820)
         self.setAcceptDrops(True)
 
-        self._model               = MeshModel()
-        self._selected_regions:   set[str]       = set()   # bbox-face selections
-        self._selected_faces:     np.ndarray     = np.array([], dtype=np.int64)  # manual picks
-        self._current_routes:     list[PaintRoute] = []
-        self._worker:             Optional[QThread] = None
-        self._pick_mode:          str             = 'none'
+        self._model             = MeshModel()
+        self._selected_regions: set[str]         = set()
+        self._current_routes:   list[PaintRoute] = []
+        self._worker:           Optional[QThread] = None
 
         self._build_ui()
         self._build_menus()
@@ -272,7 +270,6 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("Open an STL or OBJ file to begin.")
 
-        self._surface_panel.pick_mode_requested.connect(self._on_pick_mode)
         self._surface_panel.region_shortcut_requested.connect(self._on_region_shortcut)
         self._parameter_panel.generate_requested.connect(self._on_generate)
         self._parameter_panel.clear_requested.connect(self._clear_paths)
@@ -351,16 +348,12 @@ class MainWindow(QMainWindow):
             return
 
         self._selected_regions.clear()
-        self._selected_faces  = np.array([], dtype=np.int64)
-        self._current_routes  = []
-        self._pick_mode       = 'none'
+        self._current_routes = []
 
         self._viewer.load_mesh(self._model.data)
-        # Default: clicking the bounding box selects regions
         self._viewer.enable_bbox_clicking(self._on_bbox_region_clicked)
 
         self._surface_panel.set_enabled(True)
-        self._surface_panel.reset_pick_buttons()
         self._parameter_panel.set_enabled(True)
         self._status_panel.update_mesh_stats(n_faces)
         self._status_panel.clear()
@@ -413,47 +406,6 @@ class MainWindow(QMainWindow):
         self._update_grid()
 
     # ------------------------------------------------------------------
-    # Pick mode buttons (Pick Faces / Flood Fill / Clear)
-    # ------------------------------------------------------------------
-
-    def _on_pick_mode(self, mode: str) -> None:
-        self._pick_mode = mode
-
-        if mode == 'clear':
-            self._selected_regions.clear()
-            self._selected_faces = np.array([], dtype=np.int64)
-            self._viewer.clear_bbox_selection()
-            self._viewer.clear_mesh_highlight()
-            for r in _REGIONS:
-                self._surface_panel.toggle_region_checkbox(r, False)
-            self._surface_panel.reset_pick_buttons()
-            # Return to bbox clicking
-            self._viewer.enable_bbox_clicking(self._on_bbox_region_clicked)
-            self._pick_mode = 'none'
-            self.statusBar().showMessage("Selection cleared.")
-
-        elif mode == 'single':
-            self._viewer.enable_face_picking(self._on_face_picked)
-            self.statusBar().showMessage("Click mesh faces to select them.")
-
-        elif mode == 'none':
-            # Pick/Flood button un-toggled → return to bbox mode
-            self._viewer.enable_bbox_clicking(self._on_bbox_region_clicked)
-            self.statusBar().showMessage("Bbox face click mode active.")
-
-    def _on_face_picked(self, face_id: int) -> None:
-        if self._model.data is None:
-            return
-        new_faces = np.array([face_id], dtype=np.int64)
-
-        self._selected_faces = np.unique(
-            np.concatenate([self._selected_faces, new_faces])
-        ).astype(np.int64)
-
-        self._viewer.highlight_mesh_faces(self._selected_faces)
-        self.statusBar().showMessage(f"{len(self._selected_faces):,} mesh faces selected.")
-
-    # ------------------------------------------------------------------
     # Path generation
     # ------------------------------------------------------------------
 
@@ -478,16 +430,22 @@ class MainWindow(QMainWindow):
                 "Click a bounding box face to select it, then generate.")
             return
 
-        bounds = self._model.data.pyvista_mesh.bounds
+        bounds    = self._model.data.pyvista_mesh.bounds
+        up        = self._model.data.up_axis
+        direction = self._parameter_panel.get_direction()
+        v_mm      = self._parameter_panel.get_v_width_mm() or spray_mm
         routes: list[PaintRoute] = []
-        v_mm = self._parameter_panel.get_vertical_width_mm()
+
         for region in sorted(self._selected_regions):
             try:
-                route = _bbox_generator.generate_bbox_route(
-                    region, bounds, spray_mm, self._model.data.up_axis,
-                    v_width_mm=v_mm,
-                )
-                routes.append(route)
+                # Horizontal passes
+                if direction in ('horizontal', 'both'):
+                    routes.append(_bbox_generator.generate_bbox_route(
+                        region, bounds, spray_mm, up, direction='horizontal'))
+                # Vertical passes — separate route so no diagonal connector between the two
+                if direction in ('vertical', 'both'):
+                    routes.append(_bbox_generator.generate_bbox_route(
+                        region, bounds, v_mm, up, direction='vertical'))
             except Exception as exc:
                 QMessageBox.critical(self, "Generation error",
                     f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
@@ -508,11 +466,9 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "No selection",
                     "No mesh faces found for the selected regions.")
                 return
-        elif len(self._selected_faces) > 0:
-            pairs = [('selection', self._selected_faces.copy())]
         else:
             QMessageBox.warning(self, "No selection",
-                "Select bounding box regions or pick mesh faces first.")
+                "Select bounding box regions first.")
             return
 
         self._parameter_panel.set_generating(True)
@@ -542,9 +498,11 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Generation failed.")
 
     def _clear_paths(self) -> None:
-        self._viewer.clear_route()
+        self._viewer.clear_route()       # removes all pass_ and conn_ actors
+        self._viewer.clear_bbox_grid()   # removes any grid overlays
         self._current_routes = []
         self._status_panel.clear()
+        self.statusBar().showMessage("Paths cleared.")
 
     def _update_grid(self) -> None:
         """Redraw (or remove) the grey width-grid on all selected bbox faces."""
@@ -555,7 +513,7 @@ class MainWindow(QMainWindow):
             return
         bounds = tuple(self._model.data.pyvista_mesh.bounds)
         h_mm = self._parameter_panel.get_spray_width_mm()
-        v_mm = self._parameter_panel.get_vertical_width_mm()
+        v_mm = self._parameter_panel.get_v_width_mm()
         up   = self._model.data.up_axis
         for region in self._selected_regions:
             self._viewer.show_bbox_grid(region, bounds, up, h_mm, v_mm or h_mm)
