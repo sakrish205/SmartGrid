@@ -1,8 +1,10 @@
-# SurfaceCoat
+# SmartGrid
 
 A desktop tool for generating spray-paint robot paths over 3D mesh surfaces. Built for automotive body panels.
 
-![SurfaceCoat screenshot](https://raw.githubusercontent.com/sakrish205/SurfaceCoat/main/screenshot.png)
+![SmartGrid screenshot](https://raw.githubusercontent.com/sakrish205/SmartGrid/main/screenshot.png)
+
+> **SmartGrid** — Automated 3D CAD Surface Grid & Pitch Mapping for Bumper OLP
 
 ---
 
@@ -201,7 +203,7 @@ print(f"Total spray length: {total_spray_length:.1f} mm")
 ## Project structure
 
 ```
-SurfaceCoat/
+SmartGrid/
 ├── main.py
 ├── app/
 │   ├── main_window.py         top-level window and signal wiring
