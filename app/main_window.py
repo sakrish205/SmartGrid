@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QFileDialog, QMessageBox, QDialog,
     QDialogButtonBox, QRadioButton, QButtonGroup,
-    QLabel, QVBoxLayout as QVBox,
+    QLabel, QVBoxLayout as QVBox, QScrollArea,
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
@@ -122,7 +122,16 @@ QComboBox QAbstractItemView {
 }
 
 /* ── scroll area ──────────────────────────────── */
-QScrollArea { border:none; }
+QScrollArea { border:none; background:#252536; }
+QScrollArea > QWidget > QWidget { background:#252536; }
+QScrollBar:vertical {
+    background:#1e1e30; width:8px; border:none; border-radius:4px;
+}
+QScrollBar::handle:vertical {
+    background:#44446a; border-radius:4px; min-height:20px;
+}
+QScrollBar::handle:vertical:hover { background:#6666aa; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
 
 /* ── frame (dividers) ─────────────────────────── */
 QFrame[frameShape="4"] { color:#44446a; }
@@ -247,10 +256,21 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        left_widget = QWidget()
-        left_widget.setFixedWidth(270)
-        left_widget.setStyleSheet(_SIDEBAR_STYLE)
-        left_layout = QVBoxLayout(left_widget)
+        # ── Sidebar scroll container ────────────────────────────────────
+        sidebar_container = QWidget()
+        sidebar_container.setFixedWidth(270)
+        sidebar_container.setStyleSheet(_SIDEBAR_STYLE)
+        sidebar_outer = QVBoxLayout(sidebar_container)
+        sidebar_outer.setContentsMargins(0, 0, 0, 0)
+        sidebar_outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        inner = QWidget()
+        left_layout = QVBoxLayout(inner)
         left_layout.setContentsMargins(8, 8, 8, 8)
         left_layout.setSpacing(10)
 
@@ -263,7 +283,9 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self._status_panel)
         left_layout.addStretch()
 
-        root.addWidget(left_widget)
+        scroll.setWidget(inner)
+        sidebar_outer.addWidget(scroll)
+        root.addWidget(sidebar_container)
 
         self._viewer = MeshViewer()
         root.addWidget(self._viewer, stretch=1)
