@@ -4,13 +4,16 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QDialogButtonBox, QGroupBox, QGridLayout, QFrame,
+    QDoubleSpinBox,
 )
 from PySide6.QtGui import QColor
 from PySide6.QtCore import Signal, Qt
 
 
-# Default colours — all as hex strings
+# All settings in one dict — colour keys are hex strings, numeric keys are
+# stored as float-formatted strings so the dict stays homogeneous.
 DEFAULTS: dict[str, str] = {
+    # colours
     'background':     '#e8e8e8',
     'mesh':           '#78909c',
     'bbox_wire':      '#0078D4',
@@ -19,9 +22,12 @@ DEFAULTS: dict[str, str] = {
     'connector':      '#FF69B4',
     'grid':           '#546e7a',
     'face_highlight': '#FFD700',
+    # line widths
+    'arrow_line_width': '4.0',
+    'pass_line_width':  '5.0',
 }
 
-_LABELS: dict[str, str] = {
+_COLOR_LABELS: dict[str, str] = {
     'background':     'Background',
     'mesh':           'Mesh surface',
     'bbox_wire':      'Bounding box',
@@ -53,19 +59,43 @@ class ViewSettingsDialog(QDialog):
         outer.setSpacing(12)
         outer.setContentsMargins(16, 16, 16, 16)
 
-        group = QGroupBox("Element colours")
-        grid = QGridLayout(group)
+        # ── Colour swatches ───────────────────────────────────────────
+        color_group = QGroupBox("Element colours")
+        grid = QGridLayout(color_group)
         grid.setSpacing(8)
         grid.setColumnStretch(0, 1)
 
-        for row, (key, label) in enumerate(_LABELS.items()):
+        for row, (key, label) in enumerate(_COLOR_LABELS.items()):
             lbl = QLabel(label)
             btn = self._make_swatch(key)
             self._btns[key] = btn
             grid.addWidget(lbl, row, 0)
             grid.addWidget(btn, row, 1)
 
-        outer.addWidget(group)
+        outer.addWidget(color_group)
+
+        # ── Line thickness ────────────────────────────────────────────
+        thick_group = QGroupBox("Line thickness")
+        thick_grid = QGridLayout(thick_group)
+        thick_grid.setSpacing(8)
+        thick_grid.setColumnStretch(0, 1)
+
+        self._spins: dict[str, QDoubleSpinBox] = {}
+        for row, (key, label) in enumerate([
+            ('arrow_line_width', 'Direction arrows'),
+            ('pass_line_width',  'Pass lines'),
+        ]):
+            spin = QDoubleSpinBox()
+            spin.setRange(1.0, 12.0)
+            spin.setSingleStep(0.5)
+            spin.setDecimals(1)
+            spin.setValue(float(self._colors[key]))
+            spin.valueChanged.connect(lambda v, k=key: self._on_spin(k, v))
+            self._spins[key] = spin
+            thick_grid.addWidget(QLabel(label), row, 0)
+            thick_grid.addWidget(spin, row, 1)
+
+        outer.addWidget(thick_group)
 
         # Reset to defaults
         reset_btn = QPushButton("Reset to defaults")
@@ -117,10 +147,18 @@ class ViewSettingsDialog(QDialog):
             self._apply_swatch_style(self._btns[key], hex_color)
             self.colors_changed.emit(dict(self._colors))
 
+    def _on_spin(self, key: str, value: float) -> None:
+        self._colors[key] = str(value)
+        self.colors_changed.emit(dict(self._colors))
+
     def _reset_defaults(self) -> None:
         self._colors = dict(DEFAULTS)
         for key, btn in self._btns.items():
             self._apply_swatch_style(btn, self._colors[key])
+        for key, spin in self._spins.items():
+            spin.blockSignals(True)
+            spin.setValue(float(self._colors[key]))
+            spin.blockSignals(False)
         self.colors_changed.emit(dict(self._colors))
 
     def _on_cancel(self) -> None:
