@@ -407,7 +407,8 @@ class MeshViewer(QWidget):
                 color = (self._colors['pass_forward'] if paint_pass.is_forward
                          else self._colors['pass_reverse'])
                 actor = self.plotter.add_mesh(
-                    line, color=color, line_width=5,
+                    line, color=color,
+                    line_width=float(self._colors.get('pass_line_width', '5.0')),
                     render_lines_as_tubes=True, reset_camera=False,
                 )
                 key = f'pass_{ri}_{paint_pass.id}_{paint_pass.sub_index}'
@@ -418,6 +419,7 @@ class MeshViewer(QWidget):
                         self.plotter, self._actors,
                         paint_pass.points, color, arrow_len,
                         f'arr_{ri}_{paint_pass.id}_{paint_pass.sub_index}',
+                        line_width=float(self._colors.get('arrow_line_width', '4.0')),
                     )
 
             for conn in route.connections:
@@ -594,6 +596,7 @@ def _add_pass_chevrons(
     color: str,
     arrow_len: float,
     key_prefix: str,
+    line_width: float = 4.0,
 ) -> None:
     """Draw surveying-style chevron tick marks (><) along a pass line."""
     pts = np.asarray(points, dtype=float)
@@ -656,7 +659,7 @@ def _add_pass_chevrons(
     mesh.lines  = np.array(cells, dtype=np.int_)
 
     actor = plotter.add_mesh(
-        mesh, color=color, line_width=2.5,
+        mesh, color=color, line_width=line_width,
         render_lines_as_tubes=False, reset_camera=False,
     )
     actors[f'{key_prefix}_chev'] = actor
