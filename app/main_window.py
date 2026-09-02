@@ -377,6 +377,19 @@ class MainWindow(QMainWindow):
         self._parameter_panel = ParameterPanel()
         self._status_panel    = StatusPanel()
 
+        # Navigate / Select mode toggle
+        self._select_mode_btn = QPushButton("Navigate Mode")
+        self._select_mode_btn.setCheckable(True)
+        self._select_mode_btn.setMinimumHeight(32)
+        self._select_mode_btn.setStyleSheet(
+            "QPushButton { background:#ffffff; color:#252525; border:1px solid #d2d0ce;"
+            " border-radius:4px; font-size:12px; }"
+            "QPushButton:hover { background:#edebe9; }"
+            "QPushButton:checked { background:#0078D4; color:#ffffff; border-color:#0078D4; }"
+        )
+        self._select_mode_btn.clicked.connect(self._on_select_mode_toggled)
+        left_layout.addWidget(self._select_mode_btn)
+
         left_layout.addWidget(self._surface_panel)
         left_layout.addWidget(self._parameter_panel)
         left_layout.addWidget(self._status_panel)
@@ -391,6 +404,7 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("Open an STL or OBJ file to begin.")
 
+        self._select_mode_btn.setEnabled(False)
         self._surface_panel.region_shortcut_requested.connect(self._on_region_shortcut)
         self._parameter_panel.generate_requested.connect(self._on_generate)
         self._parameter_panel.clear_requested.connect(self._clear_paths)
@@ -429,6 +443,22 @@ class MainWindow(QMainWindow):
         export_menu = mb.addMenu("Export")
         export_menu.addAction("Export JSON...", self._export_json)
         export_menu.addAction("Export CSV...",  self._export_csv)
+
+    # ------------------------------------------------------------------
+    # Navigate / Select mode
+    # ------------------------------------------------------------------
+
+    def _on_select_mode_toggled(self, checked: bool) -> None:
+        self._viewer.set_select_mode(checked)
+        if checked:
+            self._select_mode_btn.setText("Select Mode  (click face to select)")
+            self.statusBar().showMessage(
+                "Select Mode — click a bounding box face to select it. "
+                "Camera rotation is suspended."
+            )
+        else:
+            self._select_mode_btn.setText("Navigate Mode")
+            self.statusBar().showMessage("Navigate Mode — drag to rotate, scroll to zoom.")
 
     # ------------------------------------------------------------------
     # View settings
@@ -502,6 +532,7 @@ class MainWindow(QMainWindow):
         self._current_routes = []
         self._surface_panel.set_enabled(False)
         self._parameter_panel.set_enabled(False)
+        self._select_mode_btn.setEnabled(False)
         self._hint_label.hide()
         self._overlay.show_message(f"Opening {os.path.basename(filepath)}...")
         self._overlay.show()
@@ -529,6 +560,9 @@ class MainWindow(QMainWindow):
 
         self._surface_panel.set_enabled(True)
         self._parameter_panel.set_enabled(True)
+        self._select_mode_btn.setEnabled(True)
+        self._select_mode_btn.setChecked(False)
+        self._select_mode_btn.setText("Navigate Mode")
         self._status_panel.update_mesh_stats(n_faces)
         self._status_panel.clear()
 
