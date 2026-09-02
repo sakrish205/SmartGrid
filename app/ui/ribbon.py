@@ -551,9 +551,9 @@ class SmartRibbon(QWidget):
         self._cw_radio.setChecked(True)
         self._cw_radio.setStyleSheet(_RADIO_CSS)
         self._ccw_radio.setStyleSheet(_RADIO_CSS)
-        sweep_grp = QButtonGroup(self)
-        sweep_grp.addButton(self._cw_radio,  0)
-        sweep_grp.addButton(self._ccw_radio, 1)
+        self._sweep_grp = QButtonGroup(self)
+        self._sweep_grp.addButton(self._cw_radio,  0)
+        self._sweep_grp.addButton(self._ccw_radio, 1)
         sweep_vl.addWidget(self._cw_radio)
         sweep_vl.addWidget(self._ccw_radio)
         hl.addLayout(sweep_vl)
@@ -655,8 +655,8 @@ class SmartRibbon(QWidget):
         self._unit_combo.currentTextChanged.connect(self._on_unit_changed)
         self._pitch_spin.valueChanged.connect(lambda _: self.grid_changed.emit())
 
-        self._cw_radio.toggled.connect(lambda _: self.sweep_changed.emit())
-        self._ccw_radio.toggled.connect(lambda _: self.sweep_changed.emit())
+        # idClicked fires once per user click (not twice like toggled on both radios)
+        self._sweep_grp.idClicked.connect(lambda _: self.sweep_changed.emit())
 
         self._gen_btn.clicked.connect(self.generate_requested)
         self._clear_btn.clicked.connect(self.clear_requested)
@@ -723,26 +723,25 @@ class SmartRibbon(QWidget):
     # ------------------------------------------------------------------
 
     def set_model_loaded(self, loaded: bool) -> None:
-        for region, btn in self._region_btns.items():
+        for btn in self._region_btns.values():
             btn.setEnabled(loaded)
         for w in (self._all_btn, self._none_btn, self._select_btn,
                   self._unit_combo, self._pitch_spin,
                   self._cw_radio, self._ccw_radio,
                   self._bbox_radio, self._mesh_radio,
                   self._gen_btn, self._grid_check, self._arrows_check,
-                  self._top_btn, self._bot_btn, self._front_btn,
-                  self._rear_btn, self._left_btn, self._right_btn,
-                  self._fit_btn):
+                  self._fit_btn, self._top_btn, self._bot_btn,
+                  self._front_btn, self._rear_btn, self._left_btn, self._right_btn):
             w.setEnabled(loaded)
-        if not loaded:
-            self._clear_btn.setEnabled(False)
-            self._exp_json_btn.setEnabled(False)
-            self._exp_csv_btn.setEnabled(False)
+        # Path-specific controls always start disabled on (re)load; set_path_exists enables them
+        self._clear_btn.setEnabled(False)
+        self._exp_json_btn.setEnabled(False)
+        self._exp_csv_btn.setEnabled(False)
 
     def set_generating(self, generating: bool) -> None:
         self._gen_btn.setEnabled(not generating)
         self._clear_btn.setEnabled(not generating)
-        self._gen_btn.setText('Generating…\n' if generating else 'Generate\nPath')
+        self._gen_btn.setText('Generating…' if generating else 'Generate\nPath')
 
     def set_path_exists(self, exists: bool) -> None:
         self._clear_btn.setEnabled(exists)
@@ -760,6 +759,11 @@ class SmartRibbon(QWidget):
         btn.blockSignals(True)
         btn.setChecked(checked)
         btn.blockSignals(False)
+
+    def flip_sweep_direction(self) -> None:
+        """Toggle CW ↔ CCW and emit sweep_changed once."""
+        self._ccw_radio.setChecked(not self._ccw_radio.isChecked())
+        self.sweep_changed.emit()
 
     def set_select_mode(self, active: bool) -> None:
         self._select_btn.blockSignals(True)
