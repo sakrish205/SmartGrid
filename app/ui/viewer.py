@@ -283,7 +283,7 @@ class MeshViewer(QWidget):
                     edge_color='#FFC107',
                     line_width=2.0,
                     lighting=False,
-                    backface_culling=True,
+                    backface_culling=False,
                     reset_camera=False,
                 )
                 # Polygon offset: render the quad in front of coincident mesh
