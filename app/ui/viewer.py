@@ -14,6 +14,12 @@ except ImportError:
 
 from app.mesh.preprocessor import MeshData
 from app.path.path_model import PaintRoute
+from app.ui.view_settings_dialog import DEFAULTS as _COLOR_DEFAULTS
+
+
+def _hex_to_rgb(hex_color: str) -> tuple:
+    c = hex_color.lstrip('#')
+    return tuple(int(c[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
 
 class MeshViewer(QWidget):
@@ -24,8 +30,10 @@ class MeshViewer(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        self._colors: dict[str, str] = dict(_COLOR_DEFAULTS)
+
         self.plotter = QtInteractor(self)
-        self.plotter.set_background('#e8e8e8')
+        self.plotter.set_background(self._colors['background'])
         layout.addWidget(self.plotter)
 
         self._actors: dict[str, object] = {}
@@ -54,7 +62,7 @@ class MeshViewer(QWidget):
         # Solid mesh — fully opaque so hardware depth-buffer picks work
         actor_mesh = self.plotter.add_mesh(
             mesh_data.pyvista_mesh,
-            color='#78909c',
+            color=self._colors['mesh'],
             opacity=1.0,
             show_edges=False,
             lighting=True,
@@ -63,10 +71,10 @@ class MeshViewer(QWidget):
         self._actors['base_mesh'] = actor_mesh
         actor_mesh.SetPickable(False)
 
-        # Green wireframe cage (line cells — visual only)
+        # Wireframe bbox cage
         actor_wire = self.plotter.add_mesh(
             mesh_data.pyvista_mesh.outline(),
-            color='#0078D4',
+            color=self._colors['bbox_wire'],
             line_width=2.5,
             reset_camera=False,
         )
@@ -250,7 +258,7 @@ class MeshViewer(QWidget):
             if face_mesh is not None:
                 actor = self.plotter.add_mesh(
                     face_mesh,
-                    color='#FFD700',
+                    color=self._colors['face_highlight'],
                     opacity=0.45,
                     show_edges=True,
                     edge_color='#FFC107',
@@ -297,7 +305,7 @@ class MeshViewer(QWidget):
 
         actor = self.plotter.add_mesh(
             lines,
-            color='#546e7a',
+            color=self._colors['grid'],
             opacity=0.75,
             line_width=1.2,
             reset_camera=False,
@@ -384,10 +392,8 @@ class MeshViewer(QWidget):
                 if len(paint_pass.points) < 2:
                     continue
                 line = pv.lines_from_points(paint_pass.points)
-                if paint_pass.direction == 'vertical':
-                    color = '#4CAF50' if paint_pass.is_forward else '#FF9800'
-                else:
-                    color = '#2196F3' if paint_pass.is_forward else '#FF5722'
+                color = (self._colors['pass_forward'] if paint_pass.is_forward
+                         else self._colors['pass_reverse'])
                 actor = self.plotter.add_mesh(
                     line, color=color, line_width=5,
                     render_lines_as_tubes=True, reset_camera=False,
@@ -407,12 +413,43 @@ class MeshViewer(QWidget):
                 line = pv.lines_from_points(conn.points)
                 actor = self.plotter.add_mesh(
                     line,
-                    color='#FF69B4',
+                    color=self._colors['connector'],
                     line_width=3,
                     render_lines_as_tubes=True,
                     reset_camera=False,
                 )
                 self._actors[f'conn_{conn.id}'] = actor
+
+        self.plotter.render()
+
+    def apply_colors(self, colors: dict[str, str]) -> None:
+        """Apply a colour dict live — updates all existing actors immediately."""
+        self._colors = dict(colors)
+
+        self.plotter.set_background(colors['background'])
+
+        if 'base_mesh' in self._actors:
+            self._actors['base_mesh'].GetProperty().SetColor(
+                *_hex_to_rgb(colors['mesh']))
+
+        if 'bbox_wire' in self._actors:
+            self._actors['bbox_wire'].GetProperty().SetColor(
+                *_hex_to_rgb(colors['bbox_wire']))
+
+        fwd_rgb = _hex_to_rgb(colors['pass_forward'])
+        rev_rgb = _hex_to_rgb(colors['pass_reverse'])
+        con_rgb = _hex_to_rgb(colors['connector'])
+        for key, actor in self._actors.items():
+            if key.startswith('pass_'):
+                # is_forward stored in key parity — re-derive from actor color
+                # Simpler: store nothing, just rerun show_route.
+                pass
+            elif key.startswith('conn_'):
+                actor.GetProperty().SetColor(*con_rgb)
+            elif key.startswith('bbox_grid_'):
+                actor.GetProperty().SetColor(*_hex_to_rgb(colors['grid']))
+            elif key.startswith('bbox_face_'):
+                actor.GetProperty().SetColor(*_hex_to_rgb(colors['face_highlight']))
 
         self.plotter.render()
 

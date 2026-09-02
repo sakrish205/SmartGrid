@@ -26,6 +26,7 @@ from app.ui.parameter_panel import ParameterPanel
 from app.ui.status_panel import StatusPanel
 from app.export.json_export import export_route_json
 from app.export.csv_export import export_route_csv
+from app.ui.view_settings_dialog import ViewSettingsDialog, DEFAULTS as _COLOR_DEFAULTS
 
 _REGIONS = ['TOP', 'BOTTOM', 'FRONT', 'REAR', 'LEFT', 'RIGHT']
 
@@ -312,8 +313,9 @@ class MainWindow(QMainWindow):
         self._model              = MeshModel()
         self._selected_regions:  set[str]         = set()
         self._current_routes:    list[PaintRoute] = []
-        self._worker:      Optional[QThread] = None
-        self._load_worker: Optional[QThread] = None
+        self._worker:         Optional[QThread] = None
+        self._load_worker:    Optional[QThread] = None
+        self._current_colors: dict[str, str]   = dict(_COLOR_DEFAULTS)
 
         self._build_ui()
         self._build_menus()
@@ -415,6 +417,8 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         view_menu.addAction("Rotate Left  90",      lambda: self._viewer.roll_view(-90))
         view_menu.addAction("Rotate Right 90",      lambda: self._viewer.roll_view(+90))
+        view_menu.addSeparator()
+        view_menu.addAction("View Settings...",     self._open_view_settings)
 
         path_menu = mb.addMenu("Path")
         path_menu.addAction("Generate\tCtrl+G",    self._on_generate)
@@ -425,6 +429,28 @@ class MainWindow(QMainWindow):
         export_menu = mb.addMenu("Export")
         export_menu.addAction("Export JSON...", self._export_json)
         export_menu.addAction("Export CSV...",  self._export_csv)
+
+    # ------------------------------------------------------------------
+    # View settings
+    # ------------------------------------------------------------------
+
+    def _open_view_settings(self) -> None:
+        dlg = ViewSettingsDialog(self._current_colors, self)
+        dlg.colors_changed.connect(self._on_colors_changed)
+        if dlg.exec():
+            self._current_colors = dlg.colors
+        else:
+            # Cancelled — live-preview already reverted inside the dialog
+            self._viewer.apply_colors(self._current_colors)
+
+    def _on_colors_changed(self, colors: dict[str, str]) -> None:
+        """Live preview while dialog is open."""
+        self._viewer.apply_colors(colors)
+        if self._current_routes:
+            self._viewer.show_route(
+                self._current_routes,
+                show_arrows=self._parameter_panel.is_show_arrows(),
+            )
 
     # ------------------------------------------------------------------
     # Sweep direction (CW / CCW)
