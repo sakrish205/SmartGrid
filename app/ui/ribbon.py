@@ -122,102 +122,114 @@ def _make_icon(name: str, size: int = 18) -> QIcon:
 
 
 # ---------------------------------------------------------------------------
-# Style constants
+# Style constants  — Windows sharp / flat design
 # ---------------------------------------------------------------------------
 _RIBBON_BG = '#f0f0f0'
-_SEP_COLOR  = '#c8c8c8'
-_GRP_LABEL_CSS = 'color:#666;font-size:10px;font-family:"Segoe UI",Arial;'
+_SEP_COLOR  = '#b0b0b0'   # crisper group separators
+_GRP_LABEL_CSS = (         # uppercase small-caps group labels
+    'color:#555;font-size:9px;font-family:"Segoe UI",Arial;font-weight:700;'
+)
 
 _BTN_CSS = (
     'QToolButton{'
-    '  background:transparent;border:1px solid transparent;border-radius:2px;'
+    '  background:transparent;border:1px solid transparent;border-radius:0px;'
     '  padding:2px 4px;font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;'
     '}'
-    'QToolButton:hover{background:#e0e0e0;border-color:#c0c0c0;}'
-    'QToolButton:checked{background:#cde8ff;border-color:#0078d4;}'
-    'QToolButton:pressed{background:#b8d8f8;border-color:#0078d4;}'
+    'QToolButton:hover{background:#e5e5e5;border-color:#b0b0b0;}'
+    'QToolButton:checked{background:#0078d4;border-color:#005a9e;color:#ffffff;}'
+    'QToolButton:checked:hover{background:#106ebe;border-color:#004f87;}'
+    'QToolButton:pressed{background:#005a9e;border-color:#004f87;color:#ffffff;}'
     'QToolButton:disabled{color:#a0a0a0;}'
 )
 
 _LARGE_BTN_CSS = (
     'QToolButton{'
-    '  background:transparent;border:1px solid transparent;border-radius:2px;'
+    '  background:transparent;border:1px solid transparent;border-radius:0px;'
     '  padding:3px;font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;'
     '  min-width:46px;'
     '}'
-    'QToolButton:hover{background:#e0e0e0;border-color:#c0c0c0;}'
-    'QToolButton:pressed{background:#b8d8f8;border-color:#0078d4;}'
+    'QToolButton:hover{background:#e5e5e5;border-color:#b0b0b0;}'
+    'QToolButton:pressed{background:#d0d0d0;border-color:#999;}'
     'QToolButton:disabled{color:#a0a0a0;}'
 )
 
 _TOGGLE_CSS = (
     'QPushButton{'
-    '  background:#fff;border:1px solid #ccc;border-radius:2px;'
+    '  background:#ffffff;border:1px solid #c0c0c0;border-radius:0px;'
     '  padding:2px 5px;font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;'
     '  min-width:32px;min-height:20px;'
     '}'
-    'QPushButton:hover{background:#e8e8e8;border-color:#999;}'
-    'QPushButton:checked{background:#cde8ff;border-color:#0078d4;color:#003e7e;}'
-    'QPushButton:disabled{background:#f4f4f4;color:#aaa;}'
+    'QPushButton:hover{background:#e5e5e5;border-color:#888;}'
+    'QPushButton:checked{background:#0078d4;border-color:#005a9e;color:#ffffff;}'
+    'QPushButton:checked:hover{background:#106ebe;border-color:#004f87;color:#ffffff;}'
+    'QPushButton:disabled{background:#f4f4f4;color:#aaa;border-color:#d0d0d0;}'
 )
 
 _PRIMARY_BTN_CSS = (
     'QToolButton{'
-    '  background:#0078d4;border:1px solid #005a9e;border-radius:2px;'
+    '  background:#0078d4;border:1px solid #005a9e;border-radius:0px;'
     '  padding:3px;font-size:11px;font-family:"Segoe UI",Arial;color:#fff;'
-    '  font-weight:600;min-width:78px;'
+    '  font-weight:700;min-width:78px;'
     '}'
-    'QToolButton:hover{background:#106ebe;}'
-    'QToolButton:pressed{background:#005a9e;}'
-    'QToolButton:disabled{background:#e4e4e4;border-color:#ccc;color:#aaa;}'
+    'QToolButton:hover{background:#106ebe;border-color:#004f87;}'
+    'QToolButton:pressed{background:#005a9e;border-color:#003f72;}'
+    'QToolButton:disabled{background:#e4e4e4;border-color:#d0d0d0;color:#aaa;}'
 )
 
 _DANGER_BTN_CSS = (
     'QToolButton{'
-    '  background:#fff;border:1px solid #d9534f;border-radius:2px;'
-    '  padding:3px;font-size:11px;font-family:"Segoe UI",Arial;color:#c9302c;'
-    '  min-width:78px;'
+    '  background:#ffffff;border:1px solid #c50f1f;border-radius:0px;'
+    '  padding:3px;font-size:11px;font-family:"Segoe UI",Arial;color:#c50f1f;'
+    '  min-width:78px;font-weight:700;'
     '}'
-    'QToolButton:hover{background:#fdf0f0;}'
-    'QToolButton:pressed{background:#f5c6c6;}'
-    'QToolButton:disabled{background:#f4f4f4;border-color:#ccc;color:#aaa;}'
+    'QToolButton:hover{background:#fdf3f4;border-color:#960b17;}'
+    'QToolButton:pressed{background:#f5c6c6;border-color:#960b17;}'
+    'QToolButton:disabled{background:#f4f4f4;border-color:#d0d0d0;color:#aaa;}'
 )
 
 _COMBO_CSS = (
-    'QComboBox{background:#fff;border:1px solid #ccc;border-radius:2px;'
+    'QComboBox{background:#fff;border:1px solid #c0c0c0;border-radius:0px;'
     '  padding:2px 4px;font-size:11px;font-family:"Segoe UI",Arial;'
     '  color:#1f1f1f;min-height:22px;}'
+    'QComboBox:hover{border-color:#888;}'
     'QComboBox:focus{border-color:#0078d4;}'
-    'QComboBox::drop-down{border:none;width:16px;}'
-    'QComboBox QAbstractItemView{background:#fff;color:#1f1f1f;'
-    '  selection-background-color:#cde8ff;selection-color:#003e7e;}'
+    'QComboBox::drop-down{border-left:1px solid #c0c0c0;width:16px;'
+    '  background:#e8e8e8;border-radius:0px;}'
+    'QComboBox QAbstractItemView{background:#fff;color:#1f1f1f;border:1px solid #b0b0b0;'
+    '  selection-background-color:#0078d4;selection-color:#fff;outline:none;}'
 )
 
 _SPIN_CSS = (
-    'QDoubleSpinBox{background:#fff;border:1px solid #ccc;border-radius:2px;'
+    'QDoubleSpinBox{background:#fff;border:1px solid #c0c0c0;border-radius:0px;'
     '  padding:2px 4px;font-size:11px;font-family:"Segoe UI",Arial;'
     '  color:#1f1f1f;min-height:22px;}'
+    'QDoubleSpinBox:hover{border-color:#888;}'
     'QDoubleSpinBox:focus{border-color:#0078d4;}'
     'QDoubleSpinBox::up-button,QDoubleSpinBox::down-button'
-    '{background:#f0f0f0;border:none;width:14px;}'
+    '{background:#e8e8e8;border-left:1px solid #c0c0c0;width:14px;border-radius:0px;}'
+    'QDoubleSpinBox::up-button:hover,QDoubleSpinBox::down-button:hover'
+    '{background:#d0d0d0;}'
 )
 
 _CHK_CSS = (
-    'QCheckBox{font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;spacing:4px;}'
+    'QCheckBox{font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;spacing:5px;}'
     'QCheckBox::indicator{width:13px;height:13px;border:1px solid #888;'
-    '  border-radius:2px;background:#fff;}'
-    'QCheckBox::indicator:checked{background:#0078d4;border-color:#0078d4;}'
+    '  border-radius:0px;background:#fff;}'
+    'QCheckBox::indicator:hover{border-color:#0078d4;}'
+    'QCheckBox::indicator:checked{background:#0078d4;border-color:#005a9e;}'
+    'QCheckBox::indicator:checked:hover{background:#106ebe;}'
 )
 
 _RADIO_CSS = (
-    'QRadioButton{font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;spacing:4px;}'
+    'QRadioButton{font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;spacing:5px;}'
     'QRadioButton::indicator{width:13px;height:13px;border:1px solid #888;'
     '  border-radius:7px;background:#fff;}'
-    'QRadioButton::indicator:checked{background:#0078d4;border-color:#0078d4;}'
+    'QRadioButton::indicator:hover{border-color:#0078d4;}'
+    'QRadioButton::indicator:checked{background:#0078d4;border-color:#005a9e;}'
 )
 
-_STAT_LABEL_CSS = 'font-size:11px;font-family:"Segoe UI",Arial;color:#333;'
-_STAT_VALUE_CSS = 'font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;font-weight:600;'
+_STAT_LABEL_CSS = 'font-size:10px;font-family:"Segoe UI",Arial;color:#555;'
+_STAT_VALUE_CSS = 'font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;font-weight:700;'
 
 
 # ---------------------------------------------------------------------------
@@ -246,8 +258,8 @@ class _Group(QWidget):
         sep_line.setFixedHeight(1)
         sep_line.setStyleSheet('color:#d0d0d0;')
 
-        lbl = QLabel(title)
-        lbl.setFixedHeight(16)
+        lbl = QLabel(title.upper())
+        lbl.setFixedHeight(15)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet(_GRP_LABEL_CSS)
 
@@ -363,6 +375,7 @@ class SmartRibbon(QWidget):
         self.setFixedHeight(RIBBON_H)
         self.setStyleSheet(
             f'SmartRibbon{{background:{_RIBBON_BG};'
+            f'border-top:2px solid #0078d4;'
             f'border-bottom:1px solid {_SEP_COLOR};}}'
         )
         self._current_unit = 'mm'
@@ -483,11 +496,12 @@ class SmartRibbon(QWidget):
         self._select_btn = QPushButton('Select Faces')
         self._select_btn.setCheckable(True)
         self._select_btn.setStyleSheet(
-            'QPushButton{background:#fff;border:1px solid #ccc;border-radius:2px;'
+            'QPushButton{background:#fff;border:1px solid #c0c0c0;border-radius:0px;'
             '  padding:2px 6px;font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;'
             '  min-height:20px;}'
-            'QPushButton:hover{background:#e8e8e8;}'
-            'QPushButton:checked{background:#cde8ff;border-color:#0078d4;color:#003e7e;}'
+            'QPushButton:hover{background:#e5e5e5;border-color:#888;}'
+            'QPushButton:checked{background:#0078d4;border-color:#005a9e;color:#ffffff;}'
+            'QPushButton:checked:hover{background:#106ebe;border-color:#004f87;}'
         )
 
         row2.addWidget(self._all_btn)
