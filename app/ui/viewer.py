@@ -150,12 +150,7 @@ class MeshViewer(QWidget):
         self,
         on_click: Callable[[tuple], None],
     ) -> None:
-        """Install press+release observers.
-
-        In select mode (self._select_mode=True) the events are aborted so the
-        VTK interactor style never sees them — camera stays still and only the
-        picker fires. In navigate mode events pass through normally.
-        """
+        """Install press+release observers for face picking."""
         self._remove_vtk_observers()
         raw = self._get_vtk_iren()
         if raw is None:
@@ -163,8 +158,6 @@ class MeshViewer(QWidget):
 
         def _press(obj, event):
             self._press_pos = raw.GetEventPosition()
-            if self._select_mode:
-                obj.AbortFlagOn()   # stop camera rotation
 
         def _release(obj, event):
             if self._press_pos is None:
@@ -172,16 +165,30 @@ class MeshViewer(QWidget):
             pos = raw.GetEventPosition()
             self._press_pos = None
             if self._select_mode:
-                obj.AbortFlagOn()
                 on_click(pos)
 
         self._obs_press   = raw.AddObserver('LeftButtonPressEvent',   _press,   1.0)
         self._obs_release = raw.AddObserver('LeftButtonReleaseEvent', _release, 1.0)
 
     def set_select_mode(self, active: bool) -> None:
-        """Toggle select mode. Does NOT change the VTK interactor style,
-        so the camera orientation is never disturbed."""
+        """Toggle select mode. Swaps the interactor style so camera does not
+        rotate while Select Faces is active."""
         self._select_mode = active
+        raw = self._get_vtk_iren()
+        if raw is None:
+            self.plotter.render()
+            return
+        if active:
+            # Save current style and replace with a passive one (no camera moves)
+            self._saved_interactor_style = raw.GetInteractorStyle()
+            from vtkmodules.vtkInteractionStyle import vtkInteractorStyleUser
+            raw.SetInteractorStyle(vtkInteractorStyleUser())
+        else:
+            # Restore the original style
+            saved = getattr(self, '_saved_interactor_style', None)
+            if saved is not None:
+                raw.SetInteractorStyle(saved)
+                self._saved_interactor_style = None
         self.plotter.render()
 
     # ------------------------------------------------------------------

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QDialog,
     QDialogButtonBox, QRadioButton, QButtonGroup,
     QLabel, QVBoxLayout as QVBox, QScrollArea,
-    QProgressBar, QPushButton,
+    QPushButton,
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
@@ -147,69 +147,6 @@ QFrame[frameShape="4"] { color:#d2d0ce; }
 
 
 # ---------------------------------------------------------------------------
-# Loading overlay — covers the full central widget while mesh loads
-# ---------------------------------------------------------------------------
-
-class _LoadingOverlay(QWidget):
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        self.setStyleSheet("background:rgba(243,242,241,220);")
-
-        outer = QVBoxLayout(self)
-        outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        panel = QWidget()
-        panel.setFixedWidth(360)
-        panel.setStyleSheet(
-            "QWidget { background:#ffffff; border:1px solid #d2d0ce;"
-            " border-radius:8px; padding:24px; }"
-        )
-        inner = QVBoxLayout(panel)
-        inner.setSpacing(14)
-        inner.setContentsMargins(24, 24, 24, 24)
-
-        title = QLabel("SmartGrid")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(
-            "font-size:18px; color:#0078D4; font-weight:bold; border:none;"
-        )
-
-        self._label = QLabel("Loading...")
-        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label.setStyleSheet(
-            "font-size:13px; color:#323130; border:none;"
-        )
-
-        self._bar = QProgressBar()
-        self._bar.setRange(0, 0)
-        self._bar.setFixedHeight(4)
-        self._bar.setTextVisible(False)
-        self._bar.setStyleSheet(
-            "QProgressBar { background:#e0dfde; border:none; border-radius:2px; }"
-            "QProgressBar::chunk { background:#0078D4; border-radius:2px; }"
-        )
-
-        inner.addWidget(title)
-        inner.addWidget(self._label)
-        inner.addWidget(self._bar)
-        outer.addWidget(panel)
-        self.hide()
-
-    def show_message(self, msg: str) -> None:
-        self._label.setText(msg)
-
-    def showEvent(self, e) -> None:
-        super().showEvent(e)
-        self.setGeometry(self.parentWidget().rect())
-
-    def resizeEvent(self, e) -> None:
-        super().resizeEvent(e)
-        if self.isVisible():
-            self.setGeometry(self.parentWidget().rect())
-
-
-# ---------------------------------------------------------------------------
 # Background worker — mesh file loading
 # ---------------------------------------------------------------------------
 
@@ -327,9 +264,6 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
-
-        # Loading overlay — child of central; covers the whole central area
-        self._overlay = _LoadingOverlay(central)
 
         root = QHBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
@@ -532,24 +466,16 @@ class MainWindow(QMainWindow):
         self._parameter_panel.set_enabled(False)
         self._select_mode_btn.setEnabled(False)
         self._hint_label.hide()
-        self._overlay.show_message(f"Opening {os.path.basename(filepath)}...")
-        self._overlay.show()
-        self._overlay.raise_()
+        self.statusBar().showMessage(f"Reading {os.path.basename(filepath)}...")
 
         worker = _LoadWorker(filepath, up_axis)
-        worker.progress.connect(self._overlay.show_message)
+        worker.progress.connect(self.statusBar().showMessage)
         worker.finished.connect(self._on_load_ready)
         worker.error.connect(self._on_load_error)
         self._load_worker = worker
         worker.start()
 
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        if self._overlay.isVisible():
-            self._overlay.setGeometry(self.centralWidget().rect())
-
     def _on_load_ready(self, model) -> None:
-        self._overlay.hide()
         self._model = model
         n_faces = len(model.data.trimesh_mesh.faces)
 
@@ -578,7 +504,6 @@ class MainWindow(QMainWindow):
         )
 
     def _on_load_error(self, message: str) -> None:
-        self._overlay.hide()
         self._hint_label.show()
         QMessageBox.critical(self, "Load error", message)
         self.statusBar().showMessage("Load failed.")
