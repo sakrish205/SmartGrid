@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QDialog,
     QDialogButtonBox, QRadioButton, QButtonGroup,
     QLabel, QVBoxLayout as QVBox, QScrollArea,
+    QProgressBar, QToolBar,
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
@@ -29,87 +30,86 @@ from app.export.csv_export import export_route_csv
 _REGIONS = ['TOP', 'BOTTOM', 'FRONT', 'REAR', 'LEFT', 'RIGHT']
 
 _SIDEBAR_STYLE = """
-/* ── whole left panel ──────────────────────── */
-QWidget { background:#252536; color:#e8e8ff; font-size:13px; }
+/* ── whole left panel — Office light ─────────── */
+QWidget { background:#f3f2f1; color:#252525; font-size:13px; }
 
-/* ── group boxes ────────────────────────────── */
+/* ── group boxes ─────────────────────────────── */
 QGroupBox {
-    color:#b0b8ff;
+    color:#0078D4;
     font-weight:bold;
     font-size:13px;
-    border:1px solid #44446a;
-    border-radius:6px;
+    border:1px solid #d2d0ce;
+    border-radius:5px;
     margin-top:10px;
     padding-top:8px;
+    background:#ffffff;
 }
 QGroupBox::title {
     subcontrol-origin:margin;
     left:10px;
     padding:0 5px;
-    color:#9090ff;
+    color:#0078D4;
+    background:#ffffff;
 }
 
-/* ── labels ─────────────────────────────────── */
-QLabel { color:#d0d8ff; font-size:12px; background:transparent; }
+/* ── labels ──────────────────────────────────── */
+QLabel { color:#323130; font-size:12px; background:transparent; }
 
 /* ── buttons ─────────────────────────────────── */
 QPushButton {
-    background:#35355a;
-    color:#d8d8ff;
-    border:1px solid #55558a;
+    background:#ffffff;
+    color:#252525;
+    border:1px solid #d2d0ce;
     border-radius:4px;
     padding:6px 4px;
     font-size:12px;
 }
-QPushButton:hover   { background:#45458a; color:#ffffff; }
-QPushButton:checked { background:#1565C0; color:#ffffff; border-color:#42A5F5; }
-QPushButton:disabled { background:#2a2a40; color:#555577; }
+QPushButton:hover    { background:#edebe9; border-color:#b0adab; }
+QPushButton:checked  { background:#0078D4; color:#ffffff; border-color:#0078D4; }
+QPushButton:disabled { background:#f3f2f1; color:#a19f9d; border-color:#e0dfde; }
 
-/* ── checkboxes ───────────────────────────────── */
-QCheckBox { color:#d0d8ff; font-size:12px; spacing:8px; background:transparent; }
+/* ── checkboxes ──────────────────────────────── */
+QCheckBox { color:#323130; font-size:12px; spacing:8px; background:transparent; }
 QCheckBox::indicator {
     width:14px; height:14px;
-    border:2px solid #6666aa;
+    border:2px solid #8a8886;
     border-radius:3px;
-    background:#2a2a45;
+    background:#ffffff;
 }
-QCheckBox::indicator:checked   { background:#1976D2; border-color:#64B5F6; }
-QCheckBox::indicator:unchecked:hover { border-color:#9999cc; }
+QCheckBox::indicator:checked { background:#0078D4; border-color:#0078D4; }
+QCheckBox::indicator:unchecked:hover { border-color:#0078D4; }
 
 /* ── radio buttons ───────────────────────────── */
-QRadioButton { color:#d0d8ff; font-size:12px; spacing:8px; background:transparent; }
+QRadioButton { color:#323130; font-size:12px; spacing:8px; background:transparent; }
 QRadioButton::indicator {
     width:14px; height:14px;
-    border:2px solid #6666aa;
+    border:2px solid #8a8886;
     border-radius:7px;
-    background:#2a2a45;
+    background:#ffffff;
 }
-QRadioButton::indicator:checked {
-    background:#42A5F5;
-    border-color:#90CAF9;
-}
-QRadioButton::indicator:unchecked:hover { border-color:#9999cc; }
+QRadioButton::indicator:checked { background:#0078D4; border-color:#0078D4; }
+QRadioButton::indicator:unchecked:hover { border-color:#0078D4; }
 
-/* ── spin boxes ───────────────────────────────── */
+/* ── spin boxes ──────────────────────────────── */
 QDoubleSpinBox {
-    background:#2e2e50;
-    color:#e8e8ff;
-    border:1px solid #55558a;
+    background:#ffffff;
+    color:#252525;
+    border:1px solid #d2d0ce;
     border-radius:4px;
     padding:4px 6px;
     font-size:12px;
     min-height:26px;
 }
-QDoubleSpinBox:focus { border-color:#7070cc; }
+QDoubleSpinBox:focus { border-color:#0078D4; }
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
-    background:#35355a; border:none; width:16px;
+    background:#f3f2f1; border:none; width:16px;
 }
 
-/* ── combo boxes ──────────────────────────────── */
+/* ── combo boxes ─────────────────────────────── */
 QComboBox {
-    background:#2e2e50;
-    color:#e8e8ff;
-    border:1px solid #55558a;
+    background:#ffffff;
+    color:#252525;
+    border:1px solid #d2d0ce;
     border-radius:4px;
     padding:4px 6px;
     font-size:12px;
@@ -117,25 +117,124 @@ QComboBox {
 }
 QComboBox::drop-down { border:none; width:20px; }
 QComboBox QAbstractItemView {
-    background:#2e2e50; color:#e8e8ff;
-    selection-background-color:#1565C0;
+    background:#ffffff; color:#252525;
+    selection-background-color:#deecf9;
+    selection-color:#0078D4;
 }
 
-/* ── scroll area ──────────────────────────────── */
-QScrollArea { border:none; background:#252536; }
-QScrollArea > QWidget > QWidget { background:#252536; }
+/* ── scroll area ─────────────────────────────── */
+QScrollArea { border:none; background:#f3f2f1; }
+QScrollArea > QWidget > QWidget { background:#f3f2f1; }
 QScrollBar:vertical {
-    background:#1e1e30; width:8px; border:none; border-radius:4px;
+    background:#f3f2f1; width:8px; border:none; border-radius:4px;
 }
 QScrollBar::handle:vertical {
-    background:#44446a; border-radius:4px; min-height:20px;
+    background:#c8c6c4; border-radius:4px; min-height:20px;
 }
-QScrollBar::handle:vertical:hover { background:#6666aa; }
+QScrollBar::handle:vertical:hover { background:#8a8886; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
 
-/* ── frame (dividers) ─────────────────────────── */
-QFrame[frameShape="4"] { color:#44446a; }
+/* ── frame (dividers) ────────────────────────── */
+QFrame[frameShape="4"] { color:#d2d0ce; }
 """
+
+_TOOLBAR_STYLE = """
+QToolBar {
+    background:#f3f2f1;
+    border-bottom:1px solid #d2d0ce;
+    spacing:2px;
+    padding:2px 6px;
+}
+QToolButton {
+    background:transparent;
+    border:1px solid transparent;
+    border-radius:3px;
+    padding:4px 8px;
+    font-size:12px;
+    color:#252525;
+    min-width:28px;
+}
+QToolButton:hover   { background:#edebe9; border-color:#d2d0ce; }
+QToolButton:checked { background:#dce6f7; border-color:#0078D4; color:#0078D4; font-weight:bold; }
+QToolButton:pressed { background:#d0d8ec; }
+QToolBar::separator { background:#d2d0ce; width:1px; margin:4px 3px; }
+"""
+
+
+# ---------------------------------------------------------------------------
+# Loading overlay — covers viewport while mesh loads
+# ---------------------------------------------------------------------------
+
+class _LoadingOverlay(QWidget):
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self.setStyleSheet("background:rgba(243,242,241,210);")
+
+        outer = QVBoxLayout(self)
+        outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        panel = QWidget()
+        panel.setFixedWidth(320)
+        panel.setStyleSheet(
+            "QWidget { background:#ffffff; border:1px solid #d2d0ce;"
+            " border-radius:8px; padding:20px; }"
+        )
+        inner = QVBoxLayout(panel)
+        inner.setSpacing(12)
+
+        self._label = QLabel("Loading…")
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._label.setStyleSheet(
+            "font-size:14px; color:#252525; font-weight:bold; border:none;"
+        )
+
+        self._bar = QProgressBar()
+        self._bar.setRange(0, 0)
+        self._bar.setFixedHeight(6)
+        self._bar.setTextVisible(False)
+        self._bar.setStyleSheet(
+            "QProgressBar { background:#e0dfde; border:none; border-radius:3px; }"
+            "QProgressBar::chunk { background:#0078D4; border-radius:3px; }"
+        )
+
+        inner.addWidget(self._label)
+        inner.addWidget(self._bar)
+        outer.addWidget(panel)
+        self.hide()
+
+    def show_message(self, msg: str) -> None:
+        self._label.setText(msg)
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        self.setGeometry(self.parentWidget().rect())
+
+
+# ---------------------------------------------------------------------------
+# Background worker — mesh file loading (blocking I/O + preprocessing)
+# ---------------------------------------------------------------------------
+
+class _LoadWorker(QThread):
+    finished = Signal(object)   # emits MeshModel (fully loaded)
+    progress = Signal(str)
+    error    = Signal(str)
+
+    def __init__(self, filepath: str, up_axis: int) -> None:
+        super().__init__()
+        self._filepath = filepath
+        self._up_axis  = up_axis
+
+    def run(self) -> None:
+        try:
+            from models.mesh_model import MeshModel as _MM
+            self.progress.emit(f"Reading {os.path.basename(self._filepath)}…")
+            model = _MM()
+            model.load(self._filepath, up_axis=self._up_axis)
+            self.progress.emit("Finalising…")
+            self.finished.emit(model)
+        except Exception as exc:
+            self.error.emit(f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
 
 
 # ---------------------------------------------------------------------------
@@ -203,12 +302,11 @@ class _FaceWorker(QThread):
 # ---------------------------------------------------------------------------
 
 class _UpAxisDialog(QDialog):
-    def __init__(self, filename: str, n_faces: int, parent=None) -> None:
+    def __init__(self, filename: str, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Mesh loaded")
+        self.setWindowTitle("Open mesh")
         layout = QVBox(self)
         layout.addWidget(QLabel(f"<b>{os.path.basename(filename)}</b>"))
-        layout.addWidget(QLabel(f"{n_faces:,} triangles"))
         layout.addWidget(QLabel("Which axis is UP in this file?"))
         self._group = QButtonGroup(self)
         self._btns: list[QRadioButton] = []
@@ -237,10 +335,12 @@ class MainWindow(QMainWindow):
         self.resize(1280, 820)
         self.setAcceptDrops(True)
 
-        self._model             = MeshModel()
-        self._selected_regions: set[str]         = set()
-        self._current_routes:   list[PaintRoute] = []
-        self._worker:           Optional[QThread] = None
+        self._model              = MeshModel()
+        self._selected_regions:  set[str]         = set()
+        self._current_routes:    list[PaintRoute] = []
+        self._worker:            Optional[QThread] = None
+        self._load_worker:       Optional[QThread] = None
+        self._direction_flipped: bool             = False
 
         self._build_ui()
         self._build_menus()
@@ -252,6 +352,10 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
+
+        # Loading overlay — child of central; covers the whole viewport while loading
+        self._overlay = _LoadingOverlay(central)
+
         root = QHBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -297,6 +401,65 @@ class MainWindow(QMainWindow):
         self._parameter_panel.clear_requested.connect(self._clear_paths)
         self._parameter_panel.grid_changed.connect(self._update_grid)
         self._parameter_panel.arrows_changed.connect(self._refresh_route_display)
+
+        self._build_toolbar()
+
+    def _build_toolbar(self) -> None:
+        tb = QToolBar("View")
+        tb.setMovable(False)
+        tb.setStyleSheet(_TOOLBAR_STYLE)
+        self.addToolBar(tb)
+
+        def act(label: str, tip: str, slot, checkable: bool = False) -> QAction:
+            a = QAction(label, self)
+            a.setToolTip(tip)
+            a.setCheckable(checkable)
+            a.triggered.connect(slot)
+            tb.addAction(a)
+            return a
+
+        act("⌂ Home",  "Fit all",       self._viewer.fit_all)
+        act("↑ Top",   "Top view (Z)",  lambda: self._viewer.set_view('top'))
+        act("◻ Front", "Front view",    lambda: self._viewer.set_view('front'))
+        act("◁ Side",  "Side view",     lambda: self._viewer.set_view('side'))
+        tb.addSeparator()
+        act("↺ CCW", "Rotate view 90° counter-clockwise", lambda: self._viewer.roll_view(-90))
+        act("↻ CW",  "Rotate view 90° clockwise",         lambda: self._viewer.roll_view(+90))
+        tb.addSeparator()
+
+        # Grid toggle — synced with sidebar checkbox
+        self._tb_grid = act("⊞ Grid", "Show pitch grid on bbox faces",
+                            self._on_toolbar_grid, checkable=True)
+        self._parameter_panel._show_grid_check.toggled.connect(
+            lambda v: self._tb_grid.setChecked(v) if self._tb_grid.isChecked() != v else None)
+
+        # Arrow toggle — synced with sidebar checkbox
+        self._tb_arrows = act("→ Arrows", "Show direction arrows",
+                              self._on_toolbar_arrows, checkable=True)
+        self._parameter_panel._show_arrows_check.toggled.connect(
+            lambda v: self._tb_arrows.setChecked(v) if self._tb_arrows.isChecked() != v else None)
+
+        tb.addSeparator()
+        act("⇄ Flip Dir", "Flip path sweep direction (CW ↔ CCW)", self._flip_direction)
+
+    def _on_toolbar_grid(self, checked: bool) -> None:
+        cb = self._parameter_panel._show_grid_check
+        cb.blockSignals(True)
+        cb.setChecked(checked)
+        cb.blockSignals(False)
+        self._update_grid()
+
+    def _on_toolbar_arrows(self, checked: bool) -> None:
+        cb = self._parameter_panel._show_arrows_check
+        cb.blockSignals(True)
+        cb.setChecked(checked)
+        cb.blockSignals(False)
+        self._refresh_route_display()
+
+    def _flip_direction(self) -> None:
+        self._direction_flipped = not self._direction_flipped
+        if self._current_routes:
+            self._on_generate()  # regenerate with new offset
 
     def _build_menus(self) -> None:
         mb = self.menuBar()
@@ -349,31 +512,34 @@ class MainWindow(QMainWindow):
                 break
 
     def _load(self, filepath: str) -> None:
-        self.statusBar().showMessage(f"Loading {os.path.basename(filepath)}…")
-        try:
-            import trimesh as _tm
-            raw = _tm.load(filepath, force='mesh')
-            if isinstance(raw, _tm.Scene):
-                raw = raw.dump(concatenate=True)
-            n_faces = len(raw.faces)
-        except Exception as exc:
-            QMessageBox.critical(self, "Load error", str(exc))
+        if self._load_worker and self._load_worker.isRunning():
             return
 
-        dlg = _UpAxisDialog(filepath, n_faces, self)
+        dlg = _UpAxisDialog(filepath, self)
         dlg.exec()
         up_axis = dlg.up_axis()
 
-        try:
-            self._model.load(filepath, up_axis=up_axis)
-        except Exception as exc:
-            QMessageBox.critical(self, "Load error", str(exc))
-            return
-
         self._selected_regions.clear()
         self._current_routes = []
+        self._surface_panel.set_enabled(False)
+        self._parameter_panel.set_enabled(False)
+        self._overlay.show_message(f"Opening {os.path.basename(filepath)}…")
+        self._overlay.show()
+        self._overlay.raise_()
 
-        self._viewer.load_mesh(self._model.data)
+        worker = _LoadWorker(filepath, up_axis)
+        worker.progress.connect(self._overlay.show_message)
+        worker.finished.connect(self._on_load_ready)
+        worker.error.connect(self._on_load_error)
+        self._load_worker = worker
+        worker.start()
+
+    def _on_load_ready(self, model) -> None:
+        self._overlay.hide()
+        self._model = model
+        n_faces = len(model.data.trimesh_mesh.faces)
+
+        self._viewer.load_mesh(model.data)
         self._viewer.enable_bbox_clicking(self._on_bbox_region_clicked)
 
         self._surface_panel.set_enabled(True)
@@ -382,9 +548,14 @@ class MainWindow(QMainWindow):
         self._status_panel.clear()
 
         self.statusBar().showMessage(
-            f"Loaded: {os.path.basename(filepath)}  |  {n_faces:,} triangles  "
-            f"— Click a box face to select it."
+            f"Loaded: {os.path.basename(model.data.source_path)}"
+            f"  |  {n_faces:,} triangles  — Click a box face to select it."
         )
+
+    def _on_load_error(self, message: str) -> None:
+        self._overlay.hide()
+        QMessageBox.critical(self, "Load error", message)
+        self.statusBar().showMessage("Load failed.")
 
     # ------------------------------------------------------------------
     # Bbox region selection (default click mode)
@@ -459,16 +630,17 @@ class MainWindow(QMainWindow):
         v_mm      = self._parameter_panel.get_v_width_mm() or spray_mm
         routes: list[PaintRoute] = []
 
+        offset = 1 if self._direction_flipped else 0
         for region in sorted(self._selected_regions):
             try:
-                # Horizontal passes
                 if direction in ('horizontal', 'both'):
                     routes.append(_bbox_generator.generate_bbox_route(
-                        region, bounds, spray_mm, up, direction='horizontal'))
-                # Vertical passes — separate route so no diagonal connector between the two
+                        region, bounds, spray_mm, up,
+                        direction='horizontal', direction_offset=offset))
                 if direction in ('vertical', 'both'):
                     routes.append(_bbox_generator.generate_bbox_route(
-                        region, bounds, v_mm, up, direction='vertical'))
+                        region, bounds, v_mm, up,
+                        direction='vertical', direction_offset=offset))
             except Exception as exc:
                 QMessageBox.critical(self, "Generation error",
                     f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
