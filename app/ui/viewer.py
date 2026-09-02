@@ -40,6 +40,7 @@ class MeshViewer(QWidget):
         self._mesh_data: Optional[MeshData] = None
         self._bbox_solid_mesh: Optional[pv.PolyData] = None
         self._picking_mode: str = 'none'
+        self._select_mode: bool = False
 
         # VTK observer handles (two per mode: press + release)
         self._obs_press:   Optional[int] = None
@@ -149,8 +150,12 @@ class MeshViewer(QWidget):
         self,
         on_click: Callable[[tuple], None],
     ) -> None:
-        """Install press+release observers. In select mode the interactor style
-        is switched to Image (pan/zoom only) so rotation cannot interfere."""
+        """Install press+release observers.
+
+        In select mode (self._select_mode=True) the events are aborted so the
+        VTK interactor style never sees them — camera stays still and only the
+        picker fires. In navigate mode events pass through normally.
+        """
         self._remove_vtk_observers()
         raw = self._get_vtk_iren()
         if raw is None:
@@ -158,31 +163,25 @@ class MeshViewer(QWidget):
 
         def _press(obj, event):
             self._press_pos = raw.GetEventPosition()
+            if self._select_mode:
+                obj.AbortFlagOn()   # stop camera rotation
 
         def _release(obj, event):
             if self._press_pos is None:
                 return
-            x, y = raw.GetEventPosition()
+            pos = raw.GetEventPosition()
             self._press_pos = None
-            on_click((x, y))
+            if self._select_mode:
+                obj.AbortFlagOn()
+                on_click(pos)
 
         self._obs_press   = raw.AddObserver('LeftButtonPressEvent',   _press,   1.0)
         self._obs_release = raw.AddObserver('LeftButtonReleaseEvent', _release, 1.0)
 
     def set_select_mode(self, active: bool) -> None:
-        """Switch between Navigate (camera rotates) and Select (click picks faces)."""
-        raw = self._get_vtk_iren()
-        if raw is None:
-            return
-        try:
-            if active:
-                from vtkmodules.vtkInteractionStyle import vtkInteractorStyleImage
-                raw.SetInteractorStyle(vtkInteractorStyleImage())
-            else:
-                from vtkmodules.vtkInteractionStyle import vtkInteractorStyleTrackballCamera
-                raw.SetInteractorStyle(vtkInteractorStyleTrackballCamera())
-        except Exception:
-            pass
+        """Toggle select mode. Does NOT change the VTK interactor style,
+        so the camera orientation is never disturbed."""
+        self._select_mode = active
         self.plotter.render()
 
     # ------------------------------------------------------------------

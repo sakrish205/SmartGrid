@@ -377,8 +377,8 @@ class MainWindow(QMainWindow):
         self._parameter_panel = ParameterPanel()
         self._status_panel    = StatusPanel()
 
-        # Navigate / Select mode toggle
-        self._select_mode_btn = QPushButton("Navigate Mode")
+        # Select Faces toggle — when active, clicks pick bbox faces instead of rotating
+        self._select_mode_btn = QPushButton("Select Faces")
         self._select_mode_btn.setCheckable(True)
         self._select_mode_btn.setMinimumHeight(32)
         self._select_mode_btn.setStyleSheet(
@@ -451,14 +451,12 @@ class MainWindow(QMainWindow):
     def _on_select_mode_toggled(self, checked: bool) -> None:
         self._viewer.set_select_mode(checked)
         if checked:
-            self._select_mode_btn.setText("Select Mode  (click face to select)")
             self.statusBar().showMessage(
-                "Select Mode — click a bounding box face to select it. "
+                "Select Faces — click a bounding box face to select it. "
                 "Camera rotation is suspended."
             )
         else:
-            self._select_mode_btn.setText("Navigate Mode")
-            self.statusBar().showMessage("Navigate Mode — drag to rotate, scroll to zoom.")
+            self.statusBar().showMessage("Navigate — drag to rotate, scroll to zoom.")
 
     # ------------------------------------------------------------------
     # View settings
@@ -562,7 +560,7 @@ class MainWindow(QMainWindow):
         self._parameter_panel.set_enabled(True)
         self._select_mode_btn.setEnabled(True)
         self._select_mode_btn.setChecked(False)
-        self._select_mode_btn.setText("Navigate Mode")
+        self._viewer.set_select_mode(False)
         self._status_panel.update_mesh_stats(n_faces)
         self._status_panel.clear()
 
