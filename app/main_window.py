@@ -224,7 +224,7 @@ class _UpAxisDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("SurfaceCoat — Paint Path Generator")
+        self.setWindowTitle("SmartGrid — 3D Surface Grid & Pitch Mapper")
         self.resize(1280, 820)
         self.setAcceptDrops(True)
 
