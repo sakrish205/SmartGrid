@@ -14,6 +14,7 @@ def generate_bbox_route(
     spray_width_mm: float,
     up_axis: int,
     direction: str = 'horizontal',   # 'horizontal' | 'vertical'
+    direction_offset: int = 0,       # 0=CW (default), 1=CCW (flip first pass)
 ) -> PaintRoute:
     """Return a PaintRoute of parallel passes on the named bbox face.
 
@@ -68,6 +69,7 @@ def generate_bbox_route(
         start_id=0,
         region=region,
         direction=direction,
+        direction_offset=direction_offset,
     )
 
     connections: list[Connection] = []
@@ -112,6 +114,7 @@ def _make_passes(
     start_id: int,
     region: str,
     direction: str,
+    direction_offset: int = 0,
 ) -> list[PaintPass]:
     step_min = mins[step_axis]
     step_max = maxs[step_axis]
@@ -128,7 +131,7 @@ def _make_passes(
     passes: list[PaintPass] = []
     for local_idx, step_pos in enumerate(step_positions):
         pass_id = start_id + local_idx
-        is_forward = (pass_id % 2 == 0)
+        is_forward = ((pass_id + direction_offset) % 2 == 0)
 
         pt_a = np.zeros(3, dtype=float)
         pt_b = np.zeros(3, dtype=float)

@@ -25,7 +25,7 @@ class MeshViewer(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.plotter = QtInteractor(self)
-        self.plotter.set_background('#1e1e2e')
+        self.plotter.set_background('#e8e8e8')
         layout.addWidget(self.plotter)
 
         self._actors: dict[str, object] = {}
@@ -54,10 +54,10 @@ class MeshViewer(QWidget):
         # Solid mesh — fully opaque so hardware depth-buffer picks work
         actor_mesh = self.plotter.add_mesh(
             mesh_data.pyvista_mesh,
-            color='#b0bec5',
+            color='#78909c',
             opacity=1.0,
             show_edges=True,
-            edge_color='#607d8b',
+            edge_color='#455a64',
             line_width=0.5,
             lighting=True,
             reset_camera=True,
@@ -68,7 +68,7 @@ class MeshViewer(QWidget):
         # Green wireframe cage (line cells — visual only)
         actor_wire = self.plotter.add_mesh(
             mesh_data.pyvista_mesh.outline(),
-            color='#00FF41',
+            color='#0078D4',
             line_width=2.5,
             reset_camera=False,
         )
@@ -294,8 +294,8 @@ class MeshViewer(QWidget):
 
         actor = self.plotter.add_mesh(
             lines,
-            color='#9E9E9E',
-            opacity=0.70,
+            color='#546e7a',
+            opacity=0.75,
             line_width=1.2,
             reset_camera=False,
         )
@@ -335,7 +335,7 @@ class MeshViewer(QWidget):
         if len(selected_face_ids) == 0:
             # Restore full opacity
             base_actor.GetProperty().SetOpacity(1.0)
-            base_actor.GetProperty().SetColor(0.69, 0.745, 0.769)   # #b0bec5
+            base_actor.GetProperty().SetColor(0.471, 0.565, 0.612)   # #78909c
         else:
             # Dim the base so selected faces stand out
             base_actor.GetProperty().SetOpacity(0.35)
@@ -392,7 +392,7 @@ class MeshViewer(QWidget):
                 self._actors[f'pass_{paint_pass.id}_{paint_pass.sub_index}'] = actor
 
                 if show_arrows:
-                    _add_pass_arrows(
+                    _add_pass_chevrons(
                         self.plotter, self._actors,
                         paint_pass.points, color, arrow_len,
                         f'arr_{paint_pass.id}_{paint_pass.sub_index}',
@@ -413,8 +413,9 @@ class MeshViewer(QWidget):
 
         self.plotter.render()
 
-    def _arrow_keys(self) -> list[str]:
-        return [k for k in self._actors if k.startswith('arr_')]
+    def roll_view(self, degrees: float) -> None:
+        self.plotter.camera.roll += degrees
+        self.plotter.render()
 
     def clear_route(self) -> None:
         keys = [k for k in self._actors if k.startswith(('pass_', 'conn_', 'arr_'))]
@@ -533,7 +534,7 @@ def _make_grid_lines(
     return mesh
 
 
-def _add_pass_arrows(
+def _add_pass_chevrons(
     plotter,
     actors: dict,
     points: np.ndarray,
@@ -541,51 +542,71 @@ def _add_pass_arrows(
     arrow_len: float,
     key_prefix: str,
 ) -> None:
-    """Place one cone arrow per segment of a pass, pointing in travel direction."""
+    """Draw surveying-style chevron tick marks (><) along a pass line."""
     pts = np.asarray(points, dtype=float)
     if len(pts) < 2:
         return
 
-    # Segment midpoints and direction vectors
-    seg_mids  = (pts[:-1] + pts[1:]) * 0.5
-    seg_vecs  = pts[1:] - pts[:-1]
-    norms     = np.linalg.norm(seg_vecs, axis=1, keepdims=True)
-    mask      = norms[:, 0] > 1e-9
-    if not np.any(mask):
+    tick_len = arrow_len * 0.4
+
+    # Walk the polyline and collect (center, seg_dir) at ~150 mm intervals
+    seg_lens = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+    total_len = seg_lens.sum()
+    if total_len < 1e-9:
         return
-    seg_mids  = seg_mids[mask]
-    seg_vecs  = seg_vecs[mask]
-    norms     = norms[mask]
-    seg_dirs  = seg_vecs / norms
 
-    # Down-sample: one arrow per ~200 mm of path length, min 1
-    cum_len = np.cumsum(norms[:, 0])
-    total   = cum_len[-1]
-    interval = max(total / max(1, int(total / 200)), 1.0)
-    chosen   = [0]
-    last     = cum_len[0]
-    for i in range(1, len(cum_len)):
-        if cum_len[i] - last >= interval:
-            chosen.append(i)
-            last = cum_len[i]
+    interval = max(150.0, total_len / max(1, int(total_len / 150)))
 
-    for i, idx in enumerate(chosen):
-        center = seg_mids[idx]
-        direction = seg_dirs[idx]
-        # pv.Arrow: tip at +x by default; scale to arrow_len
-        arrow = pv.Arrow(
-            start=center - direction * arrow_len * 0.5,
-            direction=direction,
-            tip_length=0.35,
-            tip_radius=0.12,
-            shaft_radius=0.04,
-            scale=arrow_len,
-        )
-        actor = plotter.add_mesh(
-            arrow, color=color, opacity=0.92,
-            lighting=True, reset_camera=False,
-        )
-        actors[f'{key_prefix}_{i}'] = actor
+    positions: list[tuple] = []
+    cum = 0.0
+    next_pos = interval / 2.0  # first chevron at half-interval from start
+    for i in range(len(pts) - 1):
+        seg_d = pts[i + 1] - pts[i]
+        sl = seg_lens[i]
+        if sl < 1e-9:
+            continue
+        seg_dir = seg_d / sl
+        while cum + sl >= next_pos:
+            t = next_pos - cum
+            center = pts[i] + seg_dir * t
+            positions.append((center, seg_dir))
+            next_pos += interval
+        cum += sl
+
+    if not positions:
+        positions = [(pts[len(pts) // 2], (pts[-1] - pts[0]) / max(np.linalg.norm(pts[-1] - pts[0]), 1e-9))]
+
+    # Build all chevron line pairs into one PolyData (fast — single actor)
+    all_pts: list[np.ndarray] = []
+    cells: list[int] = []
+    idx = 0
+    _z = np.array([0., 0., 1.])
+    _y = np.array([0., 1., 0.])
+
+    for center, seg_dir in positions:
+        perp = np.cross(seg_dir, _z)
+        pn = np.linalg.norm(perp)
+        if pn < 0.15:
+            perp = np.cross(seg_dir, _y)
+            pn = np.linalg.norm(perp)
+        perp = perp / pn if pn > 1e-9 else _y
+
+        # Back-left and back-right arms (chevron points forward like ">")
+        p1 = center - tick_len * (seg_dir + perp)
+        p2 = center - tick_len * (seg_dir - perp)
+        all_pts += [center.copy(), p1, center.copy(), p2]
+        cells += [2, idx, idx + 1, 2, idx + 2, idx + 3]
+        idx += 4
+
+    mesh = pv.PolyData()
+    mesh.points = np.array(all_pts, dtype=float)
+    mesh.lines  = np.array(cells, dtype=np.int_)
+
+    actor = plotter.add_mesh(
+        mesh, color=color, line_width=2.5,
+        render_lines_as_tubes=False, reset_camera=False,
+    )
+    actors[f'{key_prefix}_chev'] = actor
 
 
 def _make_bbox_face(region: str, bounds, up_axis: int) -> Optional[pv.PolyData]:

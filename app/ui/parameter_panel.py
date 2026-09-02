@@ -70,6 +70,10 @@ class ParameterPanel(QGroupBox):
         self._v_label.hide()
         self._v_spin.hide()
 
+        # Vertical and Both are hidden for now — horizontal only
+        self._v_radio.hide()
+        self._hv_radio.hide()
+
         dir_group.idClicked.connect(self._on_direction_changed)
 
         # ── Show Grid ────────────────────────────────────────────────────
@@ -112,9 +116,9 @@ class ParameterPanel(QGroupBox):
         f = QFont(); f.setBold(True); f.setPointSize(10)
         self._gen_btn.setFont(f)
         self._gen_btn.setStyleSheet(
-            "QPushButton { background:#1565C0; color:#ffffff; border-radius:5px; }"
-            "QPushButton:hover { background:#1976D2; }"
-            "QPushButton:disabled { background:#3a3a50; color:#666; }"
+            "QPushButton { background:#0078D4; color:#ffffff; border:none; border-radius:4px; }"
+            "QPushButton:hover { background:#106ebe; }"
+            "QPushButton:disabled { background:#e0dfde; color:#a19f9d; border:none; }"
         )
         self._gen_btn.clicked.connect(self.generate_requested.emit)
         layout.addWidget(self._gen_btn)
@@ -123,10 +127,10 @@ class ParameterPanel(QGroupBox):
         self._clear_btn = QPushButton("Clear Path")
         self._clear_btn.setMinimumHeight(32)
         self._clear_btn.setStyleSheet(
-            "QPushButton { background:#4a2020; color:#ffaaaa; border:1px solid #8b3333;"
-            " border-radius:5px; }"
-            "QPushButton:hover { background:#6b2a2a; color:#ffffff; }"
-            "QPushButton:disabled { background:#2a2a40; color:#555577; }"
+            "QPushButton { background:#fdf3f4; color:#c50f1f; border:1px solid #f4b8bb;"
+            " border-radius:4px; }"
+            "QPushButton:hover { background:#f9d1d3; border-color:#c50f1f; }"
+            "QPushButton:disabled { background:#f3f2f1; color:#a19f9d; border-color:#e0dfde; }"
         )
         self._clear_btn.clicked.connect(self.clear_requested.emit)
         layout.addWidget(self._clear_btn)
