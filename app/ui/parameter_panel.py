@@ -15,9 +15,10 @@ UNITS = ['mm', 'cm', 'm', 'in', 'ft']
 
 
 class ParameterPanel(QGroupBox):
-    generate_requested = Signal()
-    clear_requested    = Signal()
-    grid_changed       = Signal()
+    generate_requested  = Signal()
+    clear_requested     = Signal()
+    grid_changed        = Signal()
+    arrows_changed      = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__("Path Settings", parent)
@@ -75,6 +76,11 @@ class ParameterPanel(QGroupBox):
         self._show_grid_check = QCheckBox("Show grid")
         self._show_grid_check.toggled.connect(lambda _: self.grid_changed.emit())
         layout.addWidget(self._show_grid_check)
+
+        # ── Show Arrows ──────────────────────────────────────────────────
+        self._show_arrows_check = QCheckBox("Show direction arrows")
+        self._show_arrows_check.toggled.connect(lambda _: self.arrows_changed.emit())
+        layout.addWidget(self._show_arrows_check)
 
         # Emit grid_changed when widths change
         self._h_spin.valueChanged.connect(lambda _: self.grid_changed.emit())
@@ -167,6 +173,9 @@ class ParameterPanel(QGroupBox):
     def is_show_grid(self) -> bool:
         return self._show_grid_check.isChecked()
 
+    def is_show_arrows(self) -> bool:
+        return self._show_arrows_check.isChecked()
+
     @property
     def current_unit(self) -> str:
         return self._current_unit
@@ -174,7 +183,7 @@ class ParameterPanel(QGroupBox):
     def set_enabled(self, enabled: bool) -> None:
         for w in (self._unit_combo, self._h_spin, self._v_spin,
                   self._h_radio, self._v_radio, self._hv_radio,
-                  self._show_grid_check,
+                  self._show_grid_check, self._show_arrows_check,
                   self._bbox_target_radio, self._mesh_target_radio,
                   self._gen_btn, self._clear_btn):
             w.setEnabled(enabled)

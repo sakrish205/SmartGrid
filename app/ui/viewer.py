@@ -364,8 +364,18 @@ class MeshViewer(QWidget):
     # Route visualisation
     # ------------------------------------------------------------------
 
-    def show_route(self, routes: list[PaintRoute]) -> None:
+    def show_route(self, routes: list[PaintRoute], show_arrows: bool = False) -> None:
         self.clear_route()
+
+        # Arrow size — 2% of the longest bbox extent, clamped to a sensible range
+        if self._mesh_data is not None:
+            b = self._mesh_data.pyvista_mesh.bounds
+            extents = [b[1]-b[0], b[3]-b[2], b[5]-b[4]]
+            arrow_len = max(extents) * 0.025
+            arrow_len = max(10.0, min(arrow_len, 300.0))
+        else:
+            arrow_len = 50.0
+
         for route in routes:
             for paint_pass in route.passes:
                 if len(paint_pass.points) < 2:
@@ -381,13 +391,20 @@ class MeshViewer(QWidget):
                 )
                 self._actors[f'pass_{paint_pass.id}_{paint_pass.sub_index}'] = actor
 
+                if show_arrows:
+                    _add_pass_arrows(
+                        self.plotter, self._actors,
+                        paint_pass.points, color, arrow_len,
+                        f'arr_{paint_pass.id}_{paint_pass.sub_index}',
+                    )
+
             for conn in route.connections:
                 if len(conn.points) < 2:
                     continue
                 line = pv.lines_from_points(conn.points)
                 actor = self.plotter.add_mesh(
                     line,
-                    color='#FF69B4',      # pink — clearly distinct from blue/red passes
+                    color='#FF69B4',
                     line_width=3,
                     render_lines_as_tubes=True,
                     reset_camera=False,
@@ -396,8 +413,11 @@ class MeshViewer(QWidget):
 
         self.plotter.render()
 
+    def _arrow_keys(self) -> list[str]:
+        return [k for k in self._actors if k.startswith('arr_')]
+
     def clear_route(self) -> None:
-        keys = [k for k in self._actors if k.startswith(('pass_', 'conn_'))]
+        keys = [k for k in self._actors if k.startswith(('pass_', 'conn_', 'arr_'))]
         for k in keys:
             self.plotter.remove_actor(self._actors.pop(k))
         self.plotter.render()
@@ -511,6 +531,61 @@ def _make_grid_lines(
     mesh.points = np.array(all_pts, dtype=float)
     mesh.lines  = np.array(cells, dtype=np.int_)
     return mesh
+
+
+def _add_pass_arrows(
+    plotter,
+    actors: dict,
+    points: np.ndarray,
+    color: str,
+    arrow_len: float,
+    key_prefix: str,
+) -> None:
+    """Place one cone arrow per segment of a pass, pointing in travel direction."""
+    pts = np.asarray(points, dtype=float)
+    if len(pts) < 2:
+        return
+
+    # Segment midpoints and direction vectors
+    seg_mids  = (pts[:-1] + pts[1:]) * 0.5
+    seg_vecs  = pts[1:] - pts[:-1]
+    norms     = np.linalg.norm(seg_vecs, axis=1, keepdims=True)
+    mask      = norms[:, 0] > 1e-9
+    if not np.any(mask):
+        return
+    seg_mids  = seg_mids[mask]
+    seg_vecs  = seg_vecs[mask]
+    norms     = norms[mask]
+    seg_dirs  = seg_vecs / norms
+
+    # Down-sample: one arrow per ~200 mm of path length, min 1
+    cum_len = np.cumsum(norms[:, 0])
+    total   = cum_len[-1]
+    interval = max(total / max(1, int(total / 200)), 1.0)
+    chosen   = [0]
+    last     = cum_len[0]
+    for i in range(1, len(cum_len)):
+        if cum_len[i] - last >= interval:
+            chosen.append(i)
+            last = cum_len[i]
+
+    for i, idx in enumerate(chosen):
+        center = seg_mids[idx]
+        direction = seg_dirs[idx]
+        # pv.Arrow: tip at +x by default; scale to arrow_len
+        arrow = pv.Arrow(
+            start=center - direction * arrow_len * 0.5,
+            direction=direction,
+            tip_length=0.35,
+            tip_radius=0.12,
+            shaft_radius=0.04,
+            scale=arrow_len,
+        )
+        actor = plotter.add_mesh(
+            arrow, color=color, opacity=0.92,
+            lighting=True, reset_camera=False,
+        )
+        actors[f'{key_prefix}_{i}'] = actor
 
 
 def _make_bbox_face(region: str, bounds, up_axis: int) -> Optional[pv.PolyData]:
