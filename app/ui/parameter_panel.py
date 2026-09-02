@@ -19,6 +19,7 @@ class ParameterPanel(QGroupBox):
     clear_requested     = Signal()
     grid_changed        = Signal()
     arrows_changed      = Signal()
+    sweep_changed       = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__("Path Settings", parent)
@@ -89,6 +90,18 @@ class ParameterPanel(QGroupBox):
         # Emit grid_changed when widths change
         self._h_spin.valueChanged.connect(lambda _: self.grid_changed.emit())
         self._v_spin.valueChanged.connect(lambda _: self.grid_changed.emit())
+
+        # ── Sweep direction (CW / CCW) ───────────────────────────────────
+        layout.addWidget(_lbl("Sweep direction:", bold=True))
+        sweep_group = QButtonGroup(self)
+        self._cw_radio  = QRadioButton("CW  (standard)")
+        self._ccw_radio = QRadioButton("CCW  (flipped)")
+        self._cw_radio.setChecked(True)
+        sweep_group.addButton(self._cw_radio,  0)
+        sweep_group.addButton(self._ccw_radio, 1)
+        layout.addWidget(self._cw_radio)
+        layout.addWidget(self._ccw_radio)
+        sweep_group.idClicked.connect(lambda _: self.sweep_changed.emit())
 
         # ── Divider ──────────────────────────────────────────────────────
         sep = QFrame()
@@ -180,6 +193,9 @@ class ParameterPanel(QGroupBox):
     def is_show_arrows(self) -> bool:
         return self._show_arrows_check.isChecked()
 
+    def is_direction_flipped(self) -> bool:
+        return self._ccw_radio.isChecked()
+
     @property
     def current_unit(self) -> str:
         return self._current_unit
@@ -187,6 +203,7 @@ class ParameterPanel(QGroupBox):
     def set_enabled(self, enabled: bool) -> None:
         for w in (self._unit_combo, self._h_spin, self._v_spin,
                   self._h_radio, self._v_radio, self._hv_radio,
+                  self._cw_radio, self._ccw_radio,
                   self._show_grid_check, self._show_arrows_check,
                   self._bbox_target_radio, self._mesh_target_radio,
                   self._gen_btn, self._clear_btn):
