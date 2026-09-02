@@ -56,9 +56,7 @@ class MeshViewer(QWidget):
             mesh_data.pyvista_mesh,
             color='#78909c',
             opacity=1.0,
-            show_edges=True,
-            edge_color='#455a64',
-            line_width=0.5,
+            show_edges=False,
             lighting=True,
             reset_camera=True,
         )
