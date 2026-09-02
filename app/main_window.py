@@ -296,6 +296,7 @@ class MainWindow(QMainWindow):
         self._parameter_panel.generate_requested.connect(self._on_generate)
         self._parameter_panel.clear_requested.connect(self._clear_paths)
         self._parameter_panel.grid_changed.connect(self._update_grid)
+        self._parameter_panel.arrows_changed.connect(self._refresh_route_display)
 
     def _build_menus(self) -> None:
         mb = self.menuBar()
@@ -506,13 +507,21 @@ class MainWindow(QMainWindow):
     def _on_route_ready(self, routes: list[PaintRoute]) -> None:
         self._parameter_panel.set_generating(False)
         self._current_routes = routes
-        self._viewer.show_route(routes)
+        self._viewer.show_route(routes, show_arrows=self._parameter_panel.is_show_arrows())
         total_passes = sum(r.total_passes for r in routes)
         total_conns  = sum(len(r.connections) for r in routes)
         self._status_panel.update_route_stats(routes, self._parameter_panel.current_unit)
         self.statusBar().showMessage(
             f"Done — {total_passes} passes, {total_conns} connections."
         )
+
+    def _refresh_route_display(self) -> None:
+        """Re-render existing routes when arrow visibility is toggled."""
+        if self._current_routes:
+            self._viewer.show_route(
+                self._current_routes,
+                show_arrows=self._parameter_panel.is_show_arrows(),
+            )
 
     def _on_route_error(self, message: str) -> None:
         self._parameter_panel.set_generating(False)
