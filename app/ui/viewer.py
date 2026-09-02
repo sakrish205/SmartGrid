@@ -148,9 +148,9 @@ class MeshViewer(QWidget):
     def _install_vtk_observers(
         self,
         on_click: Callable[[tuple], None],
-        drag_threshold: int = 6,
     ) -> None:
-        """Install press+release observers that fire only when no drag occurred."""
+        """Install press+release observers. In select mode the interactor style
+        is switched to Image (pan/zoom only) so rotation cannot interfere."""
         self._remove_vtk_observers()
         raw = self._get_vtk_iren()
         if raw is None:
@@ -163,14 +163,27 @@ class MeshViewer(QWidget):
             if self._press_pos is None:
                 return
             x, y = raw.GetEventPosition()
-            px, py = self._press_pos
             self._press_pos = None
-            if abs(x - px) > drag_threshold or abs(y - py) > drag_threshold:
-                return   # drag (camera rotate) — ignore
             on_click((x, y))
 
         self._obs_press   = raw.AddObserver('LeftButtonPressEvent',   _press,   1.0)
         self._obs_release = raw.AddObserver('LeftButtonReleaseEvent', _release, 1.0)
+
+    def set_select_mode(self, active: bool) -> None:
+        """Switch between Navigate (camera rotates) and Select (click picks faces)."""
+        raw = self._get_vtk_iren()
+        if raw is None:
+            return
+        try:
+            if active:
+                from vtkmodules.vtkInteractionStyle import vtkInteractorStyleImage
+                raw.SetInteractorStyle(vtkInteractorStyleImage())
+            else:
+                from vtkmodules.vtkInteractionStyle import vtkInteractorStyleTrackballCamera
+                raw.SetInteractorStyle(vtkInteractorStyleTrackballCamera())
+        except Exception:
+            pass
+        self.plotter.render()
 
     # ------------------------------------------------------------------
     # Bbox clicking (default mode)
