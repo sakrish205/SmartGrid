@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QLabel, QCheckBox, QFrame,
 )
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont  # used for Generate button font
 
 from app.path.path_model import UNIT_TO_MM
 
