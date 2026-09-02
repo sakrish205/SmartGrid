@@ -196,6 +196,11 @@ class ParameterPanel(QGroupBox):
     def is_direction_flipped(self) -> bool:
         return self._ccw_radio.isChecked()
 
+    def set_unit(self, unit: str) -> None:
+        """Set the display unit; pitch value is converted to keep physical size the same."""
+        if unit in UNITS and unit != self._current_unit:
+            self._unit_combo.setCurrentText(unit)   # triggers _on_unit_changed
+
     @property
     def current_unit(self) -> str:
         return self._current_unit
