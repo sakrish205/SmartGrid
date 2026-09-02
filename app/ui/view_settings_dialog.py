@@ -132,7 +132,7 @@ class ViewSettingsDialog(QDialog):
         text = '#000000' if lum > 140 else '#ffffff'
         btn.setStyleSheet(
             f"QPushButton {{ background:{hex_color}; color:{text};"
-            f" border:1px solid #a0a0a0; border-radius:3px; font-size:11px; }}"
+            f" border:1px solid #909090; border-radius:0px; font-size:11px; }}"
             f"QPushButton:hover {{ border:2px solid #0078D4; }}"
         )
         btn.setText(hex_color.upper())

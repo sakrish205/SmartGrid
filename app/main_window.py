@@ -121,13 +121,14 @@ class MainWindow(QMainWindow):
 
     _MENUBAR_STYLE = (
         'QMenuBar{background:#f0f0f0;color:#1f1f1f;font-size:12px;'
-        '  font-family:"Segoe UI",Arial;border-bottom:1px solid #d0d0d0;}'
-        'QMenuBar::item{padding:4px 10px;background:transparent;}'
-        'QMenuBar::item:selected{background:#e0e0e0;}'
-        'QMenu{background:#fff;color:#1f1f1f;font-size:12px;'
-        '  font-family:"Segoe UI",Arial;border:1px solid #c8c8c8;}'
-        'QMenu::item{padding:5px 24px 5px 12px;}'
-        'QMenu::item:selected{background:#cde8ff;color:#003e7e;}'
+        '  font-family:"Segoe UI",Arial;border-bottom:1px solid #b0b0b0;}'
+        'QMenuBar::item{padding:4px 10px;background:transparent;border-radius:0px;}'
+        'QMenuBar::item:selected{background:#e5e5e5;border:1px solid #b0b0b0;}'
+        'QMenuBar::item:pressed{background:#d0d0d0;}'
+        'QMenu{background:#ffffff;color:#1f1f1f;font-size:12px;'
+        '  font-family:"Segoe UI",Arial;border:1px solid #b0b0b0;border-radius:0px;}'
+        'QMenu::item{padding:5px 24px 5px 12px;border-radius:0px;}'
+        'QMenu::item:selected{background:#0078d4;color:#ffffff;}'
         'QMenu::separator{height:1px;background:#d0d0d0;margin:2px 0;}'
     )
 
@@ -139,7 +140,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(
             'QMainWindow{background:#e8e8e8;}'
             'QStatusBar{background:#f0f0f0;color:#333;font-size:11px;'
-            '  font-family:"Segoe UI",Arial;border-top:1px solid #d0d0d0;}'
+            '  font-family:"Segoe UI",Arial;border-top:1px solid #b0b0b0;'
+            '  padding:0 4px;}'
             'QStatusBar::item{border:none;}'
         )
         self.menuBar().setStyleSheet(self._MENUBAR_STYLE)
