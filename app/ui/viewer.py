@@ -495,9 +495,13 @@ class MeshViewer(QWidget):
 
     def set_view(self, direction: str) -> None:
         views = {
-            'top':   ((0, 0, 1), (0, 1, 0)),
-            'front': ((0, -1, 0), (0, 0, 1)),
-            'side':  ((1, 0, 0), (0, 0, 1)),
+            'top':    ((0, 0,  1), (0, 1, 0)),
+            'bottom': ((0, 0, -1), (0, 1, 0)),
+            'front':  ((0, -1, 0), (0, 0, 1)),
+            'rear':   ((0,  1, 0), (0, 0, 1)),
+            'left':   ((-1, 0, 0), (0, 0, 1)),
+            'right':  (( 1, 0, 0), (0, 0, 1)),
+            'side':   (( 1, 0, 0), (0, 0, 1)),
         }
         if direction not in views:
             return
