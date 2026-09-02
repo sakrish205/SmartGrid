@@ -276,7 +276,7 @@ class MainWindow(QMainWindow):
             self._on_generate()
 
     def _flip_direction(self) -> None:
-        self._ribbon._ccw_radio.setChecked(not self._ribbon._ccw_radio.isChecked())
+        self._ribbon.flip_sweep_direction()
 
     # ------------------------------------------------------------------
     # File loading
