@@ -29,6 +29,21 @@ from app.export.csv_export import export_route_csv
 
 _REGIONS = ['TOP', 'BOTTOM', 'FRONT', 'REAR', 'LEFT', 'RIGHT']
 
+
+def _detect_unit(max_extent: float) -> str:
+    """Guess file units from the largest bounding-box dimension.
+
+    Thresholds tuned for automotive parts (bumpers, panels):
+      > 100 units  →  almost certainly mm  (e.g. 800 mm bumper)
+      1 – 100      →  likely cm            (e.g. 80 cm bumper)
+      < 1          →  likely m             (e.g. 0.8 m bumper)
+    """
+    if max_extent > 100:
+        return 'mm'
+    if max_extent > 1:
+        return 'cm'
+    return 'm'
+
 _SIDEBAR_STYLE = """
 /* whole left panel */
 QWidget { background:#f3f2f1; color:#252525; font-size:13px; }
@@ -491,9 +506,17 @@ class MainWindow(QMainWindow):
         self._status_panel.update_mesh_stats(n_faces)
         self._status_panel.clear()
 
+        # Auto-detect units from bounding box size
+        b = model.data.pyvista_mesh.bounds
+        max_extent = max(b[1]-b[0], b[3]-b[2], b[5]-b[4])
+        detected = _detect_unit(max_extent)
+        self._parameter_panel.set_unit(detected)
+        unit_note = f"  |  unit: {detected} (auto)"
+
         self.statusBar().showMessage(
             f"Loaded: {os.path.basename(model.data.source_path)}"
-            f"  |  {n_faces:,} triangles  —  click a box face to select a region."
+            f"  |  {n_faces:,} triangles{unit_note}"
+            f"  —  click a box face to select a region."
         )
 
     def _on_load_error(self, message: str) -> None:
