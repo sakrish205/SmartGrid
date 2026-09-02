@@ -2,8 +2,6 @@
 
 A desktop tool for generating spray-paint robot paths over 3D mesh surfaces. Built for automotive body panels.
 
-![SmartGrid screenshot](https://raw.githubusercontent.com/sakrish205/SmartGrid/main/screenshot.png)
-
 > **SmartGrid** — Automated 3D CAD Surface Grid & Pitch Mapping for Bumper OLP
 
 ---

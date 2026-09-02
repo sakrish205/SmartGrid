@@ -43,7 +43,7 @@ class ParameterPanel(QGroupBox):
 
         # ── Spray width ──────────────────────────────────────────────────
         self._h_spin = _spin()
-        form.addRow(_lbl("Spray width:"), self._h_spin)
+        form.addRow(_lbl("Pitch (mm):"), self._h_spin)
         layout.addLayout(form)
 
         # ── Direction ────────────────────────────────────────────────────
@@ -190,7 +190,7 @@ def _spin() -> QDoubleSpinBox:
     s = QDoubleSpinBox()
     s.setRange(0.1, 100_000.0)
     s.setDecimals(1)
-    s.setValue(50.0)
+    s.setValue(100.0)
     return s
 
 
