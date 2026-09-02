@@ -387,7 +387,7 @@ class MeshViewer(QWidget):
         else:
             arrow_len = 50.0
 
-        for route in routes:
+        for ri, route in enumerate(routes):
             for paint_pass in route.passes:
                 if len(paint_pass.points) < 2:
                     continue
@@ -398,13 +398,14 @@ class MeshViewer(QWidget):
                     line, color=color, line_width=5,
                     render_lines_as_tubes=True, reset_camera=False,
                 )
-                self._actors[f'pass_{paint_pass.id}_{paint_pass.sub_index}'] = actor
+                key = f'pass_{ri}_{paint_pass.id}_{paint_pass.sub_index}'
+                self._actors[key] = actor
 
                 if show_arrows:
                     _add_pass_chevrons(
                         self.plotter, self._actors,
                         paint_pass.points, color, arrow_len,
-                        f'arr_{paint_pass.id}_{paint_pass.sub_index}',
+                        f'arr_{ri}_{paint_pass.id}_{paint_pass.sub_index}',
                     )
 
             for conn in route.connections:
@@ -418,7 +419,7 @@ class MeshViewer(QWidget):
                     render_lines_as_tubes=True,
                     reset_camera=False,
                 )
-                self._actors[f'conn_{conn.id}'] = actor
+                self._actors[f'conn_{ri}_{conn.id}'] = actor
 
         self.plotter.render()
 
