@@ -253,7 +253,7 @@ class MeshViewer(QWidget):
                 actor = self.plotter.add_mesh(
                     face_mesh,
                     color='#FFD700',
-                    opacity=0.30,           # translucent enough to see paths through
+                    opacity=0.45,           # translucent enough to see paths through
                     show_edges=True,
                     edge_color='#FFC107',
                     line_width=2.0,
@@ -628,7 +628,11 @@ def _make_bbox_face(region: str, bounds, up_axis: int) -> Optional[pv.PolyData]:
         return None
 
     face_axis, face_sign = face_map[region]
-    face_pos = maxs[face_axis] if face_sign > 0 else mins[face_axis]
+    # Push quad slightly outside the bbox so mesh triangles at the boundary
+    # don't occlude it (mesh vertices touch the bbox extremes exactly).
+    extent = maxs[face_axis] - mins[face_axis]
+    push = extent * 0.003
+    face_pos = (maxs[face_axis] + push) if face_sign > 0 else (mins[face_axis] - push)
     a, b = [i for i in range(3) if i != face_axis]
 
     pts = np.zeros((4, 3), dtype=float)
