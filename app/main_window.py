@@ -297,9 +297,8 @@ class MainWindow(QMainWindow):
         self._model              = MeshModel()
         self._selected_regions:  set[str]         = set()
         self._current_routes:    list[PaintRoute] = []
-        self._worker:            Optional[QThread] = None
-        self._load_worker:       Optional[QThread] = None
-        self._direction_flipped: bool             = False
+        self._worker:      Optional[QThread] = None
+        self._load_worker: Optional[QThread] = None
 
         self._build_ui()
         self._build_menus()
@@ -380,6 +379,7 @@ class MainWindow(QMainWindow):
         self._parameter_panel.clear_requested.connect(self._clear_paths)
         self._parameter_panel.grid_changed.connect(self._update_grid)
         self._parameter_panel.arrows_changed.connect(self._refresh_route_display)
+        self._parameter_panel.sweep_changed.connect(self._on_sweep_changed)
 
     def _build_menus(self) -> None:
         mb = self.menuBar()
@@ -412,13 +412,17 @@ class MainWindow(QMainWindow):
         export_menu.addAction("Export CSV...",  self._export_csv)
 
     # ------------------------------------------------------------------
-    # Direction flip
+    # Sweep direction (CW / CCW)
     # ------------------------------------------------------------------
 
-    def _flip_direction(self) -> None:
-        self._direction_flipped = not self._direction_flipped
+    def _on_sweep_changed(self) -> None:
         if self._current_routes:
             self._on_generate()
+
+    def _flip_direction(self) -> None:
+        """Path menu shortcut — toggles the CCW radio button."""
+        pp = self._parameter_panel
+        pp._ccw_radio.setChecked(not pp._ccw_radio.isChecked())
 
     # ------------------------------------------------------------------
     # File loading
@@ -567,7 +571,7 @@ class MainWindow(QMainWindow):
         direction = self._parameter_panel.get_direction()
         v_mm      = self._parameter_panel.get_v_width_mm() or spray_mm
         routes: list[PaintRoute] = []
-        offset = 1 if self._direction_flipped else 0
+        offset = 1 if self._parameter_panel.is_direction_flipped() else 0
 
         for region in sorted(self._selected_regions):
             try:
