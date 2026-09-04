@@ -476,6 +476,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, 'Generation error',
                     f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
                 return
+        self._face_grid_planes_cache = None
         self._viewer.clear_face_grid_planes()
         self._on_route_ready(routes)
 
@@ -555,6 +556,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('Generating mesh paths...')
         worker = _PathWorker(self._model.data, pairs, spray_mm,
                              waypoint_spacing_mm=wpt_mm)
+        self._face_grid_planes_cache = None
         self._viewer.clear_face_grid_planes()
         worker.finished.connect(self._on_route_ready)
         worker.error.connect(self._on_route_error)
