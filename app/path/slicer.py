@@ -79,15 +79,39 @@ def compute_slice_planes(
     return planes
 
 
+_REGION_OUTWARD: dict[str, tuple[int, int]] = {}   # populated by _outward_sign()
+
+
+def _outward_sign(region_id: str, up_axis: int) -> tuple[int, int] | None:
+    """Return (axis_index, sign) for the outward-facing normal of a named region."""
+    fwd_axis   = (up_axis + 1) % 3
+    right_axis = (up_axis + 2) % 3
+    table = {
+        'TOP':    (up_axis,    +1),
+        'BOTTOM': (up_axis,    -1),
+        'FRONT':  (fwd_axis,  +1),
+        'REAR':   (fwd_axis,  -1),
+        'LEFT':   (right_axis, -1),
+        'RIGHT':  (right_axis, +1),
+    }
+    return table.get(region_id)
+
+
 def slice_region(
     mesh: trimesh.Trimesh,
     region_face_indices: np.ndarray,
     plane_normal: np.ndarray,
     plane_origin: np.ndarray,
+    region_id: str = '',
+    up_axis: int = 2,
 ) -> np.ndarray | None:
     """Intersect mesh with a plane; return only segments from the selected region.
 
     Returns shape (K, 2, 3) or None if no intersection within the region.
+
+    Only keeps segments whose source face normal points toward the OUTSIDE of
+    the selected region (e.g. upward for TOP), preventing paths from appearing
+    on the underside of the mesh when the TOP surface is selected.
     """
     if len(region_face_indices) == 0:
         return None
@@ -108,8 +132,23 @@ def slice_region(
         return None
 
     # Filter to segments whose source triangle is in the selected region
-    mask = np.isin(face_ids, region_face_indices)
-    filtered = segments[mask]
+    region_mask = np.isin(face_ids, region_face_indices)
+    filtered = segments[region_mask]
+    filtered_face_ids = face_ids[region_mask]
+
+    if len(filtered) == 0:
+        return None
+
+    # Keep only segments on outward-facing faces for the named region.
+    # This prevents paths on the underside when TOP is selected, or on the
+    # back when FRONT is selected (the plane cuts both sides of a solid mesh).
+    outward = _outward_sign(region_id, up_axis)
+    if outward is not None:
+        axis, sign = outward
+        face_normals_here = mesh.face_normals[filtered_face_ids]
+        outward_mask = (face_normals_here[:, axis] * sign) > 0.15
+        if outward_mask.sum() > 0:  # only apply if filter keeps anything
+            filtered = filtered[outward_mask]
 
     if len(filtered) == 0:
         return None

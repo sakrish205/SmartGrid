@@ -9,9 +9,10 @@ from app.path import connector as _connector
 from app.path.resampler import rdp_simplify, resample_arc
 
 _RDP_EPSILON       = 0.3   # mm — remove micro-jaggies from triangle discretisation
-_MIN_PASS_FRACTION = 0.15  # drop passes shorter than this × spray_width_mm …
-_MIN_PASS_ABS_MM   = 5.0   # … but never drop passes longer than this absolute floor
+_MIN_PASS_FRACTION = 0.30  # drop passes shorter than 30% of spray_width_mm …
+_MIN_PASS_ABS_MM   = 15.0  # … but never drop passes longer than this absolute floor
 _MAX_ANGLE_DEV_DEG = 55.0  # drop passes whose direction deviates more than this from the primary
+_MAX_SUB_PER_LEVEL = 4     # max sub-index passes per slice level (prevents fragment explosion)
 
 
 def _arc_length(pts: np.ndarray) -> float:
@@ -94,6 +95,8 @@ def generate_route(
             region_face_indices,
             plane_normal,
             plane_origin,
+            region_id=region_id,
+            up_axis=mesh_data.up_axis,
         )
         if segments is None:
             continue
@@ -105,6 +108,9 @@ def generate_route(
         # Drop corner clips, diagonal fragments, and sort by arc length
         # (_filter_polylines handles sorting internally)
         polylines = _filter_polylines(polylines, spray_width_mm)
+
+        # Cap fragments per level: too many means edge/corner noise on complex meshes
+        polylines = polylines[:_MAX_SUB_PER_LEVEL]
 
         # Direction alternates by plane index, not by total pass count,
         # so holes/sub-passes don't disrupt the pattern.
@@ -133,6 +139,7 @@ def generate_route(
     connections = _connector.connect_passes(
         all_passes, mesh_data, region_face_indices,
         simplify_epsilon=1.0,
+        spray_width_mm=spray_width_mm,
     )
 
     total_length = sum(
