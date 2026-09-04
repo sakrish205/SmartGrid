@@ -41,24 +41,27 @@ def connect_passes(
         start_vid = bverts[si]
 
         bpath = _bfs_walk(end_vid, start_vid, badj)
-        if bpath is None:
-            continue   # no boundary route — omit this connection
-
-        # Connector: pass endpoint → boundary vertices → next pass start
-        walk_pts = mesh_data.trimesh_mesh.vertices[bpath]
-        raw_pts = np.vstack([
-            end_pt[np.newaxis],
-            walk_pts,
-            start_pt[np.newaxis],
-        ])
-        pts = rdp_simplify(raw_pts, simplify_epsilon)
+        if bpath is not None:
+            # Boundary-following connector
+            walk_pts = mesh_data.trimesh_mesh.vertices[bpath]
+            raw_pts = np.vstack([
+                end_pt[np.newaxis],
+                walk_pts,
+                start_pt[np.newaxis],
+            ])
+            pts = rdp_simplify(raw_pts, simplify_epsilon)
+            is_air = False
+        else:
+            # BFS failed (disconnected boundary or too large) — straight air move
+            pts = np.array([end_pt, start_pt], dtype=float)
+            is_air = True
 
         connections.append(Connection(
             id=i,
             from_pass_id=primary_passes[i].id,
             to_pass_id=primary_passes[i + 1].id,
             points=pts,
-            is_air_move=False,
+            is_air_move=is_air,
         ))
 
     return connections

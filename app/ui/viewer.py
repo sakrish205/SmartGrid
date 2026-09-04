@@ -5,7 +5,9 @@ from typing import Callable, Optional
 import numpy as np
 import pyvista as pv
 from pyvistaqt import QtInteractor
-from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QMenu
+from PySide6.QtGui import QAction
+from PySide6.QtCore import Qt
 
 try:
     from vtkmodules.vtkRenderingCore import vtkCellPicker
@@ -47,6 +49,44 @@ class MeshViewer(QWidget):
         self._obs_press:   Optional[int] = None
         self._obs_release: Optional[int] = None
         self._press_pos:   Optional[tuple] = None
+
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_view_menu)
+
+    # ------------------------------------------------------------------
+    # View context menu
+    # ------------------------------------------------------------------
+
+    def _show_view_menu(self, pos) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            'QMenu{background:#ffffff;border:1px solid #c0c0c0;font-size:11px;'
+            '  font-family:"Segoe UI",Arial;color:#1f1f1f;}'
+            'QMenu::item{padding:4px 20px 4px 10px;}'
+            'QMenu::item:selected{background:#0078d4;color:#fff;}'
+            'QMenu::separator{height:1px;background:#d0d0d0;margin:2px 0;}'
+        )
+        title = menu.addAction('— View —')
+        title.setEnabled(False)
+        menu.addSeparator()
+        for label, direction in [
+            ('Fit All',      None),
+            ('Top',         'top'),
+            ('Bottom',      'bottom'),
+            ('Front',       'front'),
+            ('Rear',        'rear'),
+            ('Left',        'left'),
+            ('Right',       'right'),
+        ]:
+            act = menu.addAction(label)
+            if direction is None:
+                act.triggered.connect(self.fit_all)
+            else:
+                act.triggered.connect(lambda _=False, d=direction: self.set_view(d))
+        menu.addSeparator()
+        menu.addAction('Rotate Left  90°').triggered.connect(lambda: self.roll_view(-90))
+        menu.addAction('Rotate Right 90°').triggered.connect(lambda: self.roll_view(+90))
+        menu.exec(self.mapToGlobal(pos))
 
     # ------------------------------------------------------------------
     # Mesh loading
