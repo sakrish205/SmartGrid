@@ -168,7 +168,7 @@ def slice_region(
             best_gap_idx = int(np.argmax(gaps))
             best_gap     = gaps[best_gap_idx]
 
-            _MIN_CLUSTER_GAP_MM = 8.0   # only split when gap is genuinely large
+            _MIN_CLUSTER_GAP_MM = 5.0   # only split when gap is genuinely large
             if best_gap > _MIN_CLUSTER_GAP_MM:
                 # cutoff = midpoint of the largest gap
                 cutoff = (sorted_m[best_gap_idx] + sorted_m[best_gap_idx + 1]) / 2.0
