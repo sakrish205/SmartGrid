@@ -20,11 +20,13 @@ DEFAULTS: dict[str, str] = {
     'pass_forward':   '#2196F3',
     'pass_reverse':   '#FF5722',
     'connector':      '#FF69B4',
+    'waypoint':       '#FFD700',
     'grid':           '#546e7a',
     'face_highlight': '#FFD700',
     # line widths
     'arrow_line_width': '4.0',
     'pass_line_width':  '5.0',
+    'waypoint_size':    '8.0',
 }
 
 _COLOR_LABELS: dict[str, str] = {
@@ -34,6 +36,7 @@ _COLOR_LABELS: dict[str, str] = {
     'pass_forward':   'Pass — forward',
     'pass_reverse':   'Pass — reverse',
     'connector':      'Connector',
+    'waypoint':       'Waypoints',
     'grid':           'Grid lines',
     'face_highlight': 'Face highlight',
 }
@@ -84,6 +87,7 @@ class ViewSettingsDialog(QDialog):
         for row, (key, label) in enumerate([
             ('arrow_line_width', 'Direction arrows'),
             ('pass_line_width',  'Pass lines'),
+            ('waypoint_size',    'Waypoint size'),
         ]):
             spin = QDoubleSpinBox()
             spin.setRange(1.0, 12.0)
