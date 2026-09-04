@@ -239,7 +239,7 @@ _STAT_VALUE_CSS = 'font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;fon
 class _Group(QWidget):
     def __init__(self, title: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         vl = QVBoxLayout(self)
         vl.setContentsMargins(4, 2, 4, 0)
@@ -362,6 +362,7 @@ class SmartRibbon(QWidget):
     grid_changed        = Signal()
     arrows_changed      = Signal()
     waypoints_changed   = Signal()
+    spacing_changed     = Signal()      # Pt Interval changed → needs regeneration
     region_toggled      = Signal(str, bool)
     select_mode_changed = Signal(bool)
     generate_requested  = Signal()
@@ -373,7 +374,8 @@ class SmartRibbon(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(RIBBON_H)
+        self.setMinimumHeight(RIBBON_H)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setStyleSheet(
             f'SmartRibbon{{background:{_RIBBON_BG};'
             f'border-top:2px solid #0078d4;'
@@ -547,9 +549,11 @@ class SmartRibbon(QWidget):
         self._pitch_spin = QDoubleSpinBox()
         self._pitch_spin.setRange(0.1, 100_000.0)
         self._pitch_spin.setDecimals(1)
+        self._pitch_spin.setSingleStep(5.0)
         self._pitch_spin.setValue(100.0)
         self._pitch_spin.setSuffix('  mm')
-        self._pitch_spin.setFixedWidth(90)
+        self._pitch_spin.setMinimumWidth(90)
+        self._pitch_spin.setMaximumWidth(120)
         self._pitch_spin.setStyleSheet(_SPIN_CSS)
         pitch_hl.addWidget(self._pitch_spin)
 
@@ -559,10 +563,12 @@ class SmartRibbon(QWidget):
         self._wpt_interval_spin = QDoubleSpinBox()
         self._wpt_interval_spin.setRange(0.0, 10_000.0)
         self._wpt_interval_spin.setDecimals(1)
+        self._wpt_interval_spin.setSingleStep(5.0)
         self._wpt_interval_spin.setValue(0.0)
         self._wpt_interval_spin.setSpecialValueText('off')
         self._wpt_interval_spin.setSuffix('  mm')
-        self._wpt_interval_spin.setFixedWidth(90)
+        self._wpt_interval_spin.setMinimumWidth(90)
+        self._wpt_interval_spin.setMaximumWidth(120)
         self._wpt_interval_spin.setStyleSheet(_SPIN_CSS)
         interval_hl.addWidget(self._wpt_interval_spin)
 
@@ -675,7 +681,8 @@ class SmartRibbon(QWidget):
 
         self._grid_check.toggled.connect(lambda _: self.grid_changed.emit())
         self._arrows_check.toggled.connect(lambda _: self.arrows_changed.emit())
-        self._waypoints_check.toggled.connect(lambda _: self.waypoints_changed.emit())
+        self._waypoints_check.toggled.connect(self._on_waypoints_toggled)
+        self._wpt_interval_spin.valueChanged.connect(self._on_spacing_changed)
 
         for region, btn in self._region_btns.items():
             btn.toggled.connect(
@@ -696,6 +703,20 @@ class SmartRibbon(QWidget):
 
         self._exp_json_btn.clicked.connect(self.export_json)
         self._exp_csv_btn.clicked.connect(self.export_csv)
+
+    def _on_waypoints_toggled(self, checked: bool) -> None:
+        """When user enables Waypoints and spacing is off, set a sensible default."""
+        if checked and self._wpt_interval_spin.value() == 0.0:
+            self._wpt_interval_spin.blockSignals(True)
+            self._wpt_interval_spin.setValue(20.0)
+            self._wpt_interval_spin.blockSignals(False)
+            self.spacing_changed.emit()   # needs regeneration with new spacing
+        self.waypoints_changed.emit()
+
+    def _on_spacing_changed(self, _value: float) -> None:
+        """Pt Interval changed — regenerate if waypoints are visible."""
+        if self._waypoints_check.isChecked():
+            self.spacing_changed.emit()
 
     def _select_all_regions(self) -> None:
         for region, btn in self._region_btns.items():
