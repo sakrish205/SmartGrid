@@ -396,9 +396,13 @@ class SmartRibbon(QWidget):
         groups = [
             self._build_file(),
             self._build_view(),
-            self._build_surface(),
-            self._build_path_settings(),
+            self._build_select(),
+            self._build_parameters(),
+            self._build_path_mode(),
+            self._build_sweep(),
+            self._build_waypoints(),
             self._build_path(),
+            self._build_display(),
             self._build_stats(),
             self._build_export(),
         ]
@@ -421,64 +425,29 @@ class SmartRibbon(QWidget):
     def _build_view(self) -> _Group:
         g = _Group('View')
 
-        vl = QVBoxLayout()
-        vl.setContentsMargins(0, 0, 0, 0)
-        vl.setSpacing(2)
-
-        # Row 1 — camera presets
-        row1 = QHBoxLayout()
-        row1.setSpacing(2)
-        row1.setContentsMargins(0, 0, 0, 0)
-
-        self._fit_btn    = _small_btn('Fit All', _make_icon('fit', 16))
-        self._top_btn    = _small_btn('Top',     _make_icon('top', 16))
-        self._bot_btn    = _small_btn('Bottom',  _make_icon('bottom', 16))
-        self._front_btn  = _small_btn('Front',   _make_icon('front', 16))
-        self._rear_btn   = _small_btn('Rear',    _make_icon('rear', 16))
-        self._left_btn   = _small_btn('Left',    _make_icon('left', 16))
-        self._right_btn  = _small_btn('Right',   _make_icon('right', 16))
+        self._fit_btn   = _small_btn('Fit All', _make_icon('fit', 16))
+        self._top_btn   = _small_btn('Top',     _make_icon('top', 16))
+        self._bot_btn   = _small_btn('Bottom',  _make_icon('bottom', 16))
+        self._front_btn = _small_btn('Front',   _make_icon('front', 16))
+        self._rear_btn  = _small_btn('Rear',    _make_icon('rear', 16))
+        self._left_btn  = _small_btn('Left',    _make_icon('left', 16))
+        self._right_btn = _small_btn('Right',   _make_icon('right', 16))
 
         for b in (self._fit_btn, self._top_btn, self._bot_btn,
                   self._front_btn, self._rear_btn, self._left_btn, self._right_btn):
             b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            row1.addWidget(b)
-
-        # Row 2 — overlays + settings
-        row2 = QHBoxLayout()
-        row2.setSpacing(6)
-        row2.setContentsMargins(0, 0, 0, 0)
-
-        self._grid_check      = QCheckBox('Grid')
-        self._arrows_check    = QCheckBox('Arrows')
-        self._waypoints_check = QCheckBox('Waypoints')
-        self._grid_check.setStyleSheet(_CHK_CSS)
-        self._arrows_check.setStyleSheet(_CHK_CSS)
-        self._waypoints_check.setStyleSheet(_CHK_CSS)
-
-        vs_btn = _small_btn('Settings', _make_icon('settings', 16))
-        vs_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        vs_btn.clicked.connect(self.view_settings_req)
-
-        row2.addWidget(self._grid_check)
-        row2.addWidget(self._arrows_check)
-        row2.addWidget(self._waypoints_check)
-        row2.addSpacing(4)
-        row2.addWidget(vs_btn)
-
-        vl.addLayout(row1)
-        vl.addLayout(row2)
-        g.add_layout(vl)
+            g.add(b)
         return g
 
-    # ── Surface Selection ─────────────────────────────────────────────────
-    def _build_surface(self) -> _Group:
-        g = _Group('Surface Selection')
+    # ── Select ────────────────────────────────────────────────────────────
+    def _build_select(self) -> _Group:
+        g = _Group('Select')
 
         vl = QVBoxLayout()
         vl.setContentsMargins(0, 0, 0, 0)
         vl.setSpacing(2)
 
-        # Row 1 — region toggle buttons
+        # Region toggle buttons
         row1 = QHBoxLayout()
         row1.setSpacing(2)
         row1.setContentsMargins(0, 0, 0, 0)
@@ -490,7 +459,7 @@ class SmartRibbon(QWidget):
             self._region_btns[region] = btn
             row1.addWidget(btn)
 
-        # Row 2 — All / None / Select Faces
+        # All / None / Select Faces
         row2 = QHBoxLayout()
         row2.setSpacing(4)
         row2.setContentsMargins(0, 0, 0, 0)
@@ -521,21 +490,16 @@ class SmartRibbon(QWidget):
         g.add_layout(vl)
         return g
 
-    # ── Path Settings ─────────────────────────────────────────────────────
-    def _build_path_settings(self) -> _Group:
-        g = _Group('Path Settings')
+    # ── Parameters ────────────────────────────────────────────────────────
+    def _build_parameters(self) -> _Group:
+        g = _Group('Parameters')
 
-        hl = QHBoxLayout()
-        hl.setSpacing(8)
-        hl.setContentsMargins(0, 0, 0, 0)
-
-        # Unit + Pitch
-        form_vl = QVBoxLayout()
-        form_vl.setSpacing(3)
-        form_vl.setContentsMargins(0, 0, 0, 0)
+        vl = QVBoxLayout()
+        vl.setSpacing(3)
+        vl.setContentsMargins(0, 0, 0, 0)
 
         unit_hl = QHBoxLayout()
-        unit_hl.setSpacing(3)
+        unit_hl.setSpacing(4)
         unit_hl.addWidget(_row_label('Unit'))
         self._unit_combo = QComboBox()
         self._unit_combo.addItems(_UNITS)
@@ -545,8 +509,8 @@ class SmartRibbon(QWidget):
         unit_hl.addWidget(self._unit_combo)
 
         pitch_hl = QHBoxLayout()
-        pitch_hl.setSpacing(3)
-        pitch_hl.addWidget(_row_label('Pitch'))
+        pitch_hl.setSpacing(4)
+        pitch_hl.addWidget(_row_label('Spray Width'))
         self._pitch_spin = QDoubleSpinBox()
         self._pitch_spin.setRange(0.1, 100_000.0)
         self._pitch_spin.setDecimals(1)
@@ -554,63 +518,32 @@ class SmartRibbon(QWidget):
         self._pitch_spin.setValue(100.0)
         self._pitch_spin.setSuffix('  mm')
         self._pitch_spin.setMinimumWidth(90)
-        self._pitch_spin.setMaximumWidth(120)
+        self._pitch_spin.setMaximumWidth(110)
         self._pitch_spin.setStyleSheet(_SPIN_CSS)
         pitch_hl.addWidget(self._pitch_spin)
 
-        interval_hl = QHBoxLayout()
-        interval_hl.setSpacing(3)
-        interval_hl.addWidget(_row_label('Pt Interval'))
-        self._wpt_interval_spin = QDoubleSpinBox()
-        self._wpt_interval_spin.setRange(0.0, 10_000.0)
-        self._wpt_interval_spin.setDecimals(1)
-        self._wpt_interval_spin.setSingleStep(5.0)
-        self._wpt_interval_spin.setValue(0.0)
-        self._wpt_interval_spin.setSpecialValueText('off')
-        self._wpt_interval_spin.setSuffix('  mm')
-        self._wpt_interval_spin.setMinimumWidth(90)
-        self._wpt_interval_spin.setMaximumWidth(120)
-        self._wpt_interval_spin.setStyleSheet(_SPIN_CSS)
-        interval_hl.addWidget(self._wpt_interval_spin)
+        vl.addLayout(unit_hl)
+        vl.addLayout(pitch_hl)
+        g.add_layout(vl)
+        return g
 
-        form_vl.addLayout(unit_hl)
-        form_vl.addLayout(pitch_hl)
-        form_vl.addLayout(interval_hl)
-        hl.addLayout(form_vl)
+    # ── Path Mode ─────────────────────────────────────────────────────────
+    def _build_path_mode(self) -> _Group:
+        g = _Group('Path Mode')
 
-        hl.addWidget(_mk_vsep())
+        hl = QHBoxLayout()
+        hl.setSpacing(8)
+        hl.setContentsMargins(0, 0, 0, 0)
 
-        # Sweep direction
-        sweep_vl = QVBoxLayout()
-        sweep_vl.setSpacing(2)
-        sweep_vl.setContentsMargins(0, 0, 0, 0)
-        sweep_vl.addWidget(_row_label('Sweep'))
-        self._cw_radio  = QRadioButton('CW')
-        self._ccw_radio = QRadioButton('CCW')
-        self._cw_radio.setChecked(True)
-        self._cw_radio.setStyleSheet(_RADIO_CSS)
-        self._ccw_radio.setStyleSheet(_RADIO_CSS)
-        self._sweep_grp = QButtonGroup(self)
-        self._sweep_grp.addButton(self._cw_radio,  0)
-        self._sweep_grp.addButton(self._ccw_radio, 1)
-        sweep_vl.addWidget(self._cw_radio)
-        sweep_vl.addWidget(self._ccw_radio)
-        hl.addLayout(sweep_vl)
-
-        hl.addWidget(_mk_vsep())
-
-        # Path target
         target_vl = QVBoxLayout()
         target_vl.setSpacing(2)
         target_vl.setContentsMargins(0, 0, 0, 0)
-        target_vl.addWidget(_row_label('Path on'))
         self._bbox_radio      = QRadioButton('Boundary Box')
         self._face_grid_radio = QRadioButton('Face Grid')
         self._mesh_radio      = QRadioButton('Mesh Surface')
         self._mesh_radio.setChecked(True)
-        self._bbox_radio.setStyleSheet(_RADIO_CSS)
-        self._face_grid_radio.setStyleSheet(_RADIO_CSS)
-        self._mesh_radio.setStyleSheet(_RADIO_CSS)
+        for r in (self._bbox_radio, self._face_grid_radio, self._mesh_radio):
+            r.setStyleSheet(_RADIO_CSS)
         target_grp = QButtonGroup(self)
         target_grp.addButton(self._bbox_radio,      0)
         target_grp.addButton(self._face_grid_radio, 2)
@@ -620,7 +553,7 @@ class SmartRibbon(QWidget):
         target_vl.addWidget(self._mesh_radio)
         hl.addLayout(target_vl)
 
-        # Standoff spinbox — only visible when Face Grid is selected
+        # Standoff — visible only when Face Grid is selected
         standoff_vl = QVBoxLayout()
         standoff_vl.setSpacing(2)
         standoff_vl.setContentsMargins(0, 0, 0, 0)
@@ -631,14 +564,66 @@ class SmartRibbon(QWidget):
         self._standoff_spin.setSingleStep(10.0)
         self._standoff_spin.setDecimals(1)
         self._standoff_spin.setFixedWidth(70)
+        self._standoff_spin.setStyleSheet(_SPIN_CSS)
         self._standoff_label.setVisible(False)
         self._standoff_spin.setVisible(False)
         standoff_vl.addWidget(self._standoff_label)
         standoff_vl.addWidget(self._standoff_spin)
         hl.addLayout(standoff_vl)
-        self._face_grid_radio.toggled.connect(self._on_target_changed)
 
+        self._face_grid_radio.toggled.connect(self._on_target_changed)
         g.add_layout(hl)
+        return g
+
+    # ── Sweep ─────────────────────────────────────────────────────────────
+    def _build_sweep(self) -> _Group:
+        g = _Group('Sweep')
+
+        vl = QVBoxLayout()
+        vl.setSpacing(2)
+        vl.setContentsMargins(0, 0, 0, 0)
+        self._cw_radio  = QRadioButton('CW')
+        self._ccw_radio = QRadioButton('CCW')
+        self._cw_radio.setChecked(True)
+        self._cw_radio.setStyleSheet(_RADIO_CSS)
+        self._ccw_radio.setStyleSheet(_RADIO_CSS)
+        self._sweep_grp = QButtonGroup(self)
+        self._sweep_grp.addButton(self._cw_radio,  0)
+        self._sweep_grp.addButton(self._ccw_radio, 1)
+        vl.addWidget(self._cw_radio)
+        vl.addWidget(self._ccw_radio)
+        g.add_layout(vl)
+        return g
+
+    # ── Waypoints ─────────────────────────────────────────────────────────
+    def _build_waypoints(self) -> _Group:
+        g = _Group('Waypoints')
+
+        vl = QVBoxLayout()
+        vl.setSpacing(3)
+        vl.setContentsMargins(0, 0, 0, 0)
+
+        self._waypoints_check = QCheckBox('Show')
+        self._waypoints_check.setStyleSheet(_CHK_CSS)
+        vl.addWidget(self._waypoints_check)
+
+        interval_hl = QHBoxLayout()
+        interval_hl.setSpacing(4)
+        interval_hl.addWidget(_row_label('Interval'))
+        self._wpt_interval_spin = QDoubleSpinBox()
+        self._wpt_interval_spin.setRange(0.0, 10_000.0)
+        self._wpt_interval_spin.setDecimals(1)
+        self._wpt_interval_spin.setSingleStep(5.0)
+        self._wpt_interval_spin.setValue(0.0)
+        self._wpt_interval_spin.setSpecialValueText('off')
+        self._wpt_interval_spin.setSuffix('  mm')
+        self._wpt_interval_spin.setMinimumWidth(80)
+        self._wpt_interval_spin.setMaximumWidth(110)
+        self._wpt_interval_spin.setStyleSheet(_SPIN_CSS)
+        interval_hl.addWidget(self._wpt_interval_spin)
+        vl.addLayout(interval_hl)
+
+        g.add_layout(vl)
         return g
 
     # ── Path ─────────────────────────────────────────────────────────────
@@ -649,6 +634,29 @@ class SmartRibbon(QWidget):
         g.add(self._gen_btn)
         g.add_spacing(2)
         g.add(self._clear_btn)
+        return g
+
+    # ── Display ───────────────────────────────────────────────────────────
+    def _build_display(self) -> _Group:
+        g = _Group('Display')
+
+        vl = QVBoxLayout()
+        vl.setSpacing(3)
+        vl.setContentsMargins(0, 0, 0, 0)
+
+        self._grid_check   = QCheckBox('Grid')
+        self._arrows_check = QCheckBox('Arrows')
+        self._grid_check.setStyleSheet(_CHK_CSS)
+        self._arrows_check.setStyleSheet(_CHK_CSS)
+
+        vs_btn = _small_btn('Settings', _make_icon('settings', 16))
+        vs_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        vs_btn.clicked.connect(self.view_settings_req)
+
+        vl.addWidget(self._grid_check)
+        vl.addWidget(self._arrows_check)
+        vl.addWidget(vs_btn)
+        g.add_layout(vl)
         return g
 
     # ── Statistics ────────────────────────────────────────────────────────
@@ -827,12 +835,12 @@ class SmartRibbon(QWidget):
         for btn in self._region_btns.values():
             btn.setEnabled(loaded)
         for w in (self._all_btn, self._none_btn, self._select_btn,
-                  self._unit_combo, self._pitch_spin, self._wpt_interval_spin,
+                  self._unit_combo, self._pitch_spin,
                   self._cw_radio, self._ccw_radio,
                   self._bbox_radio, self._face_grid_radio, self._mesh_radio,
                   self._standoff_spin,
+                  self._waypoints_check, self._wpt_interval_spin,
                   self._gen_btn, self._grid_check, self._arrows_check,
-                  self._waypoints_check,
                   self._fit_btn, self._top_btn, self._bot_btn,
                   self._front_btn, self._rear_btn, self._left_btn, self._right_btn):
             w.setEnabled(loaded)
