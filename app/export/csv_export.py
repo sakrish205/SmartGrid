@@ -37,7 +37,16 @@ _FIELDS = [
 ]
 
 
-def export_route_csv(routes: list[PaintRoute], filepath: str) -> None:
+def export_route_csv(
+    routes: list[PaintRoute],
+    filepath: str,
+    show_waypoints: bool = True,
+) -> None:
+    """Export routes to CSV.
+
+    show_waypoints=True  → all TCP waypoints per pass (full resampled path).
+    show_waypoints=False → only start and end point per pass (minimal robot program).
+    """
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=_FIELDS, extrasaction='ignore')
         writer.writeheader()
@@ -60,7 +69,13 @@ def export_route_csv(routes: list[PaintRoute], filepath: str) -> None:
                     round(float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1))), 3)
                     if len(p.points) >= 2 else 0.0
                 )
-                for i, pt in enumerate(p.points):
+                # If waypoints are disabled, only export start and end of each pass.
+                pts_to_write = (
+                    p.points if show_waypoints
+                    else p.points[[0, -1]]
+                )
+                for i, pt in enumerate(pts_to_write):
+                    pt_label = i if show_waypoints else ([0, len(p.points) - 1][i])
                     writer.writerow({
                         'seq_id':          seq_id,
                         'segment_type':    'pass',
@@ -75,7 +90,7 @@ def export_route_csv(routes: list[PaintRoute], filepath: str) -> None:
                         'is_air_move':     '',
                         'sweep_direction': sweep_dir,
                         'length_mm':       seg_len if i == 0 else '',
-                        'pt_idx':          i,
+                        'pt_idx':          pt_label,
                         'x': round(float(pt[0]), 4),
                         'y': round(float(pt[1]), 4),
                         'z': round(float(pt[2]), 4),

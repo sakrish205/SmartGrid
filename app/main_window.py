@@ -200,8 +200,8 @@ class MainWindow(QMainWindow):
         self._ribbon.clear_requested.connect(self._clear_paths)
         self._ribbon.sweep_changed.connect(self._on_sweep_changed)
         self._ribbon.waypoints_changed.connect(self._refresh_route_display)
-        self._ribbon.spacing_changed.connect(self._on_generate)   # Pt Interval change → regenerate
-        self._ribbon.pitch_changed.connect(self._on_generate)     # Spray pitch change → regenerate
+        # pitch_changed and spacing_changed no longer auto-generate —
+        # settings are applied only when the user clicks Generate Path.
         self._ribbon.export_json.connect(self._export_json)
         self._ribbon.export_csv.connect(self._export_csv)
         self._ribbon.view_settings_req.connect(self._open_view_settings)
@@ -540,7 +540,10 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, 'Export JSON', '', 'JSON (*.json)')
         if path:
             self.statusBar().showMessage('Exporting toolpath...')
-            export_route_json(self._current_routes, path)
+            export_route_json(
+                self._current_routes, path,
+                show_waypoints=self._ribbon.is_show_waypoints(),
+            )
             self.statusBar().showMessage(f'Exported: {path}')
 
     def _export_csv(self) -> None:
@@ -550,5 +553,8 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, 'Export CSV', '', 'CSV (*.csv)')
         if path:
             self.statusBar().showMessage('Exporting toolpath...')
-            export_route_csv(self._current_routes, path)
+            export_route_csv(
+                self._current_routes, path,
+                show_waypoints=self._ribbon.is_show_waypoints(),
+            )
             self.statusBar().showMessage(f'Exported: {path}')
