@@ -17,6 +17,7 @@ def generate_bbox_route(
     direction: str = 'horizontal',   # 'horizontal' | 'vertical'
     direction_offset: int = 0,       # 0=CW (default), 1=CCW (flip first pass)
     waypoint_spacing_mm: float = 0.0,  # 0 = no resampling; >0 = uniform waypoints
+    standoff_mm: float = 0.0,          # outward offset from the face plane
 ) -> PaintRoute:
     """Return a PaintRoute of parallel passes on the named bbox face.
 
@@ -43,6 +44,7 @@ def generate_bbox_route(
 
     face_axis, face_sign = face_map[region]
     face_pos = maxs[face_axis] if face_sign > 0 else mins[face_axis]
+    face_pos += face_sign * standoff_mm   # shift outward by standoff distance
 
     # Horizontal base axes for each face
     if region in ('TOP', 'BOTTOM'):

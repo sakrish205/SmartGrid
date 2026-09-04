@@ -421,6 +421,8 @@ class MainWindow(QMainWindow):
         path_target = self._ribbon.get_path_target()
         if path_target == 'bbox':
             self._generate_bbox(spray_mm)
+        elif path_target == 'face_grid':
+            self._generate_face_grid(spray_mm)
         else:
             self._generate_mesh(spray_mm)
 
@@ -452,6 +454,52 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, 'Generation error',
                     f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
                 return
+        self._on_route_ready(routes)
+
+    def _generate_face_grid(self, spray_mm: float) -> None:
+        """Face Grid: bbox passes fitted to selected region's own vertex bounds + standoff."""
+        if not self._selected_regions:
+            QMessageBox.warning(self, 'No selection',
+                'Select a bounding box face first, then generate.')
+            return
+        mesh      = self._model.data.trimesh_mesh
+        up        = self._model.data.up_axis
+        direction = self._ribbon.get_direction()
+        v_mm      = self._ribbon.get_v_width_mm() or spray_mm
+        offset    = 1 if self._ribbon.is_direction_flipped() else 0
+        wpt_mm    = self._ribbon.get_waypoint_spacing_mm()
+        standoff  = self._ribbon.get_standoff_mm()
+        routes: list[PaintRoute] = []
+        for region in sorted(self._selected_regions):
+            face_indices = self._model.get_region_faces(region)
+            if len(face_indices) == 0:
+                continue
+            # Tight bounds from this region's own vertices (not full mesh bbox)
+            region_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
+            rmin = region_verts.min(axis=0)
+            rmax = region_verts.max(axis=0)
+            bounds = (float(rmin[0]), float(rmax[0]),
+                      float(rmin[1]), float(rmax[1]),
+                      float(rmin[2]), float(rmax[2]))
+            try:
+                if direction in ('horizontal', 'both'):
+                    routes.append(_bbox_generator.generate_bbox_route(
+                        region, bounds, spray_mm, up,
+                        direction='horizontal', direction_offset=offset,
+                        waypoint_spacing_mm=wpt_mm, standoff_mm=standoff))
+                if direction in ('vertical', 'both'):
+                    routes.append(_bbox_generator.generate_bbox_route(
+                        region, bounds, v_mm, up,
+                        direction='vertical', direction_offset=offset,
+                        waypoint_spacing_mm=wpt_mm, standoff_mm=standoff))
+            except Exception as exc:
+                QMessageBox.critical(self, 'Generation error',
+                    f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
+                return
+        if not routes:
+            QMessageBox.warning(self, 'No faces',
+                'Selected regions have no classified faces.')
+            return
         self._on_route_ready(routes)
 
     def _generate_mesh(self, spray_mm: float) -> None:
