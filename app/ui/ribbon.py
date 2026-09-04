@@ -361,6 +361,7 @@ class SmartRibbon(QWidget):
     view_set            = Signal(str)   # direction string
     grid_changed        = Signal()
     arrows_changed      = Signal()
+    waypoints_changed   = Signal()
     region_toggled      = Signal(str, bool)
     select_mode_changed = Signal(bool)
     generate_requested  = Signal()
@@ -444,10 +445,12 @@ class SmartRibbon(QWidget):
         row2.setSpacing(6)
         row2.setContentsMargins(0, 0, 0, 0)
 
-        self._grid_check   = QCheckBox('Grid')
-        self._arrows_check = QCheckBox('Arrows')
+        self._grid_check      = QCheckBox('Grid')
+        self._arrows_check    = QCheckBox('Arrows')
+        self._waypoints_check = QCheckBox('Waypoints')
         self._grid_check.setStyleSheet(_CHK_CSS)
         self._arrows_check.setStyleSheet(_CHK_CSS)
+        self._waypoints_check.setStyleSheet(_CHK_CSS)
 
         vs_btn = _small_btn('Settings', _make_icon('settings', 16))
         vs_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -455,6 +458,7 @@ class SmartRibbon(QWidget):
 
         row2.addWidget(self._grid_check)
         row2.addWidget(self._arrows_check)
+        row2.addWidget(self._waypoints_check)
         row2.addSpacing(4)
         row2.addWidget(vs_btn)
 
@@ -549,8 +553,22 @@ class SmartRibbon(QWidget):
         self._pitch_spin.setStyleSheet(_SPIN_CSS)
         pitch_hl.addWidget(self._pitch_spin)
 
+        interval_hl = QHBoxLayout()
+        interval_hl.setSpacing(3)
+        interval_hl.addWidget(_row_label('Pt Interval'))
+        self._wpt_interval_spin = QDoubleSpinBox()
+        self._wpt_interval_spin.setRange(0.0, 10_000.0)
+        self._wpt_interval_spin.setDecimals(1)
+        self._wpt_interval_spin.setValue(0.0)
+        self._wpt_interval_spin.setSpecialValueText('off')
+        self._wpt_interval_spin.setSuffix('  mm')
+        self._wpt_interval_spin.setFixedWidth(90)
+        self._wpt_interval_spin.setStyleSheet(_SPIN_CSS)
+        interval_hl.addWidget(self._wpt_interval_spin)
+
         form_vl.addLayout(unit_hl)
         form_vl.addLayout(pitch_hl)
+        form_vl.addLayout(interval_hl)
         hl.addLayout(form_vl)
 
         hl.addWidget(_mk_vsep())
@@ -581,7 +599,7 @@ class SmartRibbon(QWidget):
         target_vl.addWidget(_row_label('Path on'))
         self._bbox_radio = QRadioButton('Boundary Box')
         self._mesh_radio = QRadioButton('Mesh Surface')
-        self._bbox_radio.setChecked(True)
+        self._mesh_radio.setChecked(True)
         self._bbox_radio.setStyleSheet(_RADIO_CSS)
         self._mesh_radio.setStyleSheet(_RADIO_CSS)
         target_grp = QButtonGroup(self)
@@ -657,6 +675,7 @@ class SmartRibbon(QWidget):
 
         self._grid_check.toggled.connect(lambda _: self.grid_changed.emit())
         self._arrows_check.toggled.connect(lambda _: self.arrows_changed.emit())
+        self._waypoints_check.toggled.connect(lambda _: self.waypoints_changed.emit())
 
         for region, btn in self._region_btns.items():
             btn.toggled.connect(
@@ -732,6 +751,13 @@ class SmartRibbon(QWidget):
     def is_show_arrows(self) -> bool:
         return self._arrows_check.isChecked()
 
+    def is_show_waypoints(self) -> bool:
+        return self._waypoints_check.isChecked()
+
+    def get_waypoint_spacing_mm(self) -> float:
+        """0.0 = disabled (no resampling)."""
+        return self._wpt_interval_spin.value()
+
     # ------------------------------------------------------------------
     # Public state setters (called by MainWindow)
     # ------------------------------------------------------------------
@@ -740,10 +766,11 @@ class SmartRibbon(QWidget):
         for btn in self._region_btns.values():
             btn.setEnabled(loaded)
         for w in (self._all_btn, self._none_btn, self._select_btn,
-                  self._unit_combo, self._pitch_spin,
+                  self._unit_combo, self._pitch_spin, self._wpt_interval_spin,
                   self._cw_radio, self._ccw_radio,
                   self._bbox_radio, self._mesh_radio,
                   self._gen_btn, self._grid_check, self._arrows_check,
+                  self._waypoints_check,
                   self._fit_btn, self._top_btn, self._bot_btn,
                   self._front_btn, self._rear_btn, self._left_btn, self._right_btn):
             w.setEnabled(loaded)

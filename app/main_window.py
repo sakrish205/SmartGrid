@@ -63,11 +63,18 @@ class _PathWorker(QThread):
     finished = Signal(object)
     error    = Signal(str)
 
-    def __init__(self, mesh_data: MeshData, pairs: list, spray_mm: float) -> None:
+    def __init__(
+        self,
+        mesh_data: MeshData,
+        pairs: list,
+        spray_mm: float,
+        waypoint_spacing_mm: float = 0.0,
+    ) -> None:
         super().__init__()
-        self._mesh_data = mesh_data
-        self._pairs     = pairs
-        self._spray_mm  = spray_mm
+        self._mesh_data          = mesh_data
+        self._pairs              = pairs
+        self._spray_mm           = spray_mm
+        self._waypoint_spacing   = waypoint_spacing_mm
 
     def run(self) -> None:
         try:
@@ -78,6 +85,7 @@ class _PathWorker(QThread):
                     region_id=region_id,
                     region_face_indices=face_indices,
                     spray_width_mm=self._spray_mm,
+                    waypoint_spacing_mm=self._waypoint_spacing,
                 ))
             self.finished.emit(routes)
         except Exception as exc:
@@ -191,6 +199,7 @@ class MainWindow(QMainWindow):
         self._ribbon.generate_requested.connect(self._on_generate)
         self._ribbon.clear_requested.connect(self._clear_paths)
         self._ribbon.sweep_changed.connect(self._on_sweep_changed)
+        self._ribbon.waypoints_changed.connect(self._refresh_route_display)
         self._ribbon.export_json.connect(self._export_json)
         self._ribbon.export_csv.connect(self._export_csv)
         self._ribbon.view_settings_req.connect(self._open_view_settings)
@@ -267,6 +276,7 @@ class MainWindow(QMainWindow):
             self._viewer.show_route(
                 self._current_routes,
                 show_arrows=self._ribbon.is_show_arrows(),
+                show_waypoints=self._ribbon.is_show_waypoints(),
             )
 
     # ------------------------------------------------------------------
@@ -416,17 +426,20 @@ class MainWindow(QMainWindow):
         direction = self._ribbon.get_direction()
         v_mm      = self._ribbon.get_v_width_mm() or spray_mm
         offset    = 1 if self._ribbon.is_direction_flipped() else 0
+        wpt_mm    = self._ribbon.get_waypoint_spacing_mm()
         routes: list[PaintRoute] = []
         for region in sorted(self._selected_regions):
             try:
                 if direction in ('horizontal', 'both'):
                     routes.append(_bbox_generator.generate_bbox_route(
                         region, bounds, spray_mm, up,
-                        direction='horizontal', direction_offset=offset))
+                        direction='horizontal', direction_offset=offset,
+                        waypoint_spacing_mm=wpt_mm))
                 if direction in ('vertical', 'both'):
                     routes.append(_bbox_generator.generate_bbox_route(
                         region, bounds, v_mm, up,
-                        direction='vertical', direction_offset=offset))
+                        direction='vertical', direction_offset=offset,
+                        waypoint_spacing_mm=wpt_mm))
             except Exception as exc:
                 QMessageBox.critical(self, 'Generation error',
                     f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
@@ -443,9 +456,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'No selection',
                 'Select bounding box regions first.')
             return
+        wpt_mm = self._ribbon.get_waypoint_spacing_mm()
         self._ribbon.set_generating(True)
         self.statusBar().showMessage('Generating mesh paths...')
-        worker = _PathWorker(self._model.data, pairs, spray_mm)
+        worker = _PathWorker(self._model.data, pairs, spray_mm,
+                             waypoint_spacing_mm=wpt_mm)
         worker.finished.connect(self._on_route_ready)
         worker.error.connect(self._on_route_error)
         self._worker = worker
@@ -454,7 +469,11 @@ class MainWindow(QMainWindow):
     def _on_route_ready(self, routes: list[PaintRoute]) -> None:
         self._ribbon.set_generating(False)
         self._current_routes = routes
-        self._viewer.show_route(routes, show_arrows=self._ribbon.is_show_arrows())
+        self._viewer.show_route(
+            routes,
+            show_arrows=self._ribbon.is_show_arrows(),
+            show_waypoints=self._ribbon.is_show_waypoints(),
+        )
         self._ribbon.update_route_stats(routes, self._ribbon.current_unit)
         self._ribbon.set_path_exists(bool(routes))
         total_passes = sum(r.total_passes for r in routes)
@@ -467,6 +486,7 @@ class MainWindow(QMainWindow):
             self._viewer.show_route(
                 self._current_routes,
                 show_arrows=self._ribbon.is_show_arrows(),
+                show_waypoints=self._ribbon.is_show_waypoints(),
             )
 
     def _on_route_error(self, message: str) -> None:

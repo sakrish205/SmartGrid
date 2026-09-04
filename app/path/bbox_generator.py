@@ -6,6 +6,7 @@ For crosshatch, the caller makes two calls and gets two separate routes.
 from __future__ import annotations
 import numpy as np
 from app.path.path_model import PaintPass, Connection, PaintRoute
+from app.path.resampler import resample_arc
 
 
 def generate_bbox_route(
@@ -15,6 +16,7 @@ def generate_bbox_route(
     up_axis: int,
     direction: str = 'horizontal',   # 'horizontal' | 'vertical'
     direction_offset: int = 0,       # 0=CW (default), 1=CCW (flip first pass)
+    waypoint_spacing_mm: float = 0.0,  # 0 = no resampling; >0 = uniform waypoints
 ) -> PaintRoute:
     """Return a PaintRoute of parallel passes on the named bbox face.
 
@@ -70,6 +72,7 @@ def generate_bbox_route(
         region=region,
         direction=direction,
         direction_offset=direction_offset,
+        waypoint_spacing_mm=waypoint_spacing_mm,
     )
 
     connections: list[Connection] = []
@@ -115,6 +118,7 @@ def _make_passes(
     region: str,
     direction: str,
     direction_offset: int = 0,
+    waypoint_spacing_mm: float = 0.0,
 ) -> list[PaintPass]:
     step_min = mins[step_axis]
     step_max = maxs[step_axis]
@@ -143,6 +147,9 @@ def _make_passes(
         pts = np.array([pt_a, pt_b], dtype=float)
         if not is_forward:
             pts = pts[::-1]
+
+        if waypoint_spacing_mm > 0:
+            pts = resample_arc(pts, waypoint_spacing_mm)
 
         passes.append(PaintPass(
             id=pass_id,

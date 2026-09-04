@@ -8,12 +8,14 @@ from scipy.spatial import cKDTree
 
 from app.mesh.preprocessor import MeshData
 from app.path.path_model import PaintPass, Connection
+from app.path.resampler import rdp_simplify
 
 
 def connect_passes(
     primary_passes: list[PaintPass],
     mesh_data: MeshData,
     region_face_indices: np.ndarray,
+    simplify_epsilon: float = 1.0,   # mm — RDP on boundary walk
 ) -> list[Connection]:
     """Connect adjacent primary passes by walking the selected-face boundary."""
     if len(primary_passes) < 2:
@@ -44,11 +46,12 @@ def connect_passes(
 
         # Connector: pass endpoint → boundary vertices → next pass start
         walk_pts = mesh_data.trimesh_mesh.vertices[bpath]
-        pts = np.vstack([
+        raw_pts = np.vstack([
             end_pt[np.newaxis],
             walk_pts,
             start_pt[np.newaxis],
         ])
+        pts = rdp_simplify(raw_pts, simplify_epsilon)
 
         connections.append(Connection(
             id=i,

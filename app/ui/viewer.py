@@ -394,7 +394,12 @@ class MeshViewer(QWidget):
     # Route visualisation
     # ------------------------------------------------------------------
 
-    def show_route(self, routes: list[PaintRoute], show_arrows: bool = False) -> None:
+    def show_route(
+        self,
+        routes: list[PaintRoute],
+        show_arrows: bool = False,
+        show_waypoints: bool = False,
+    ) -> None:
         self.clear_route()
 
         # Arrow size — 2% of the longest bbox extent, clamped to a sensible range
@@ -429,6 +434,19 @@ class MeshViewer(QWidget):
                         line_width=float(self._colors.get('arrow_line_width', '4.0')),
                     )
 
+                if show_waypoints and len(paint_pass.points) >= 1:
+                    wpt_color  = self._colors.get('waypoint', '#FFD700')
+                    wpt_size   = float(self._colors.get('waypoint_size', '8.0'))
+                    wpt_cloud  = pv.PolyData(paint_pass.points)
+                    wpt_actor  = self.plotter.add_mesh(
+                        wpt_cloud,
+                        color=wpt_color,
+                        point_size=wpt_size,
+                        render_points_as_spheres=True,
+                        reset_camera=False,
+                    )
+                    self._actors[f'wpt_{ri}_{paint_pass.id}_{paint_pass.sub_index}'] = wpt_actor
+
             for conn in route.connections:
                 if len(conn.points) < 2:
                     continue
@@ -461,13 +479,16 @@ class MeshViewer(QWidget):
         fwd_rgb = _hex_to_rgb(colors['pass_forward'])
         rev_rgb = _hex_to_rgb(colors['pass_reverse'])
         con_rgb = _hex_to_rgb(colors['connector'])
+        wpt_rgb = _hex_to_rgb(colors.get('waypoint', '#FFD700'))
+        wpt_size = float(colors.get('waypoint_size', '8.0'))
         for key, actor in self._actors.items():
             if key.startswith('pass_'):
-                # is_forward stored in key parity — re-derive from actor color
-                # Simpler: store nothing, just rerun show_route.
-                pass
+                pass  # rerun show_route to change pass colors
             elif key.startswith('conn_'):
                 actor.GetProperty().SetColor(*con_rgb)
+            elif key.startswith('wpt_'):
+                actor.GetProperty().SetColor(*wpt_rgb)
+                actor.GetProperty().SetPointSize(wpt_size)
             elif key.startswith('bbox_grid_'):
                 actor.GetProperty().SetColor(*_hex_to_rgb(colors['grid']))
             elif key.startswith('bbox_face_'):
@@ -480,7 +501,7 @@ class MeshViewer(QWidget):
         self.plotter.render()
 
     def clear_route(self) -> None:
-        keys = [k for k in self._actors if k.startswith(('pass_', 'conn_', 'arr_'))]
+        keys = [k for k in self._actors if k.startswith(('pass_', 'conn_', 'arr_', 'wpt_'))]
         for k in keys:
             self.plotter.remove_actor(self._actors.pop(k))
         self.plotter.render()
