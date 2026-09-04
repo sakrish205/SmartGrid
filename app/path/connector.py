@@ -1,150 +1,29 @@
-"""Boundary-following connectors between adjacent paint passes."""
+"""Straight-line air connectors between adjacent paint passes."""
 from __future__ import annotations
-from collections import defaultdict, deque
-from typing import Optional
-
 import numpy as np
-from scipy.spatial import cKDTree
-
 from app.mesh.preprocessor import MeshData
 from app.path.path_model import PaintPass, Connection
-from app.path.resampler import rdp_simplify
 
 
 def connect_passes(
     primary_passes: list[PaintPass],
     mesh_data: MeshData,
     region_face_indices: np.ndarray,
-    simplify_epsilon: float = 1.0,   # mm — RDP on boundary walk
+    simplify_epsilon: float = 1.0,
 ) -> list[Connection]:
-    """Connect adjacent primary passes by walking the selected-face boundary."""
+    """Connect adjacent primary passes with straight-line air moves."""
     if len(primary_passes) < 2:
         return []
 
-    bverts, badj, bpositions = _build_boundary_graph(
-        mesh_data.trimesh_mesh, region_face_indices
-    )
-    has_boundary = bverts is not None
-    tree = cKDTree(bpositions) if has_boundary else None
-
     connections: list[Connection] = []
-
     for i in range(len(primary_passes) - 1):
-        end_pt   = primary_passes[i].points[-1]      # (3,)
-        start_pt = primary_passes[i + 1].points[0]   # (3,)
-
-        pts: np.ndarray
-        is_air: bool
-
-        if has_boundary:
-            # Try boundary-following route
-            _, ei = tree.query(end_pt)
-            _, si = tree.query(start_pt)
-            end_vid   = bverts[ei]
-            start_vid = bverts[si]
-            bpath = _bfs_walk(end_vid, start_vid, badj)
-            if bpath is not None:
-                walk_pts = mesh_data.trimesh_mesh.vertices[bpath]
-                raw_pts  = np.vstack([end_pt[np.newaxis], walk_pts, start_pt[np.newaxis]])
-                pts   = rdp_simplify(raw_pts, simplify_epsilon)
-                is_air = False
-            else:
-                # BFS failed — straight air move
-                pts    = np.array([end_pt, start_pt], dtype=float)
-                is_air = True
-        else:
-            # No boundary at all (closed/full mesh) — always straight air move
-            pts    = np.array([end_pt, start_pt], dtype=float)
-            is_air = True
-
+        end_pt   = primary_passes[i].points[-1]
+        start_pt = primary_passes[i + 1].points[0]
         connections.append(Connection(
             id=i,
             from_pass_id=primary_passes[i].id,
             to_pass_id=primary_passes[i + 1].id,
-            points=pts,
-            is_air_move=is_air,
+            points=np.array([end_pt, start_pt], dtype=float),
+            is_air_move=True,
         ))
-
     return connections
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _build_boundary_graph(
-    mesh,
-    region_face_indices: np.ndarray,
-) -> tuple[Optional[list[int]], Optional[dict], Optional[np.ndarray]]:
-    """
-    Identify the boundary of the selected face set and return it as a graph.
-
-    A boundary edge is one shared by exactly one selected face (the other
-    side is either unselected or open mesh boundary).
-
-    Returns
-    -------
-    bverts    : sorted list of boundary vertex indices
-    adj       : dict mapping each boundary vertex → set of adjacent boundary vertices
-    positions : (K, 3) float array of vertex positions for bverts
-    """
-    # Count how many selected faces contain each edge
-    edge_count: dict[tuple[int, int], int] = {}
-    faces = mesh.faces
-    for fi in region_face_indices:
-        f = faces[fi]
-        for j in range(3):
-            a, b = int(f[j]), int(f[(j + 1) % 3])
-            edge = (min(a, b), max(a, b))
-            edge_count[edge] = edge_count.get(edge, 0) + 1
-
-    boundary_edges = [e for e, c in edge_count.items() if c == 1]
-    if not boundary_edges:
-        return None, None, None
-
-    adj: dict[int, set[int]] = defaultdict(set)
-    for v0, v1 in boundary_edges:
-        adj[v0].add(v1)
-        adj[v1].add(v0)
-
-    bverts = sorted(adj.keys())
-    positions = mesh.vertices[bverts].copy()   # (K, 3)
-    return bverts, dict(adj), positions
-
-
-def _bfs_walk(
-    start_vid: int,
-    end_vid: int,
-    adj: dict[int, set[int]],
-    max_nodes: int = 20_000,
-) -> Optional[list[int]]:
-    """Shortest-path BFS through the boundary graph. Returns None if unreachable.
-
-    Uses parent-dict reconstruction — O(V) memory instead of O(V²).
-    max_nodes limits total vertices explored, not path depth.
-    """
-    if start_vid == end_vid:
-        return [start_vid]
-
-    parent: dict[int, Optional[int]] = {start_vid: None}
-    queue: deque[int] = deque([start_vid])
-
-    while queue:
-        if len(parent) > max_nodes:
-            return None   # boundary too large — skip
-        vid = queue.popleft()
-        for nb in adj.get(vid, set()):
-            if nb not in parent:
-                parent[nb] = vid
-                if nb == end_vid:
-                    # Reconstruct path by walking parent pointers
-                    path: list[int] = []
-                    cur: Optional[int] = nb
-                    while cur is not None:
-                        path.append(cur)
-                        cur = parent[cur]
-                    path.reverse()
-                    return path
-                queue.append(nb)
-
-    return None
