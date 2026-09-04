@@ -29,7 +29,16 @@ class _NumpyEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-def export_route_json(routes: list[PaintRoute], filepath: str) -> None:
+def export_route_json(
+    routes: list[PaintRoute],
+    filepath: str,
+    show_waypoints: bool = True,
+) -> None:
+    """Export routes to JSON.
+
+    show_waypoints=True  → full tcp_waypoints array per pass.
+    show_waypoints=False → only start/end in each pass (no tcp_waypoints key).
+    """
     total_passes      = sum(r.total_passes for r in routes)
     total_connections = sum(len(r.connections) for r in routes)
     total_length      = sum(r.total_length_mm for r in routes)
@@ -47,15 +56,16 @@ def export_route_json(routes: list[PaintRoute], filepath: str) -> None:
             "total_length_mm":    round(total_length, 3),
             "regions":            regions,
             "directions":         directions,
+            "waypoints_included": show_waypoints,
         },
-        "routes": [_route_to_dict(r, idx) for idx, r in enumerate(routes)],
+        "routes": [_route_to_dict(r, idx, show_waypoints) for idx, r in enumerate(routes)],
     }
 
     with open(filepath, 'w', encoding='utf-8') as f:
         json.dump(data, f, cls=_NumpyEncoder, indent=2)
 
 
-def _route_to_dict(route: PaintRoute, route_index: int) -> dict:
+def _route_to_dict(route: PaintRoute, route_index: int, show_waypoints: bool = True) -> dict:
     dirs = {p.direction for p in route.passes}
     route_direction = dirs.pop() if len(dirs) == 1 else 'mixed'
 
@@ -78,15 +88,15 @@ def _route_to_dict(route: PaintRoute, route_index: int) -> dict:
         "total_passes":       route.total_passes,
         "total_length_mm":    round(route.total_length_mm, 3),
         "execution_sequence": execution_sequence,
-        "passes":      [_pass_to_dict(p) for p in route.passes],
+        "passes":      [_pass_to_dict(p, show_waypoints) for p in route.passes],
         "connections": [_conn_to_dict(c) for c in route.connections],
     }
 
 
-def _pass_to_dict(p) -> dict:
+def _pass_to_dict(p, show_waypoints: bool = True) -> dict:
     length = float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1))) if len(p.points) >= 2 else 0.0
     pts = [[round(v, 4) for v in row] for row in p.points.tolist()]
-    return {
+    d = {
         "id":             p.id,
         "region_id":      p.region_id,
         "direction":      p.direction,
@@ -96,8 +106,10 @@ def _pass_to_dict(p) -> dict:
         "length_mm":      round(length, 3),
         "start":          pts[0],
         "end":            pts[-1],
-        "tcp_waypoints":  pts,   # TCP positions in execution order — import directly into OLP
     }
+    if show_waypoints:
+        d["tcp_waypoints"] = pts   # full list only when Waypoints checkbox is ON
+    return d
 
 
 def _conn_to_dict(c) -> dict:
