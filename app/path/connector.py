@@ -112,26 +112,35 @@ def _bfs_walk(
     start_vid: int,
     end_vid: int,
     adj: dict[int, set[int]],
-    max_depth: int = 10_000,
+    max_nodes: int = 20_000,
 ) -> Optional[list[int]]:
-    """Shortest-path BFS through the boundary graph. Returns None if unreachable."""
+    """Shortest-path BFS through the boundary graph. Returns None if unreachable.
+
+    Uses parent-dict reconstruction — O(V) memory instead of O(V²).
+    max_nodes limits total vertices explored, not path depth.
+    """
     if start_vid == end_vid:
         return [start_vid]
 
-    queue: deque[list[int]] = deque([[start_vid]])
-    visited: set[int] = {start_vid}
-    depth = 0
+    parent: dict[int, Optional[int]] = {start_vid: None}
+    queue: deque[int] = deque([start_vid])
 
     while queue:
-        path = queue.popleft()
-        depth += 1
-        if depth > max_depth:
-            return None   # boundary too large — skip this connection
-        for nb in adj.get(path[-1], set()):
-            if nb == end_vid:
-                return path + [nb]
-            if nb not in visited:
-                visited.add(nb)
-                queue.append(path + [nb])
+        if len(parent) > max_nodes:
+            return None   # boundary too large — skip
+        vid = queue.popleft()
+        for nb in adj.get(vid, set()):
+            if nb not in parent:
+                parent[nb] = vid
+                if nb == end_vid:
+                    # Reconstruct path by walking parent pointers
+                    path: list[int] = []
+                    cur: Optional[int] = nb
+                    while cur is not None:
+                        path.append(cur)
+                        cur = parent[cur]
+                    path.reverse()
+                    return path
+                queue.append(nb)
 
     return None

@@ -9,7 +9,8 @@ from app.path import connector as _connector
 from app.path.resampler import rdp_simplify, resample_arc
 
 _RDP_EPSILON       = 0.3   # mm — remove micro-jaggies from triangle discretisation
-_MIN_PASS_FRACTION = 0.3   # drop passes shorter than this × spray_width_mm
+_MIN_PASS_FRACTION = 0.15  # drop passes shorter than this × spray_width_mm …
+_MIN_PASS_ABS_MM   = 5.0   # … but never drop passes longer than this absolute floor
 _MAX_ANGLE_DEV_DEG = 40.0  # drop passes whose direction deviates more than this from the primary
 
 
@@ -41,19 +42,20 @@ def _filter_polylines(
     if not polylines:
         return polylines
 
-    min_len   = spray_width_mm * _MIN_PASS_FRACTION
-    cos_limit = np.cos(np.radians(_MAX_ANGLE_DEV_DEG))
-
-    # Primary pass: longest by arc length
+    # Sort by arc length so primary is always index 0 — avoids primary_idx mismatch
+    # when a dense short fragment has more points than the real long pass.
     lengths = [_arc_length(np.asarray(p, dtype=float)) for p in polylines]
-    primary_idx = int(np.argmax(lengths))
-    primary_dir = _dominant_dir(np.asarray(polylines[primary_idx], dtype=float))
+    order   = sorted(range(len(polylines)), key=lambda i: lengths[i], reverse=True)
+    polylines = [polylines[i] for i in order]
+    lengths   = [lengths[i]   for i in order]
 
-    kept = []
-    for i, (poly, arc_len) in enumerate(zip(polylines, lengths)):
-        if i == primary_idx:
-            kept.append(poly)   # always keep primary
-            continue
+    # Minimum length: fraction of spray_width, but never drop passes above the absolute floor
+    min_len   = max(spray_width_mm * _MIN_PASS_FRACTION, _MIN_PASS_ABS_MM)
+    cos_limit = np.cos(np.radians(_MAX_ANGLE_DEV_DEG))
+    primary_dir = _dominant_dir(np.asarray(polylines[0], dtype=float))
+
+    kept = [polylines[0]]   # always keep primary (longest)
+    for poly, arc_len in zip(polylines[1:], lengths[1:]):
         if arc_len < min_len:
             continue            # too short — corner clip
         d = _dominant_dir(np.asarray(poly, dtype=float))
@@ -100,10 +102,8 @@ def generate_route(
         if not polylines:
             continue
 
-        # Sort so the longest chain comes first (primary pass for this level)
-        polylines.sort(key=lambda p: len(p), reverse=True)
-
-        # Drop corner clips and misaligned diagonal fragments
+        # Drop corner clips, diagonal fragments, and sort by arc length
+        # (_filter_polylines handles sorting internally)
         polylines = _filter_polylines(polylines, spray_width_mm)
 
         # Direction alternates by plane index, not by total pass count,

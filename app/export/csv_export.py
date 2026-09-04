@@ -40,7 +40,7 @@ def export_route_csv(routes: list[PaintRoute], filepath: str) -> None:
 
             for p in route.passes:
                 seg_len = (
-                    round(float(np.linalg.norm(p.points[-1] - p.points[0])), 3)
+                    round(float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1))), 3)
                     if len(p.points) >= 2 else 0.0
                 )
                 arrow_dir_str = _arrow_dir(p.points) if len(p.points) >= 2 else ''
@@ -67,7 +67,7 @@ def export_route_csv(routes: list[PaintRoute], filepath: str) -> None:
 
             for c in route.connections:
                 seg_len = (
-                    round(float(np.linalg.norm(c.points[-1] - c.points[0])), 3)
+                    round(float(np.sum(np.linalg.norm(np.diff(c.points, axis=0), axis=1))), 3)
                     if len(c.points) >= 2 else 0.0
                 )
                 for i, pt in enumerate(c.points):

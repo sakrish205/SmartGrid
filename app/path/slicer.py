@@ -19,16 +19,14 @@ def compute_slice_config(
     For arbitrary selections ('selection'), the dominant normal axis of the
     selected faces determines which branch applies.
     """
-    fwd_axis   = (up_axis + 1) % 3
-    right_axis = (up_axis + 2) % 3   # noqa: F841
+    fwd_axis = (up_axis + 1) % 3
 
     if region_id in ('TOP', 'BOTTOM'):
         slice_axis = fwd_axis
     elif region_id in ('FRONT', 'REAR', 'LEFT', 'RIGHT'):
         slice_axis = up_axis
     else:
-        # Arbitrary selection: infer from the dominant normal direction.
-        # If the up axis dominates (mostly horizontal faces) → use fwd_axis.
+        # Arbitrary selection: infer from dominant normal direction.
         if mean_face_normal is not None:
             dominant = int(np.argmax(np.abs(mean_face_normal)))
             slice_axis = fwd_axis if dominant == up_axis else up_axis

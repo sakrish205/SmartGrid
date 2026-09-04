@@ -6,7 +6,7 @@ import numpy as np
 
 def stitch_segments(
     segments: np.ndarray,
-    tolerance: float = 1e-6,
+    tolerance: float = 1e-4,   # 0.1 µm — safe for mm-scale meshes (was 1e-6, too tight)
 ) -> list[np.ndarray]:
     """Take (N, 2, 3) unordered segments, return list of ordered (M, 3) polylines.
 

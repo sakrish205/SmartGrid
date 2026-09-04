@@ -337,6 +337,9 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _on_load_ready(self, model) -> None:
+        if self._load_worker:
+            self._load_worker.deleteLater()
+            self._load_worker = None
         self._model = model
         n_faces = len(model.data.trimesh_mesh.faces)
 
@@ -362,6 +365,9 @@ class MainWindow(QMainWindow):
         )
 
     def _on_load_error(self, message: str) -> None:
+        if self._load_worker:
+            self._load_worker.deleteLater()
+            self._load_worker = None
         QMessageBox.critical(self, 'Load error', message)
         self.statusBar().showMessage('Load failed.')
 
@@ -468,6 +474,9 @@ class MainWindow(QMainWindow):
 
     def _on_route_ready(self, routes: list[PaintRoute]) -> None:
         self._ribbon.set_generating(False)
+        if self._worker:
+            self._worker.deleteLater()
+            self._worker = None
         self._current_routes = routes
         self._viewer.show_route(
             routes,
@@ -491,6 +500,9 @@ class MainWindow(QMainWindow):
 
     def _on_route_error(self, message: str) -> None:
         self._ribbon.set_generating(False)
+        if self._worker:
+            self._worker.deleteLater()
+            self._worker = None
         QMessageBox.critical(self, 'Generation error', message)
         self.statusBar().showMessage('Generation failed.')
 
