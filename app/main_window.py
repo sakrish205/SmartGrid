@@ -267,8 +267,8 @@ class MainWindow(QMainWindow):
         dlg.colors_changed.connect(self._on_colors_changed)
         if dlg.exec():
             self._current_colors = dlg.colors
-        else:
-            self._viewer.apply_colors(self._current_colors)
+        # On cancel: ViewSettingsDialog emits colors_changed with the original
+        # colors, which _on_colors_changed already handles — no extra call needed.
 
     def _on_colors_changed(self, colors: dict[str, str]) -> None:
         self._viewer.apply_colors(colors)

@@ -89,8 +89,9 @@ def generate_bbox_route(
         ))
 
     total_length = sum(
-        float(np.linalg.norm(p.points[-1] - p.points[0]))
+        float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1)))
         for p in all_passes
+        if len(p.points) >= 2
     )
 
     return PaintRoute(

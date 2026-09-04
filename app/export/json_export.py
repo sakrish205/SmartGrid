@@ -75,6 +75,10 @@ def _pass_to_dict(p) -> dict:
         "start":          p.points[0].tolist(),
         "end":            p.points[-1].tolist(),
         "points":         p.points.tolist(),
+        # 'waypoints' is identical to 'points' — explicit alias for OLP import scripts
+        # that expect a dedicated 'waypoints' key (e.g. RoboDK CSV/JSON templates).
+        "waypoints": [{"idx": i, "x": round(pt[0], 4), "y": round(pt[1], 4), "z": round(pt[2], 4)}
+                      for i, pt in enumerate(p.points.tolist())],
     }
 
 

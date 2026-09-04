@@ -41,11 +41,12 @@ class MeshViewer(QWidget):
         self._bbox_solid_mesh: Optional[pv.PolyData] = None
         self._picking_mode: str = 'none'
         self._select_mode: bool = False
+        self._saved_interactor_style = None
 
         # VTK observer handles (two per mode: press + release)
         self._obs_press:   Optional[int] = None
         self._obs_release: Optional[int] = None
-        self._press_pos:   Optional[tuple] = None   # for drag-vs-click detection
+        self._press_pos:   Optional[tuple] = None
 
     # ------------------------------------------------------------------
     # Mesh loading
@@ -163,9 +164,12 @@ class MeshViewer(QWidget):
             if self._press_pos is None:
                 return
             pos = raw.GetEventPosition()
+            press = self._press_pos
             self._press_pos = None
             if self._select_mode:
-                on_click(pos)
+                # Treat as click only if mouse moved less than 5 px (not a drag)
+                if max(abs(pos[0] - press[0]), abs(pos[1] - press[1])) < 5:
+                    on_click(pos)
 
         self._obs_press   = raw.AddObserver('LeftButtonPressEvent',   _press,   1.0)
         self._obs_release = raw.AddObserver('LeftButtonReleaseEvent', _release, 1.0)
@@ -184,10 +188,8 @@ class MeshViewer(QWidget):
             from vtkmodules.vtkInteractionStyle import vtkInteractorStyleUser
             raw.SetInteractorStyle(vtkInteractorStyleUser())
         else:
-            # Restore the original style
-            saved = getattr(self, '_saved_interactor_style', None)
-            if saved is not None:
-                raw.SetInteractorStyle(saved)
+            if self._saved_interactor_style is not None:
+                raw.SetInteractorStyle(self._saved_interactor_style)
                 self._saved_interactor_style = None
         self.plotter.render()
 
@@ -363,9 +365,9 @@ class MeshViewer(QWidget):
             return
 
         if len(selected_face_ids) == 0:
-            # Restore full opacity
+            # Restore full opacity and user-configured mesh color
             base_actor.GetProperty().SetOpacity(1.0)
-            base_actor.GetProperty().SetColor(0.471, 0.565, 0.612)   # #78909c
+            base_actor.GetProperty().SetColor(*_hex_to_rgb(self._colors.get('mesh', '#78909c')))
         else:
             # Dim the base so selected faces stand out
             base_actor.GetProperty().SetOpacity(0.35)

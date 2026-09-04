@@ -803,7 +803,10 @@ class SmartRibbon(QWidget):
 
     def flip_sweep_direction(self) -> None:
         """Toggle CW ↔ CCW and emit sweep_changed once."""
-        self._ccw_radio.setChecked(not self._ccw_radio.isChecked())
+        if self._ccw_radio.isChecked():
+            self._cw_radio.setChecked(True)
+        else:
+            self._ccw_radio.setChecked(True)
         self.sweep_changed.emit()
 
     def set_select_mode(self, active: bool) -> None:
@@ -815,7 +818,6 @@ class SmartRibbon(QWidget):
         self._tri_val.setText(f'{n_faces:,}')
 
     def update_route_stats(self, routes: list, display_unit: str) -> None:
-        from app.path.path_model import UNIT_TO_MM
         total_passes = sum(r.total_passes for r in routes)
         total_conns  = sum(len(r.connections) for r in routes)
         total_mm     = sum(r.total_length_mm for r in routes)
