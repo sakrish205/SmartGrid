@@ -11,15 +11,15 @@ import numpy as np
 from app.path.path_model import PaintRoute
 
 _FIELDS = [
-    'segment_type',    # 'pass' | 'connection'
+    'segment_type',    # 'pass' | 'connection' | 'waypoint'
     'route_index',     # which route (0 = first, etc.)
     'region',          # bbox face: TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT
     'direction',       # 'horizontal' | 'vertical' | '' (connections)
     'pass_id',         # unique pass number within the route
     'is_forward',      # True = forward sweep, False = reversed
     'sub_index',       # 0 = main pass; >0 = extra chain at same slice (holes)
-    'conn_id',         # connection id (blank for passes)
-    'is_air_move',     # True = gun off travel (blank for passes)
+    'conn_id',         # connection id (blank for passes/waypoints)
+    'is_air_move',     # True = gun off travel (blank for passes/waypoints)
     'sweep_direction', # 'CW' or 'CCW' — overall sweep direction for this route
     'length_mm',       # total length of this pass/connection (written on pt_idx=0 only)
     'arrow_direction', # unit vector 'dx,dy,dz' of travel direction (pt_idx=0 only, passes only)
@@ -60,6 +60,21 @@ def export_route_csv(routes: list[PaintRoute], filepath: str) -> None:
                         'length_mm':       seg_len if i == 0 else '',
                         'arrow_direction': arrow_dir_str if i == 0 else '',
                         'pt_idx':          i,
+                        'x': round(float(pt[0]), 4),
+                        'y': round(float(pt[1]), 4),
+                        'z': round(float(pt[2]), 4),
+                    })
+
+            # Waypoint rows — pure TCP positions for OLP import.
+            # Contains only pass_id + pt_idx + xyz; all other metadata lives in
+            # the corresponding 'pass' rows above (join on route_index + pass_id).
+            for p in route.passes:
+                for i, pt in enumerate(p.points):
+                    writer.writerow({
+                        'segment_type': 'waypoint',
+                        'route_index':  route_idx,
+                        'pass_id':      p.id,
+                        'pt_idx':       i,
                         'x': round(float(pt[0]), 4),
                         'y': round(float(pt[1]), 4),
                         'z': round(float(pt[2]), 4),

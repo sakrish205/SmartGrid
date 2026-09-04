@@ -70,12 +70,12 @@ def resample_arc(points: np.ndarray, spacing: float) -> np.ndarray:
     result = np.empty((n_pts, 3), dtype=float)
     for i, s in enumerate(sample_s):
         j = int(np.searchsorted(cum, s, side='right')) - 1
-        j = min(j, len(diffs) - 1)
+        j = max(0, min(j, len(diffs) - 1))   # clamp: searchsorted(-1) → 0
         sl = seg_lens[j]
         t  = (s - cum[j]) / sl if sl > 1e-12 else 0.0
         result[i] = pts[j] + t * diffs[j]
 
-    # Ensure exact endpoints (floating-point rounding safety)
+    # Pin exact endpoints — avoids any floating-point drift at boundaries
     result[0]  = pts[0]
     result[-1] = pts[-1]
     return result

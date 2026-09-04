@@ -6,11 +6,6 @@ from .preprocessor import MeshData
 
 def _region_vectors(up_axis: int) -> dict[str, np.ndarray]:
     """Build direction vectors for all 6 regions given the user's up-axis."""
-    vecs = np.zeros((3, 3), dtype=float)
-    vecs[up_axis, up_axis] = 1.0          # up axis
-    other = [i for i in range(3) if i != up_axis]
-    vecs[0, other[0]] = 1.0 if up_axis != 0 else 0.0
-    # Simpler: just hardcode the three canonical axis assignments
     up = np.zeros(3); up[up_axis] = 1.0
     fwd_axis = (up_axis + 1) % 3
     fwd = np.zeros(3); fwd[fwd_axis] = 1.0
