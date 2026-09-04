@@ -11,7 +11,7 @@ from app.path.resampler import rdp_simplify, resample_arc
 _RDP_EPSILON       = 0.3   # mm — remove micro-jaggies from triangle discretisation
 _MIN_PASS_FRACTION = 0.15  # drop passes shorter than this × spray_width_mm …
 _MIN_PASS_ABS_MM   = 5.0   # … but never drop passes longer than this absolute floor
-_MAX_ANGLE_DEV_DEG = 40.0  # drop passes whose direction deviates more than this from the primary
+_MAX_ANGLE_DEV_DEG = 55.0  # drop passes whose direction deviates more than this from the primary
 
 
 def _arc_length(pts: np.ndarray) -> float:

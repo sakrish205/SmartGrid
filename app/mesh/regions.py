@@ -23,7 +23,7 @@ def _region_vectors(up_axis: int) -> dict[str, np.ndarray]:
 
 def classify_regions(
     mesh_data: MeshData,
-    threshold: float = 0.55,
+    threshold: float = 0.42,
 ) -> dict[str, np.ndarray]:
     """Return mapping region_id -> int array of face indices.
 
