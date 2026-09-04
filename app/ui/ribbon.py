@@ -363,6 +363,7 @@ class SmartRibbon(QWidget):
     arrows_changed      = Signal()
     waypoints_changed   = Signal()
     spacing_changed     = Signal()      # Pt Interval changed → needs regeneration
+    pitch_changed       = Signal()      # Spray pitch changed → needs regeneration
     region_toggled      = Signal(str, bool)
     select_mode_changed = Signal(bool)
     generate_requested  = Signal()
@@ -693,7 +694,7 @@ class SmartRibbon(QWidget):
         self._select_btn.toggled.connect(self.select_mode_changed)
 
         self._unit_combo.currentTextChanged.connect(self._on_unit_changed)
-        self._pitch_spin.valueChanged.connect(lambda _: self.grid_changed.emit())
+        self._pitch_spin.valueChanged.connect(self._on_pitch_changed)
 
         # idClicked fires once per user click (not twice like toggled on both radios)
         self._sweep_grp.idClicked.connect(lambda _: self.sweep_changed.emit())
@@ -703,6 +704,11 @@ class SmartRibbon(QWidget):
 
         self._exp_json_btn.clicked.connect(self.export_json)
         self._exp_csv_btn.clicked.connect(self.export_csv)
+
+    def _on_pitch_changed(self, _value: float) -> None:
+        """Spray pitch changed — update grid display and trigger regeneration."""
+        self.grid_changed.emit()
+        self.pitch_changed.emit()
 
     def _on_waypoints_toggled(self, checked: bool) -> None:
         """When user enables Waypoints and spacing is off, set a sensible default."""
