@@ -149,7 +149,7 @@ def slice_region(
 
         # Stage 1 — Normal direction filter: drop faces not pointing outward.
         # Catches the underside of the mesh and back-faces.
-        outward_mask = (face_normals_here[:, axis] * sign) > 0.15
+        outward_mask = (face_normals_here[:, axis] * sign) > 0.05
         if outward_mask.sum() > 0:
             filtered = filtered[outward_mask]
 

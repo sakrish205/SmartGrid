@@ -9,10 +9,10 @@ from app.path import connector as _connector
 from app.path.resampler import rdp_simplify, resample_arc
 
 _RDP_EPSILON       = 0.3   # mm — remove micro-jaggies from triangle discretisation
-_MIN_PASS_FRACTION = 0.30  # drop passes shorter than 30% of spray_width_mm …
-_MIN_PASS_ABS_MM   = 15.0  # … but never drop passes longer than this absolute floor
-_MAX_ANGLE_DEV_DEG = 55.0  # drop passes whose direction deviates more than this from the primary
-_MAX_SUB_PER_LEVEL = 4     # max sub-index passes per slice level (prevents fragment explosion)
+_MIN_PASS_FRACTION = 0.10  # drop passes shorter than 10% of spray_width_mm …
+_MIN_PASS_ABS_MM   = 5.0   # … but never drop passes longer than this absolute floor
+_MAX_ANGLE_DEV_DEG = 65.0  # drop passes whose direction deviates more than this from the primary
+_MAX_SUB_PER_LEVEL = 6     # max sub-index passes per slice level (prevents fragment explosion)
 
 
 def _arc_length(pts: np.ndarray) -> float:
