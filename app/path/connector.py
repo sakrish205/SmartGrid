@@ -24,36 +24,37 @@ def connect_passes(
     bverts, badj, bpositions = _build_boundary_graph(
         mesh_data.trimesh_mesh, region_face_indices
     )
-    if bverts is None:
-        return []
+    has_boundary = bverts is not None
+    tree = cKDTree(bpositions) if has_boundary else None
 
-    tree = cKDTree(bpositions)
     connections: list[Connection] = []
 
     for i in range(len(primary_passes) - 1):
         end_pt   = primary_passes[i].points[-1]      # (3,)
         start_pt = primary_passes[i + 1].points[0]   # (3,)
 
-        # Nearest boundary vertices to each pass endpoint
-        _, ei = tree.query(end_pt)
-        _, si = tree.query(start_pt)
-        end_vid   = bverts[ei]
-        start_vid = bverts[si]
+        pts: np.ndarray
+        is_air: bool
 
-        bpath = _bfs_walk(end_vid, start_vid, badj)
-        if bpath is not None:
-            # Boundary-following connector
-            walk_pts = mesh_data.trimesh_mesh.vertices[bpath]
-            raw_pts = np.vstack([
-                end_pt[np.newaxis],
-                walk_pts,
-                start_pt[np.newaxis],
-            ])
-            pts = rdp_simplify(raw_pts, simplify_epsilon)
-            is_air = False
+        if has_boundary:
+            # Try boundary-following route
+            _, ei = tree.query(end_pt)
+            _, si = tree.query(start_pt)
+            end_vid   = bverts[ei]
+            start_vid = bverts[si]
+            bpath = _bfs_walk(end_vid, start_vid, badj)
+            if bpath is not None:
+                walk_pts = mesh_data.trimesh_mesh.vertices[bpath]
+                raw_pts  = np.vstack([end_pt[np.newaxis], walk_pts, start_pt[np.newaxis]])
+                pts   = rdp_simplify(raw_pts, simplify_epsilon)
+                is_air = False
+            else:
+                # BFS failed — straight air move
+                pts    = np.array([end_pt, start_pt], dtype=float)
+                is_air = True
         else:
-            # BFS failed (disconnected boundary or too large) — straight air move
-            pts = np.array([end_pt, start_pt], dtype=float)
+            # No boundary at all (closed/full mesh) — always straight air move
+            pts    = np.array([end_pt, start_pt], dtype=float)
             is_air = True
 
         connections.append(Connection(
