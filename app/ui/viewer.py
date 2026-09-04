@@ -299,31 +299,33 @@ class MeshViewer(QWidget):
             self._actors['face_grid_edge'] = pair_std[1]
             act_std = pair_std[0]
 
-        # Optional grid lines on the spray plane
+        # Optional grid lines on the spray plane (one line per spray step)
         if show_grid and standoff_corners is not None and step_spacing > 0:
             c = standoff_corners.astype(float)
-            # Two in-plane edge vectors from corner 0
-            edge_a = c[1] - c[0]   # pass direction
-            edge_b = c[3] - c[0]   # step direction
+            edge_a = c[1] - c[0]   # pass direction (full width)
+            edge_b = c[3] - c[0]   # step direction (full height)
             step_len = float(np.linalg.norm(edge_b))
             if step_len > 0:
-                n_lines = max(1, int(step_len / step_spacing))
-                pts_list, cells_list = [], []
-                offset = 0
-                for i in range(1, n_lines):
-                    t = i / n_lines
+                n_lines = max(0, round(step_len / step_spacing) - 1)
+                pts_list: list = []
+                cells_list: list = []
+                seg = 0
+                for i in range(1, n_lines + 1):
+                    t = i * step_spacing / step_len
+                    if t >= 1.0:
+                        break
                     p0 = c[0] + t * edge_b
                     p1 = p0 + edge_a
                     pts_list.extend([p0, p1])
-                    cells_list.extend([2, offset, offset + 1])
-                    offset += 2
+                    cells_list.extend([2, seg, seg + 1])
+                    seg += 2
                 if pts_list:
-                    grid_pts = np.array(pts_list, dtype=float)
+                    grid_pts   = np.array(pts_list,   dtype=float)
                     grid_cells = np.array(cells_list, dtype=np.int_)
-                    grid_mesh = pv.PolyData(grid_pts, lines=grid_cells)
+                    grid_mesh  = pv.PolyData(grid_pts, lines=grid_cells)
                     act_grid = self.plotter.add_mesh(
                         grid_mesh, color=self._SPRAY_PLANE_COLOR,
-                        opacity=0.5, line_width=1.0,
+                        opacity=0.7, line_width=2.0,
                         lighting=False, reset_camera=False,
                     )
                     self._actors['face_grid_spray_grid'] = act_grid
