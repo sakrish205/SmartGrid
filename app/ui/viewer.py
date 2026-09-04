@@ -113,9 +113,17 @@ class MeshViewer(QWidget):
         self._actors['base_mesh'] = actor_mesh
         actor_mesh.SetPickable(False)
 
-        # Wireframe bbox cage
+        # Wireframe bbox cage — proper rectangular box, not mesh outline
+        bounds = mesh_data.pyvista_mesh.bounds
+        pad = max(bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4]) * 0.001
+        padded = (
+            bounds[0]-pad, bounds[1]+pad,
+            bounds[2]-pad, bounds[3]+pad,
+            bounds[4]-pad, bounds[5]+pad,
+        )
+        bbox_box = pv.Box(bounds=bounds)
         actor_wire = self.plotter.add_mesh(
-            mesh_data.pyvista_mesh.outline(),
+            bbox_box.extract_feature_edges(),
             color=self._colors['bbox_wire'],
             line_width=2.5,
             reset_camera=False,
@@ -124,13 +132,6 @@ class MeshViewer(QWidget):
         actor_wire.SetPickable(False)
 
         # Near-invisible solid box — click target for bbox mode
-        bounds = mesh_data.pyvista_mesh.bounds
-        pad = max(bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4]) * 0.001
-        padded = (
-            bounds[0]-pad, bounds[1]+pad,
-            bounds[2]-pad, bounds[3]+pad,
-            bounds[4]-pad, bounds[5]+pad,
-        )
         self._bbox_solid_mesh = pv.Box(bounds=padded)
         actor_box = self.plotter.add_mesh(
             self._bbox_solid_mesh,
@@ -232,6 +233,106 @@ class MeshViewer(QWidget):
                 raw.SetInteractorStyle(self._saved_interactor_style)
                 self._saved_interactor_style = None
         self.plotter.render()
+
+    def show_bbox(self, visible: bool) -> None:
+        """Show or hide the bounding box wire cage and solid click target."""
+        for key in ('bbox_wire', 'bbox_solid'):
+            actor = self._actors.get(key)
+            if actor is not None:
+                actor.SetVisibility(visible)
+        self.plotter.render()
+
+    # Plane colours — match legend entries
+    _FACE_PLANE_COLOR  = '#1976D2'   # blue  — Face Plane  (bbox face, zero standoff)
+    _SPRAY_PLANE_COLOR = '#ff3300'   # red   — Spray Plane (robot path at standoff)
+
+    def show_face_grid_planes(
+        self,
+        ref_corners: np.ndarray | None,
+        standoff_corners: np.ndarray | None,
+        step_spacing: float = 0.0,
+        show_grid: bool = False,
+    ) -> None:
+        """Show the two Face Grid reference planes with a named colour legend.
+
+        ref_corners      — Face Plane  (blue): bbox face at zero standoff.
+        standoff_corners — Spray Plane (red):  robot path at actual standoff.
+        Pass None for either to remove it.
+        """
+        for key in list(k for k in self._actors if k.startswith('face_grid_')):
+            old = self._actors.pop(key, None)
+            if old is not None:
+                self.plotter.remove_actor(old)
+
+        def _add_plane(corners, color, fill_opacity, line_width):
+            if corners is None or len(corners) != 4:
+                return None
+            faces = np.array([[4, 0, 1, 2, 3]], dtype=np.int_)
+            quad  = pv.PolyData(corners.astype(float), faces)
+            # Semi-transparent fill so both planes stay visible when stacked
+            act_fill = self.plotter.add_mesh(
+                quad, color=color, opacity=fill_opacity,
+                show_edges=False, lighting=False, reset_camera=False,
+            )
+            # Solid border lines drawn on top of the fill
+            edges = quad.extract_feature_edges(
+                boundary_edges=True, non_manifold_edges=False,
+                feature_edges=False, manifold_edges=False,
+            )
+            act_edge = self.plotter.add_mesh(
+                edges, color=color, line_width=line_width,
+                lighting=False, reset_camera=False,
+            )
+            return act_fill, act_edge
+
+        pair_ref = _add_plane(ref_corners,      self._FACE_PLANE_COLOR,  0.12, 2.5)
+        pair_std = _add_plane(standoff_corners, self._SPRAY_PLANE_COLOR, 0.22, 2.5)
+
+        # Store each fill + edge actor pair under its key
+        act_ref = act_std = None
+        if pair_ref:
+            self._actors['face_grid_ref_fill'] = pair_ref[0]
+            self._actors['face_grid_ref_edge'] = pair_ref[1]
+            act_ref = pair_ref[0]
+        if pair_std:
+            self._actors['face_grid_fill'] = pair_std[0]
+            self._actors['face_grid_edge'] = pair_std[1]
+            act_std = pair_std[0]
+
+        # Optional grid lines on the spray plane
+        if show_grid and standoff_corners is not None and step_spacing > 0:
+            c = standoff_corners.astype(float)
+            # Two in-plane edge vectors from corner 0
+            edge_a = c[1] - c[0]   # pass direction
+            edge_b = c[3] - c[0]   # step direction
+            step_len = float(np.linalg.norm(edge_b))
+            if step_len > 0:
+                n_lines = max(1, int(step_len / step_spacing))
+                pts_list, cells_list = [], []
+                offset = 0
+                for i in range(1, n_lines):
+                    t = i / n_lines
+                    p0 = c[0] + t * edge_b
+                    p1 = p0 + edge_a
+                    pts_list.extend([p0, p1])
+                    cells_list.extend([2, offset, offset + 1])
+                    offset += 2
+                if pts_list:
+                    grid_pts = np.array(pts_list, dtype=float)
+                    grid_cells = np.array(cells_list, dtype=np.int_)
+                    grid_mesh = pv.PolyData(grid_pts, lines=grid_cells)
+                    act_grid = self.plotter.add_mesh(
+                        grid_mesh, color=self._SPRAY_PLANE_COLOR,
+                        opacity=0.5, line_width=1.0,
+                        lighting=False, reset_camera=False,
+                    )
+                    self._actors['face_grid_spray_grid'] = act_grid
+
+        self.plotter.render()
+
+    def show_face_grid_plane(self, corners: np.ndarray | None) -> None:
+        """Show only the Spray Plane (red) — convenience wrapper."""
+        self.show_face_grid_planes(ref_corners=None, standoff_corners=corners)
 
     # ------------------------------------------------------------------
     # Bbox clicking (default mode)
@@ -543,10 +644,42 @@ class MeshViewer(QWidget):
         self.plotter.render()
 
     def clear_route(self) -> None:
-        keys = [k for k in self._actors if k.startswith(('pass_', 'conn_', 'arr_', 'wpt_'))]
+        keys = [k for k in self._actors
+                if k.startswith(('pass_', 'conn_', 'arr_', 'wpt_'))]
         for k in keys:
             self.plotter.remove_actor(self._actors.pop(k))
         self.plotter.render()
+
+    def clear_face_grid_planes(self) -> None:
+        """Remove the Face Plane + Spray Plane reference rectangles."""
+        keys = [k for k in self._actors if k.startswith('face_grid_')]
+        for k in keys:
+            self.plotter.remove_actor(self._actors.pop(k))
+        self.plotter.render()
+
+    # ------------------------------------------------------------------
+    # Stats text (rendered in VTK viewport — bypasses Qt stylesheet issues)
+    # ------------------------------------------------------------------
+
+    def show_stats_text(self, lines: list[str]) -> None:
+        if 'stats_text' in self._actors:
+            self.plotter.remove_actor(self._actors.pop('stats_text'))
+        actor = self.plotter.add_text(
+            '\n'.join(lines),
+            position='lower_right',
+            font_size=7,
+            color='black',
+            font='courier',
+            shadow=False,
+            render=False,
+        )
+        self._actors['stats_text'] = actor
+        self.plotter.render()
+
+    def clear_stats_text(self) -> None:
+        if 'stats_text' in self._actors:
+            self.plotter.remove_actor(self._actors.pop('stats_text'))
+            self.plotter.render()
 
     # ------------------------------------------------------------------
     # Camera helpers

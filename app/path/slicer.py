@@ -2,7 +2,6 @@
 from __future__ import annotations
 import numpy as np
 import trimesh
-from app.mesh.preprocessor import MeshData
 
 
 def compute_slice_config(
