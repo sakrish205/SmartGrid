@@ -146,9 +146,35 @@ def slice_region(
     if outward is not None:
         axis, sign = outward
         face_normals_here = mesh.face_normals[filtered_face_ids]
+
+        # Stage 1 — Normal direction filter: drop faces not pointing outward.
+        # Catches the underside of the mesh and back-faces.
         outward_mask = (face_normals_here[:, axis] * sign) > 0.15
-        if outward_mask.sum() > 0:  # only apply if filter keeps anything
+        if outward_mask.sum() > 0:
             filtered = filtered[outward_mask]
+
+        # Stage 2 — Outermost-cluster filter: find the largest gap in the
+        # distribution of segment heights along the outward axis and keep
+        # only the top cluster.  This removes paths on internal ribs and
+        # supports that survived Stage 1 because their normals also face out.
+        #
+        # Example: outer surface at Z=100–110, inner ribs at Z=70–90.
+        # Sorted midpoints: [...70 72 75 80 85 90] [gap 15 mm] [100 102 108 110...]
+        # Largest gap = 10 mm → cutoff = 90+gap/2 = 95 → keep Z ≥ 95 only.
+        if len(filtered) > 1:
+            mids = (filtered[:, 0, axis] + filtered[:, 1, axis]) / 2.0
+            sorted_m = np.sort(mids)                       # ascending
+            gaps     = np.diff(sorted_m)                   # gap between each pair
+            best_gap_idx = int(np.argmax(gaps))
+            best_gap     = gaps[best_gap_idx]
+
+            _MIN_CLUSTER_GAP_MM = 8.0   # only split when gap is genuinely large
+            if best_gap > _MIN_CLUSTER_GAP_MM:
+                # cutoff = midpoint of the largest gap
+                cutoff = (sorted_m[best_gap_idx] + sorted_m[best_gap_idx + 1]) / 2.0
+                keep   = mids >= cutoff if sign > 0 else mids <= cutoff
+                if keep.sum() > 0:
+                    filtered = filtered[keep]
 
     if len(filtered) == 0:
         return None
