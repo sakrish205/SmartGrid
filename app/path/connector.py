@@ -10,8 +10,8 @@ import numpy as np
 from app.mesh.preprocessor import MeshData
 from app.path.path_model import PaintPass, Connection
 
-_MAX_CONNECTOR_FACTOR = 5.0   # connector distance must be ≤ this × spray_width_mm
-_MAX_CONNECTOR_ABS_MM = 500.0 # hard cap regardless of spray width
+_MAX_CONNECTOR_FACTOR = 3.0   # connector distance must be ≤ this × spray_width_mm
+_MAX_CONNECTOR_ABS_MM = 400.0 # hard cap regardless of spray width
 
 
 def connect_passes(

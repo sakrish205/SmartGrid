@@ -1,5 +1,6 @@
 """Orchestrates: slice → stitch → filter → simplify → resample → connect."""
 from __future__ import annotations
+from collections import defaultdict
 import numpy as np
 from app.mesh.preprocessor import MeshData
 from app.path.path_model import PaintPass, PaintRoute
@@ -134,6 +135,28 @@ def generate_route(
                 slice_position=float(slice_pos),
             ))
             pass_id += 1
+
+    # Boustrophedon sort: group passes by slice level, sort sub-passes within each
+    # level by centroid along the sweep axis (the axis with the most spread).
+    # Alternate row traversal direction on odd rows so the path snakes back and
+    # forth, minimising connector length between consecutive rows and between the
+    # left/right halves at grille levels.
+    _level_map: dict[float, list[PaintPass]] = defaultdict(list)
+    for _p in all_passes:
+        _level_map[round(_p.slice_position, 4)].append(_p)
+
+    _sorted_passes: list[PaintPass] = []
+    for _row_idx, _pos in enumerate(sorted(_level_map.keys())):
+        _group = _level_map[_pos]
+        if len(_group) > 1:
+            _cents = np.array([_p.points.mean(axis=0) for _p in _group])
+            _spread = _cents.max(axis=0) - _cents.min(axis=0)
+            _ax = int(np.argmax(_spread))
+            _group = sorted(_group, key=lambda _p, _a=_ax: _p.points.mean(axis=0)[_a])
+            if _row_idx % 2 == 1:
+                _group = list(reversed(_group))
+        _sorted_passes.extend(_group)
+    all_passes = _sorted_passes
 
     # Connect ALL passes in execution order (sub-index passes are real passes, not orphans)
     connections = _connector.connect_passes(
