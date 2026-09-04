@@ -201,6 +201,7 @@ class MainWindow(QMainWindow):
         self._ribbon.sweep_changed.connect(self._on_sweep_changed)
         self._ribbon.waypoints_changed.connect(self._refresh_route_display)
         self._ribbon.spacing_changed.connect(self._on_generate)   # Pt Interval change → regenerate
+        self._ribbon.pitch_changed.connect(self._on_generate)     # Spray pitch change → regenerate
         self._ribbon.export_json.connect(self._export_json)
         self._ribbon.export_csv.connect(self._export_csv)
         self._ribbon.view_settings_req.connect(self._open_view_settings)

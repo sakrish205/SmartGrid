@@ -1,4 +1,15 @@
-"""Export PaintRoute list to JSON."""
+"""Export PaintRoute list to JSON for OLP software.
+
+Structure:
+  root
+  ├── version, author, generated_at
+  ├── summary          — totals across all routes
+  └── routes[]
+      ├── route metadata (region, spacing, etc.)
+      ├── execution_sequence[]  — ordered list of {type, id} for robot program
+      ├── passes[]     — full pass data (points are the TCP waypoints)
+      └── connections[] — straight-line air moves between passes
+"""
 from __future__ import annotations
 import json
 from datetime import datetime
@@ -26,7 +37,7 @@ def export_route_json(routes: list[PaintRoute], filepath: str) -> None:
     directions        = sorted({p.direction for r in routes for p in r.passes})
 
     data = {
-        "version": "1.1",
+        "version": "1.2",
         "author": "Saketha Krishna B S",
         "generated_at": datetime.now().isoformat(timespec='seconds'),
         "summary": {
@@ -45,25 +56,36 @@ def export_route_json(routes: list[PaintRoute], filepath: str) -> None:
 
 
 def _route_to_dict(route: PaintRoute, route_index: int) -> dict:
-    # Infer the single direction for this route (bbox routes are always one direction)
     dirs = {p.direction for p in route.passes}
     route_direction = dirs.pop() if len(dirs) == 1 else 'mixed'
 
+    conn_by_from = {c.from_pass_id: c for c in route.connections}
+
+    # Build execution sequence in robot program order
+    execution_sequence = []
+    for p in route.passes:
+        execution_sequence.append({"type": "pass", "id": p.id})
+        conn = conn_by_from.get(p.id)
+        if conn is not None:
+            execution_sequence.append({"type": "connection", "id": conn.id})
+
     return {
-        "route_index":      route_index,
-        "region_id":        route.region_id,
-        "direction":        route_direction,
-        "unit":             route.unit,
-        "spacing_mm":       route.spacing_mm,
-        "total_passes":     route.total_passes,
-        "total_length_mm":  round(route.total_length_mm, 3),
-        "passes": [_pass_to_dict(p) for p in route.passes],
+        "route_index":        route_index,
+        "region_id":          route.region_id,
+        "direction":          route_direction,
+        "unit":               route.unit,
+        "spacing_mm":         route.spacing_mm,
+        "total_passes":       route.total_passes,
+        "total_length_mm":    round(route.total_length_mm, 3),
+        "execution_sequence": execution_sequence,
+        "passes":      [_pass_to_dict(p) for p in route.passes],
         "connections": [_conn_to_dict(c) for c in route.connections],
     }
 
 
 def _pass_to_dict(p) -> dict:
     length = float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1))) if len(p.points) >= 2 else 0.0
+    pts = [[round(v, 4) for v in row] for row in p.points.tolist()]
     return {
         "id":             p.id,
         "region_id":      p.region_id,
@@ -72,25 +94,22 @@ def _pass_to_dict(p) -> dict:
         "sub_index":      p.sub_index,
         "slice_position": round(float(p.slice_position), 4),
         "length_mm":      round(length, 3),
-        "start":          p.points[0].tolist(),
-        "end":            p.points[-1].tolist(),
-        "points":         p.points.tolist(),
-        # 'waypoints' is identical to 'points' — explicit alias for OLP import scripts
-        # that expect a dedicated 'waypoints' key (e.g. RoboDK CSV/JSON templates).
-        "waypoints": [{"idx": i, "x": round(pt[0], 4), "y": round(pt[1], 4), "z": round(pt[2], 4)}
-                      for i, pt in enumerate(p.points.tolist())],
+        "start":          pts[0],
+        "end":            pts[-1],
+        "tcp_waypoints":  pts,   # TCP positions in execution order — import directly into OLP
     }
 
 
 def _conn_to_dict(c) -> dict:
     length = float(np.sum(np.linalg.norm(np.diff(c.points, axis=0), axis=1))) if len(c.points) >= 2 else 0.0
+    pts = [[round(v, 4) for v in row] for row in c.points.tolist()]
     return {
         "id":           c.id,
         "from_pass_id": c.from_pass_id,
         "to_pass_id":   c.to_pass_id,
         "is_air_move":  c.is_air_move,
         "length_mm":    round(length, 3),
-        "start":        c.points[0].tolist(),
-        "end":          c.points[-1].tolist(),
-        "points":       c.points.tolist(),
+        "start":        pts[0],
+        "end":          pts[-1],
+        "tcp_waypoints": pts,
     }

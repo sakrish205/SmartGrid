@@ -129,10 +129,9 @@ def generate_route(
             ))
             pass_id += 1
 
-    # Only connect the primary (sub_index == 0) passes
-    primary_passes = [p for p in all_passes if p.sub_index == 0]
+    # Connect ALL passes in execution order (sub-index passes are real passes, not orphans)
     connections = _connector.connect_passes(
-        primary_passes, mesh_data, region_face_indices,
+        all_passes, mesh_data, region_face_indices,
         simplify_epsilon=1.0,
     )
 
@@ -148,6 +147,6 @@ def generate_route(
         connections=connections,
         unit='mm',
         spacing_mm=spray_width_mm,
-        total_passes=len(primary_passes),
+        total_passes=len(all_passes),
         total_length_mm=total_length,
     )
