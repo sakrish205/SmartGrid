@@ -32,8 +32,8 @@ def classify_regions(
 ) -> dict[str, np.ndarray]:
     """Return mapping region_id -> int array of face indices.
 
-    Uses a weighted combination of face-normal alignment (70%) and
-    centroid position within the bounding box (30%).
+    Uses a weighted combination of face-normal alignment (60%) and
+    centroid position within the bounding box (40%).
     """
     region_vecs_dict = _region_vectors(mesh_data.up_axis)
     region_names = list(region_vecs_dict.keys())

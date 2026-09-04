@@ -63,7 +63,7 @@ def _route_to_dict(route: PaintRoute, route_index: int) -> dict:
 
 
 def _pass_to_dict(p) -> dict:
-    length = float(np.linalg.norm(p.points[-1] - p.points[0])) if len(p.points) >= 2 else 0.0
+    length = float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1))) if len(p.points) >= 2 else 0.0
     return {
         "id":             p.id,
         "region_id":      p.region_id,
@@ -79,7 +79,7 @@ def _pass_to_dict(p) -> dict:
 
 
 def _conn_to_dict(c) -> dict:
-    length = float(np.linalg.norm(c.points[-1] - c.points[0])) if len(c.points) >= 2 else 0.0
+    length = float(np.sum(np.linalg.norm(np.diff(c.points, axis=0), axis=1))) if len(c.points) >= 2 else 0.0
     return {
         "id":           c.id,
         "from_pass_id": c.from_pass_id,
