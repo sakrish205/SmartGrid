@@ -8,16 +8,17 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
     QFileDialog, QMessageBox, QDialog,
     QDialogButtonBox, QRadioButton, QButtonGroup,
-    QLabel, QVBoxLayout as QVBox,
+    QLabel, QVBoxLayout as QVBox, QScrollArea, QFrame,
 )
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QFont
+from PySide6.QtCore import Qt, QThread, Signal, QEvent
+from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 
 from models.mesh_model import MeshModel
 from app.mesh.preprocessor import MeshData
 from app.path.path_model import PaintRoute
 from app.path import generator as _generator
 from app.path import bbox_generator as _bbox_generator
+from app.path import face_grid_generator as _face_grid_generator
 from app.ui.viewer import MeshViewer
 from app.ui.ribbon import SmartRibbon
 from app.export.json_export import export_route_json
@@ -160,6 +161,7 @@ class MainWindow(QMainWindow):
         self._worker:        Optional[QThread] = None
         self._load_worker:   Optional[QThread] = None
         self._current_colors: dict[str, str]  = dict(_COLOR_DEFAULTS)
+        self._face_grid_planes_cache: tuple | None = None   # (ref_corners, standoff_corners, spray_mm)
 
         self._build_ui()
         self._build_menus()
@@ -176,13 +178,24 @@ class MainWindow(QMainWindow):
         vl.setContentsMargins(0, 0, 0, 0)
         vl.setSpacing(0)
 
-        # Ribbon
+        # Ribbon wrapped in a horizontal scroll area so it never clips on small windows
+        from app.ui.ribbon import RIBBON_H
         self._ribbon = SmartRibbon()
-        vl.addWidget(self._ribbon)
+        ribbon_scroll = QScrollArea()
+        ribbon_scroll.setWidget(self._ribbon)
+        ribbon_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        ribbon_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        ribbon_scroll.setWidgetResizable(False)
+        ribbon_scroll.setFixedHeight(RIBBON_H + 4)
+        ribbon_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        ribbon_scroll.setStyleSheet('QScrollArea{background:transparent;border:none;}')
+        vl.addWidget(ribbon_scroll)
 
         # 3-D viewport — takes all remaining space
         self._viewer = MeshViewer()
         vl.addWidget(self._viewer, stretch=1)
+
+        self._viewer.installEventFilter(self)
 
         # Initial state
         self._ribbon.set_model_loaded(False)
@@ -260,6 +273,9 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage('Navigate — drag to rotate, scroll to zoom.')
 
+    def eventFilter(self, obj, event) -> bool:
+        return super().eventFilter(obj, event)
+
     # ------------------------------------------------------------------
     # View settings
     # ------------------------------------------------------------------
@@ -292,6 +308,7 @@ class MainWindow(QMainWindow):
     def _flip_direction(self) -> None:
         self._ribbon.flip_sweep_direction()
 
+
     # ------------------------------------------------------------------
     # File loading
     # ------------------------------------------------------------------
@@ -320,7 +337,8 @@ class MainWindow(QMainWindow):
         if self._load_worker and self._load_worker.isRunning():
             return
         dlg = _UpAxisDialog(filepath, self)
-        dlg.exec()
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
         up_axis = dlg.up_axis()
 
         self._selected_regions.clear()
@@ -354,6 +372,10 @@ class MainWindow(QMainWindow):
         self._viewer.set_select_mode(False)
         self._ribbon.update_mesh_stats(n_faces)
         self._ribbon.clear_stats()
+        self._viewer.show_stats_text([
+            'MESH',
+            f'Triangles  {n_faces:,}',
+        ])
 
         b = model.data.pyvista_mesh.bounds
         max_extent = max(b[1]-b[0], b[3]-b[2], b[5]-b[4])
@@ -454,53 +476,69 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, 'Generation error',
                     f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
                 return
+        self._viewer.clear_face_grid_planes()
         self._on_route_ready(routes)
 
     def _generate_face_grid(self, spray_mm: float) -> None:
-        """Face Grid: bbox passes fitted to selected region's own vertex bounds + standoff."""
+        """Face Grid: axis-aligned plane at the selected face + standoff."""
         if not self._selected_regions:
             QMessageBox.warning(self, 'No selection',
-                'Select a bounding box face first, then generate.')
+                'Select a face region first, then generate.')
             return
-        mesh      = self._model.data.trimesh_mesh
-        up        = self._model.data.up_axis
-        direction = self._ribbon.get_direction()
-        v_mm      = self._ribbon.get_v_width_mm() or spray_mm
-        offset    = 1 if self._ribbon.is_direction_flipped() else 0
-        wpt_mm    = self._ribbon.get_waypoint_spacing_mm()
-        standoff  = self._ribbon.get_standoff_mm()
+        data     = self._model.data
+        mesh     = data.trimesh_mesh
+        up       = data.up_axis
+        offset   = 1 if self._ribbon.is_direction_flipped() else 0
+        wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
+        standoff = self._ribbon.get_standoff_mm()
+        mesh_bounds  = tuple(data.pyvista_mesh.bounds)
         routes: list[PaintRoute] = []
+        all_corners = []
         for region in sorted(self._selected_regions):
             face_indices = self._model.get_region_faces(region)
             if len(face_indices) == 0:
                 continue
-            # Tight bounds from this region's own vertices (not full mesh bbox)
-            region_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
-            rmin = region_verts.min(axis=0)
-            rmax = region_verts.max(axis=0)
-            bounds = (float(rmin[0]), float(rmax[0]),
-                      float(rmin[1]), float(rmax[1]),
-                      float(rmin[2]), float(rmax[2]))
             try:
-                if direction in ('horizontal', 'both'):
-                    routes.append(_bbox_generator.generate_bbox_route(
-                        region, bounds, spray_mm, up,
-                        direction='horizontal', direction_offset=offset,
-                        waypoint_spacing_mm=wpt_mm, standoff_mm=standoff))
-                if direction in ('vertical', 'both'):
-                    routes.append(_bbox_generator.generate_bbox_route(
-                        region, bounds, v_mm, up,
-                        direction='vertical', direction_offset=offset,
-                        waypoint_spacing_mm=wpt_mm, standoff_mm=standoff))
+                routes.append(_face_grid_generator.generate_face_grid_route(
+                    region, face_indices, mesh, up,
+                    spray_width_mm=spray_mm,
+                    direction_offset=offset,
+                    waypoint_spacing_mm=wpt_mm,
+                    standoff_mm=standoff,
+                    mesh_bounds=mesh_bounds,
+                ))
+                all_corners.append(_face_grid_generator.get_face_grid_plane_corners(
+                    region, face_indices, mesh, up,
+                    standoff_mm=standoff,
+                    mesh_bounds=mesh_bounds,
+                ))
             except Exception as exc:
                 QMessageBox.critical(self, 'Generation error',
                     f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
                 return
+        # Hide bbox cage
+        self._viewer.show_bbox(False)
         if not routes:
             QMessageBox.warning(self, 'No faces',
                 'Selected regions have no classified faces.')
             return
+        # Show routes first (clear_route called inside show_route removes old pass actors)
         self._on_route_ready(routes)
+        # Show planes AFTER routes so they are not erased by clear_route
+        if all_corners:
+            region0       = sorted(self._selected_regions)[0]
+            face_indices0 = self._model.get_region_faces(region0)
+            ref_corners   = _face_grid_generator.get_face_grid_plane_corners(
+                region0, face_indices0, mesh, up,
+                standoff_mm=0.0, mesh_bounds=mesh_bounds,
+                region_face_pos=True,
+            )
+            self._face_grid_planes_cache = (ref_corners, all_corners[0], spray_mm)
+            self._viewer.show_face_grid_planes(
+                ref_corners, all_corners[0],
+                step_spacing=spray_mm,
+                show_grid=self._ribbon.is_show_grid(),
+            )
 
     def _generate_mesh(self, spray_mm: float) -> None:
         pairs = []
@@ -517,6 +555,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('Generating mesh paths...')
         worker = _PathWorker(self._model.data, pairs, spray_mm,
                              waypoint_spacing_mm=wpt_mm)
+        self._viewer.clear_face_grid_planes()
         worker.finished.connect(self._on_route_ready)
         worker.error.connect(self._on_route_error)
         self._worker = worker
@@ -535,8 +574,31 @@ class MainWindow(QMainWindow):
         )
         self._ribbon.update_route_stats(routes, self._ribbon.current_unit)
         self._ribbon.set_path_exists(bool(routes))
+        from app.path.path_model import UNIT_TO_MM
+        unit = self._ribbon.current_unit
+        factor = UNIT_TO_MM.get(unit, 1.0)
         total_passes = sum(r.total_passes for r in routes)
         total_conns  = sum(len(r.connections) for r in routes)
+        total_mm     = sum(r.total_length_mm for r in routes)
+        spacing_mm   = routes[0].spacing_mm if routes else 0.0
+        n_faces = len(self._model.data.trimesh_mesh.faces)
+        self._viewer.show_stats_text([
+            'MESH',
+            f'Triangles  {n_faces:,}',
+            '',
+            'PATH',
+            f'Passes       {total_passes}',
+            f'Connections  {total_conns}',
+            f'Length       {total_mm / factor:.2f} {unit}',
+            f'Spacing      {spacing_mm / factor:.2f} {unit}',
+        ])
+        empty_regions = [r.region_id for r in routes if r.total_passes == 0]
+        if empty_regions:
+            QMessageBox.warning(
+                self, 'No passes generated',
+                f"The following regions produced 0 passes:\n  {', '.join(empty_regions)}\n\n"
+                "Try reducing the spray width or check that the correct up-axis was selected.",
+            )
         self.statusBar().showMessage(
             f'Path generation complete  —  {total_passes} passes, {total_conns} connections.')
 
@@ -557,14 +619,29 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('Generation failed.')
 
     def _clear_paths(self) -> None:
+        self._face_grid_planes_cache = None
         self._viewer.clear_route()
+        self._viewer.clear_face_grid_planes()
         self._viewer.clear_bbox_grid()
+        self._viewer.show_bbox(True)        # restore bbox cage if hidden by Face Grid
         self._current_routes = []
         self._ribbon.clear_stats()
+        self._viewer.clear_stats_text()
         self._ribbon.set_path_exists(False)
         self.statusBar().showMessage('Paths cleared.')
 
     def _update_grid(self) -> None:
+        # Face grid mode: redraw spray plane grid from cache (toggling grid shows/hides lines)
+        if self._face_grid_planes_cache is not None:
+            ref_c, std_c, spc = self._face_grid_planes_cache
+            self._viewer.show_face_grid_planes(
+                ref_c, std_c,
+                step_spacing=spc,
+                show_grid=self._ribbon.is_show_grid(),
+            )
+            return
+
+        # Bbox / mesh mode: draw grid on the bounding-box face
         self._viewer.clear_bbox_grid()
         if not self._ribbon.is_show_grid():
             return

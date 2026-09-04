@@ -1,7 +1,10 @@
 """Orchestrates: slice → stitch → filter → simplify → resample → connect."""
 from __future__ import annotations
 from collections import defaultdict
+import logging
 import numpy as np
+
+_log = logging.getLogger(__name__)
 from app.mesh.preprocessor import MeshData
 from app.path.path_model import PaintPass, PaintRoute
 from app.path import slicer as _slicer
@@ -120,7 +123,7 @@ def generate_route(
         for sub_idx, polyline in enumerate(polylines):
             if len(polyline) < 2:
                 continue
-            pts = polyline if is_forward else polyline[::-1]
+            pts = polyline if is_forward else polyline[::-1].copy()
             # Smooth micro-jaggies from mesh triangulation, then resample uniformly
             pts = rdp_simplify(pts, _RDP_EPSILON)
             if waypoint_spacing_mm > 0 and len(pts) >= 2:
@@ -157,6 +160,14 @@ def generate_route(
                 _group = list(reversed(_group))
         _sorted_passes.extend(_group)
     all_passes = _sorted_passes
+
+    if not all_passes:
+        _log.warning(
+            "generate_route: region '%s' produced 0 passes — "
+            "all slice planes missed the geometry. "
+            "Try reducing spray_width_mm or check the up_axis setting.",
+            region_id,
+        )
 
     # Connect ALL passes in execution order (sub-index passes are real passes, not orphans)
     connections = _connector.connect_passes(

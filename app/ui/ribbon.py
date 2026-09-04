@@ -362,8 +362,8 @@ class SmartRibbon(QWidget):
     grid_changed        = Signal()
     arrows_changed      = Signal()
     waypoints_changed   = Signal()
-    spacing_changed     = Signal()      # Pt Interval changed → needs regeneration
-    pitch_changed       = Signal()      # Spray pitch changed → needs regeneration
+    spacing_changed     = Signal()      # Pt Interval changed (not auto-connected; apply on Generate)
+    pitch_changed       = Signal()      # Spray pitch changed (not auto-connected; apply on Generate)
     region_toggled      = Signal(str, bool)
     select_mode_changed = Signal(bool)
     generate_requested  = Signal()
@@ -393,17 +393,21 @@ class SmartRibbon(QWidget):
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(0)
 
+        # Build view group (needed for signals/buttons); not shown in ribbon.
+        # Waypoints group: keep alive (widgets referenced on self) but not shown.
+        # Store on self so Python GC does not destroy the child buttons.
+        self._view_group      = self._build_view()
+        self._stats_group     = self._build_stats()
+        self._waypoints_group = self._build_waypoints()
+
         groups = [
             self._build_file(),
-            self._build_view(),
             self._build_select(),
             self._build_parameters(),
             self._build_path_mode(),
             self._build_sweep(),
-            self._build_waypoints(),
             self._build_path(),
             self._build_display(),
-            self._build_stats(),
             self._build_export(),
         ]
 
@@ -541,13 +545,13 @@ class SmartRibbon(QWidget):
         self._bbox_radio      = QRadioButton('Boundary Box')
         self._face_grid_radio = QRadioButton('Face Grid')
         self._mesh_radio      = QRadioButton('Mesh Surface')
-        self._mesh_radio.setChecked(True)
+        self._bbox_radio.setChecked(True)
         for r in (self._bbox_radio, self._face_grid_radio, self._mesh_radio):
             r.setStyleSheet(_RADIO_CSS)
-        target_grp = QButtonGroup(self)
-        target_grp.addButton(self._bbox_radio,      0)
-        target_grp.addButton(self._face_grid_radio, 2)
-        target_grp.addButton(self._mesh_radio,      1)
+        self._target_grp = QButtonGroup(self)
+        self._target_grp.addButton(self._bbox_radio,      0)
+        self._target_grp.addButton(self._face_grid_radio, 2)
+        self._target_grp.addButton(self._mesh_radio,      1)
         target_vl.addWidget(self._bbox_radio)
         target_vl.addWidget(self._face_grid_radio)
         target_vl.addWidget(self._mesh_radio)
@@ -561,7 +565,7 @@ class SmartRibbon(QWidget):
         self._standoff_spin  = QDoubleSpinBox()
         self._standoff_spin.setRange(0.0, 500.0)
         self._standoff_spin.setValue(50.0)
-        self._standoff_spin.setSingleStep(10.0)
+        self._standoff_spin.setSingleStep(5.0)
         self._standoff_spin.setDecimals(1)
         self._standoff_spin.setFixedWidth(70)
         self._standoff_spin.setStyleSheet(_SPIN_CSS)
@@ -671,8 +675,10 @@ class SmartRibbon(QWidget):
         def _add_stat(row, col_lbl, col_val, label):
             lbl = QLabel(label)
             lbl.setStyleSheet(_STAT_LABEL_CSS)
+            lbl.setMinimumWidth(60)
             val = QLabel('—')
             val.setStyleSheet(_STAT_VALUE_CSS)
+            val.setMinimumWidth(55)
             grid.addWidget(lbl, row, col_lbl)
             grid.addWidget(val, row, col_val)
             return val

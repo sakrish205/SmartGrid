@@ -18,15 +18,29 @@ def generate_bbox_route(
     direction_offset: int = 0,       # 0=CW (default), 1=CCW (flip first pass)
     waypoint_spacing_mm: float = 0.0,  # 0 = no resampling; >0 = uniform waypoints
     standoff_mm: float = 0.0,          # outward offset from the face plane
+    face_bounds: tuple | None = None,  # if set, use these bounds ONLY for face position
+                                       # (bounds still controls pass width/height extent)
 ) -> PaintRoute:
     """Return a PaintRoute of parallel passes on the named bbox face.
 
     direction='horizontal' — passes sweep the wide axis, step the tall axis.
     direction='vertical'   — axes swapped (90° rotation of horizontal).
+
+    face_bounds: when provided (e.g. the full mesh bbox), the face plane position is
+    derived from face_bounds rather than bounds. This lets the standard zero-standoff
+    position coincide with the mesh bounding box face (the blue wire cage) while the
+    pass width/height is still clipped to the selected region's own extents.
     """
     xmin, xmax, ymin, ymax, zmin, zmax = bounds
     mins = [xmin, ymin, zmin]
     maxs = [xmax, ymax, zmax]
+
+    if face_bounds is not None:
+        fxmin, fxmax, fymin, fymax, fzmin, fzmax = face_bounds
+        face_mins = [fxmin, fymin, fzmin]
+        face_maxs = [fxmax, fymax, fzmax]
+    else:
+        face_mins, face_maxs = mins, maxs
 
     fwd_axis   = (up_axis + 1) % 3
     right_axis = (up_axis + 2) % 3
@@ -43,7 +57,7 @@ def generate_bbox_route(
         raise ValueError(f"Unknown region: {region!r}")
 
     face_axis, face_sign = face_map[region]
-    face_pos = maxs[face_axis] if face_sign > 0 else mins[face_axis]
+    face_pos = face_maxs[face_axis] if face_sign > 0 else face_mins[face_axis]
     face_pos += face_sign * standoff_mm   # shift outward by standoff distance
 
     # Horizontal base axes for each face

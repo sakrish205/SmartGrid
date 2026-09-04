@@ -50,10 +50,11 @@ def connect_passes(
             continue
 
         if dist_to_end < dist_to_start:
-            nxt.points    = nxt.points[::-1].copy()
-            nxt.is_forward = not nxt.is_forward
+            nxt_points = nxt.points[::-1].copy()
+        else:
+            nxt_points = nxt.points
 
-        start_pt = nxt.points[0]
+        start_pt = nxt_points[0]
         connections.append(Connection(
             id=conn_id,
             from_pass_id=cur.id,
