@@ -557,12 +557,24 @@ class SmartRibbon(QWidget):
         target_vl.addWidget(self._mesh_radio)
         hl.addLayout(target_vl)
 
-        # Face Grid standoff — shown only when Face Grid is selected
-        # Standoff = 0 → flat plane on bbox face  |  > 0 → offset outward from bbox
+        # Face Grid sub-panel — shown only when Face Grid is selected
         fg_vl = QVBoxLayout()
         fg_vl.setSpacing(2)
         fg_vl.setContentsMargins(4, 0, 0, 0)   # 4 px left indent shows subordination
 
+        # Mode: Shadow Plane (default) vs Mesh Surface
+        self._fg_shadow_radio = QRadioButton('Shadow Plane')
+        self._fg_mesh_radio   = QRadioButton('Mesh + Standoff')
+        self._fg_shadow_radio.setChecked(True)
+        for r in (self._fg_shadow_radio, self._fg_mesh_radio):
+            r.setStyleSheet(_RADIO_CSS)
+        self._fg_sub_grp = QButtonGroup(self)
+        self._fg_sub_grp.addButton(self._fg_shadow_radio, 0)
+        self._fg_sub_grp.addButton(self._fg_mesh_radio,   1)
+        fg_vl.addWidget(self._fg_shadow_radio)
+        fg_vl.addWidget(self._fg_mesh_radio)
+
+        # Standoff row — inline, consistent with Spray Width style
         standoff_hl = QHBoxLayout()
         standoff_hl.setSpacing(4)
         standoff_hl.setContentsMargins(0, 0, 0, 0)
@@ -824,8 +836,8 @@ class SmartRibbon(QWidget):
         return self._standoff_spin.value()
 
     def get_face_grid_submode(self) -> str:
-        """'flat' when standoff == 0, 'bbox_standoff' otherwise."""
-        return 'flat' if self._standoff_spin.value() == 0.0 else 'bbox_standoff'
+        """'shadow' | 'mesh_standoff'"""
+        return 'mesh_standoff' if self._fg_mesh_radio.isChecked() else 'shadow'
 
     def _on_target_changed(self) -> None:
         self._fg_subpanel.setVisible(self._face_grid_radio.isChecked())
@@ -857,6 +869,7 @@ class SmartRibbon(QWidget):
                   self._unit_combo, self._pitch_spin,
                   self._cw_radio, self._ccw_radio,
                   self._bbox_radio, self._face_grid_radio, self._mesh_radio,
+                  self._fg_shadow_radio, self._fg_mesh_radio,
                   self._standoff_spin,
                   self._waypoints_check, self._wpt_interval_spin,
                   self._gen_btn, self._grid_check, self._arrows_check,
