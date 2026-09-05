@@ -3,17 +3,17 @@
 Public API
 ----------
 generate_face_grid_route(...)
-    Shadow-projected passes: each row's depth is the outermost vertex in that
-    row's band, so paths always sit on (or above, with standoff) the actual
-    mesh surface rather than a global flat bbox plane.
+    Surface-tilted passes: computes mean normal of selected faces, builds an
+    orthonormal spray-plane basis (mean_normal, pass_vec, step_vec), then
+    shadow-projects each row's depth from the outermost vertex in that band.
+    The spray plane automatically tilts to match the actual surface orientation.
 
 get_face_grid_plane_corners(...)
-    Returns the 4 corners of the spray plane rectangle for 3-D visualisation.
-    Always uses region vertex tight bounds for face depth (matches paths).
+    Returns 4 corners of the tilted spray plane for 3-D visualisation.
+    Plane normal and extent are derived from the actual face normals.
 
 compute_mesh_shaped_passes(...)
-    Low-level: given geometry parameters and the region vertex cloud, returns
-    list[PaintPass] with per-row width AND depth clipped to the mesh silhouette.
+    Low-level axis-aligned helper (used by bbox path mode).
 """
 from __future__ import annotations
 import numpy as np
@@ -60,6 +60,50 @@ def _plane_axes(region: str, up_axis: int) -> tuple[int, int, int]:
 
 
 # ---------------------------------------------------------------------------
+# Surface-tilt basis
+# ---------------------------------------------------------------------------
+
+def _compute_surface_basis(
+    face_indices: np.ndarray,
+    mesh: trimesh.Trimesh,
+    up_axis: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (mean_normal, pass_vec, step_vec) orthonormal basis.
+
+    mean_normal — outward unit normal of the surface (plane tilts to match it)
+    pass_vec    — left-right direction across the spray plane (along passes)
+    step_vec    — step direction (advances between rows)
+    """
+    normals = mesh.face_normals[face_indices]
+    mean_n = normals.mean(axis=0)
+    n_len = np.linalg.norm(mean_n)
+    if n_len < 1e-9:
+        mean_n = np.zeros(3, dtype=float)
+        mean_n[up_axis] = 1.0
+    else:
+        mean_n = mean_n / n_len
+
+    # pass_vec: horizontal direction in the spray plane, derived from global up
+    up_vec = np.zeros(3, dtype=float)
+    up_vec[up_axis] = 1.0
+    pass_vec = np.cross(mean_n, up_vec)
+    pv_len = np.linalg.norm(pass_vec)
+    if pv_len < 1e-9:
+        # Normal is nearly parallel to up — use forward axis instead
+        fwd_vec = np.zeros(3, dtype=float)
+        fwd_vec[(up_axis + 1) % 3] = 1.0
+        pass_vec = np.cross(mean_n, fwd_vec)
+        pv_len = np.linalg.norm(pass_vec)
+    pass_vec = pass_vec / pv_len
+
+    # step_vec: perpendicular to both normal and pass_vec (the step direction)
+    step_vec = np.cross(pass_vec, mean_n)
+    step_vec = step_vec / np.linalg.norm(step_vec)
+
+    return mean_n, pass_vec, step_vec
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -73,34 +117,82 @@ def generate_face_grid_route(
     waypoint_spacing_mm: float = 0.0,
     standoff_mm: float = 0.0,
 ) -> PaintRoute:
-    """Return a PaintRoute of parallel passes using shadow projection.
+    """Return a PaintRoute of surface-tilted parallel passes.
 
-    Each row's depth is the outermost vertex within that row's band along the
-    face axis.  Standoff is added outward from that surface, so paths never
-    land inside recessed geometry.
+    Computes the mean face normal of face_indices, builds an orthonormal
+    spray-plane basis (mean_normal, pass_vec, step_vec), then for each row
+    shadow-projects the outermost vertex depth along mean_normal so paths sit
+    on the actual tilted surface.  Standoff lifts paths outward from there.
     """
     if region not in _resolve_face_map(up_axis):
         raise ValueError(f'Unknown region: {region!r}')
 
-    face_map = _resolve_face_map(up_axis)
-    face_axis, face_sign = face_map[region]
-    _, pass_axis, step_axis = _plane_axes(region, up_axis)
+    face_axis, face_sign = _resolve_face_map(up_axis)[region]
+    # Basis from forward-facing faces only — closed-mesh all-face normals cancel to zero
+    basis_faces = np.where(mesh.face_normals[:, face_axis] * face_sign > 0.0)[0].astype(np.int64)
+    if len(basis_faces) == 0:
+        basis_faces = face_indices
+    mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
 
-    region_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
+    verts = mesh.vertices[mesh.faces[face_indices].ravel()]
+    pass_proj = verts @ pass_vec   # 1-D coords along left-right axis
+    step_proj = verts @ step_vec   # 1-D coords along step axis
+    depth_proj = verts @ mean_n    # 1-D coords along spray-normal
 
-    all_passes = compute_mesh_shaped_passes(
-        face_axis=face_axis,
-        step_axis=step_axis,
-        pass_axis=pass_axis,
-        step_spacing=spray_width_mm,
-        region_verts=region_verts,
-        start_id=0,
-        region=region,
-        direction_offset=direction_offset,
-        waypoint_spacing_mm=waypoint_spacing_mm,
-        face_sign=face_sign,
-        standoff_mm=standoff_mm,
-    )
+    step_min = float(step_proj.min())
+    step_max = float(step_proj.max())
+    global_pass_min = float(pass_proj.min())
+    global_pass_max = float(pass_proj.max())
+    global_depth = float(depth_proj.max())   # outermost surface
+
+    span = step_max - step_min
+    if span <= spray_width_mm:
+        step_positions = [(step_min + step_max) / 2.0]
+    else:
+        first = step_min + spray_width_mm / 2.0
+        step_positions = list(np.arange(first, step_max, spray_width_mm))
+
+    band_half = spray_width_mm * 0.65
+
+    all_passes: list[PaintPass] = []
+    for local_idx, step_pos in enumerate(step_positions):
+        pass_id    = local_idx
+        is_forward = ((pass_id + direction_offset) % 2 == 0)
+
+        in_band    = np.abs(step_proj - step_pos) <= band_half
+        band_verts = verts[in_band]
+
+        if len(band_verts) == 0:
+            p_min      = global_pass_min
+            p_max      = global_pass_max
+            row_depth  = global_depth
+        else:
+            p_min     = float((band_verts @ pass_vec).min())
+            p_max     = float((band_verts @ pass_vec).max())
+            row_depth = float((band_verts @ mean_n).max())
+
+        row_face_pos = row_depth + standoff_mm
+
+        # Build world-space endpoints in the tilted plane
+        pt_a = row_face_pos * mean_n + p_min * pass_vec + step_pos * step_vec
+        pt_b = row_face_pos * mean_n + p_max * pass_vec + step_pos * step_vec
+
+        pts = np.array([pt_a, pt_b], dtype=float)
+        if not is_forward:
+            pts = pts[::-1].copy()
+
+        if waypoint_spacing_mm > 0:
+            pts = resample_arc(pts, waypoint_spacing_mm)
+
+        all_passes.append(PaintPass(
+            id=pass_id,
+            region_id=region,
+            direction='horizontal',
+            points=pts,
+            is_forward=is_forward,
+            sub_index=0,
+            slice_position=float(step_pos),
+        ))
 
     connections: list[Connection] = []
     for i in range(len(all_passes) - 1):
@@ -128,6 +220,7 @@ def generate_face_grid_route(
         spacing_mm=spray_width_mm,
         total_passes=len(all_passes),
         total_length_mm=total_length,
+        spray_normal=mean_n.copy(),
     )
 
 
@@ -139,47 +232,44 @@ def get_face_grid_plane_corners(
     standoff_mm: float = 0.0,
     mesh_bounds: tuple | None = None,
 ) -> np.ndarray:
-    """Return (4, 3) corners of the spray plane rectangle for visualization.
+    """Return (4, 3) corners of the tilted spray plane for visualization.
 
-    Face depth always comes from region vertex tight bounds (matching path
-    shadow projection).  Width/height come from mesh_bounds when provided so
-    the visual plane spans the full bbox face, giving a clear reference frame.
+    The plane normal is derived from the mean face normal of face_indices so
+    the visualised plane automatically tilts to match the actual surface.
+    Depth is the outermost vertex projected along mean_normal, then lifted by
+    standoff_mm.  The mesh_bounds parameter is accepted for API compatibility
+    but ignored — extent comes from face_indices vertices.
     """
-    face_map = _resolve_face_map(up_axis)
-    face_axis, face_sign = face_map[region]
-    _, pass_axis, step_axis = _plane_axes(region, up_axis)
+    face_axis, face_sign = _resolve_face_map(up_axis)[region]
+    # Basis from forward-facing faces — same rule as generate_face_grid_route
+    basis_faces = np.where(mesh.face_normals[:, face_axis] * face_sign > 0.0)[0].astype(np.int64)
+    if len(basis_faces) == 0:
+        basis_faces = face_indices
+    mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
 
-    region_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
-    rmins = region_verts.min(axis=0)
-    rmaxs = region_verts.max(axis=0)
+    verts = mesh.vertices[mesh.faces[face_indices].ravel()]
+    pass_proj  = verts @ pass_vec
+    step_proj  = verts @ step_vec
+    depth_proj = verts @ mean_n
 
-    # Width/height: full bbox when available, else region extent
-    if mesh_bounds is not None:
-        bx0, bx1, by0, by1, bz0, bz1 = mesh_bounds
-        b0 = np.array([bx0, by0, bz0], dtype=float)
-        b1 = np.array([bx1, by1, bz1], dtype=float)
-        pass_min, pass_max = float(b0[pass_axis]), float(b1[pass_axis])
-        step_min, step_max = float(b0[step_axis]), float(b1[step_axis])
-    else:
-        pass_min, pass_max = float(rmins[pass_axis]), float(rmaxs[pass_axis])
-        step_min, step_max = float(rmins[step_axis]), float(rmaxs[step_axis])
+    pass_min, pass_max = float(pass_proj.min()), float(pass_proj.max())
+    step_min, step_max = float(step_proj.min()), float(step_proj.max())
+    face_depth = float(depth_proj.max()) + standoff_mm
 
-    # Depth: always region outermost surface + standoff
-    face_pos = float(rmaxs[face_axis] if face_sign > 0 else rmins[face_axis])
-    face_pos += face_sign * standoff_mm
+    # Centre of the plane in world space
+    pc = (pass_min + pass_max) / 2.0
+    sc = (step_min + step_max) / 2.0
+    centre = face_depth * mean_n + pc * pass_vec + sc * step_vec
 
-    corners = np.zeros((4, 3), dtype=float)
-    for ci, (pa, sa) in enumerate([
-        (pass_min, step_min),
-        (pass_max, step_min),
-        (pass_max, step_max),
-        (pass_min, step_max),
-    ]):
-        corners[ci][face_axis] = face_pos
-        corners[ci][pass_axis] = pa
-        corners[ci][step_axis] = sa
+    dp = (pass_max - pass_min) / 2.0
+    ds = (step_max - step_min) / 2.0
 
-    return corners
+    return np.array([
+        centre - dp * pass_vec - ds * step_vec,   # BL
+        centre + dp * pass_vec - ds * step_vec,   # BR
+        centre + dp * pass_vec + ds * step_vec,   # TR
+        centre - dp * pass_vec + ds * step_vec,   # TL
+    ], dtype=float)
 
 
 # ---------------------------------------------------------------------------
