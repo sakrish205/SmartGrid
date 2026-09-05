@@ -258,6 +258,7 @@ class MainWindow(QMainWindow):
         self._ribbon.view_fit.connect(self._viewer.fit_all)
         self._ribbon.view_set.connect(self._on_view_set)
         self._ribbon.grid_changed.connect(self._update_grid)
+        self._ribbon.plane_changed.connect(self._update_grid)
         self._ribbon.arrows_changed.connect(self._refresh_route_display)
         self._ribbon.region_toggled.connect(self._on_region_shortcut)
         self._ribbon.select_mode_changed.connect(self._on_select_mode_changed)
@@ -570,7 +571,8 @@ class MainWindow(QMainWindow):
         ref_corners_first: np.ndarray | None = None
 
         for region in sorted(self._selected_regions):
-            if len(self._model.get_region_faces(region)) == 0:
+            region_faces = np.array(self._model.get_region_faces(region), dtype=np.int64)
+            if len(region_faces) == 0:
                 continue
             try:
                 routes.append(_face_grid_generator.generate_face_grid_route(
@@ -580,13 +582,14 @@ class MainWindow(QMainWindow):
                     waypoint_spacing_mm=wpt_mm,
                     standoff_mm=standoff,
                 ))
+                # Plane corners use region_faces — tight around the selected region only
                 spray_corners.append(_face_grid_generator.get_face_grid_plane_corners(
-                    region, all_face_indices, mesh, up,
+                    region, region_faces, mesh, up,
                     standoff_mm=standoff, mesh_bounds=bounds,
                 ))
                 if ref_corners_first is None:
                     ref_corners_first = _face_grid_generator.get_face_grid_plane_corners(
-                        region, all_face_indices, mesh, up,
+                        region, region_faces, mesh, up,
                         standoff_mm=0.0, mesh_bounds=bounds,
                     )
             except Exception as exc:
@@ -601,10 +604,12 @@ class MainWindow(QMainWindow):
         self._on_route_ready(routes)
         if spray_corners:
             self._face_grid_planes_cache = (ref_corners_first, spray_corners[0], spray_mm)
+            show_plane = self._ribbon.is_show_plane()
             self._viewer.show_face_grid_planes(
-                ref_corners_first, spray_corners[0],
+                ref_corners_first if show_plane else None,
+                spray_corners[0]  if show_plane else None,
                 step_spacing=spray_mm,
-                show_grid=self._ribbon.is_show_grid(),
+                show_grid=self._ribbon.is_show_grid() and show_plane,
             )
 
     def _generate_face_grid_mesh(self, spray_mm: float) -> None:
@@ -651,10 +656,12 @@ class MainWindow(QMainWindow):
             standoff_mm=standoff, mesh_bounds=bounds,
         )
         self._face_grid_planes_cache = (ref_corners, spray_corners, spray_mm)
+        show_plane = self._ribbon.is_show_plane()
         self._viewer.show_face_grid_planes(
-            ref_corners, spray_corners,
+            ref_corners if show_plane else None,
+            spray_corners if show_plane else None,
             step_spacing=spray_mm,
-            show_grid=self._ribbon.is_show_grid(),   # flat reference grid, user-controlled
+            show_grid=self._ribbon.is_show_grid() and show_plane,
         )
         self._viewer.show_bbox(False)
 
@@ -760,14 +767,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('Paths cleared.')
 
     def _update_grid(self) -> None:
-        # Face grid mode: redraw spray plane from cache
+        # Face grid mode: redraw planes/grid from cache
         if self._face_grid_planes_cache is not None:
             ref_c, std_c, spc = self._face_grid_planes_cache
-            # Grid is always the flat standard reference (pitch divisions) — user controls it
+            show_plane = self._ribbon.is_show_plane()
             self._viewer.show_face_grid_planes(
-                ref_c, std_c,
+                ref_c  if show_plane else None,
+                std_c  if show_plane else None,
                 step_spacing=spc,
-                show_grid=self._ribbon.is_show_grid(),
+                show_grid=self._ribbon.is_show_grid() and show_plane,
             )
             return
 
