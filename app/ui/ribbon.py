@@ -239,7 +239,7 @@ _STAT_VALUE_CSS = 'font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;fon
 class _Group(QWidget):
     def __init__(self, title: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
 
         vl = QVBoxLayout(self)
         vl.setContentsMargins(4, 2, 4, 0)
@@ -247,7 +247,7 @@ class _Group(QWidget):
 
         self._content = QWidget()
         self._content.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         self._hl = QHBoxLayout(self._content)
         self._hl.setContentsMargins(0, 0, 0, 0)
         self._hl.setSpacing(3)
@@ -259,9 +259,12 @@ class _Group(QWidget):
         sep_line.setStyleSheet('color:#d0d0d0;')
 
         lbl = QLabel(title.upper())
-        lbl.setFixedHeight(15)
+        lbl.setFixedHeight(14)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet(_GRP_LABEL_CSS)
+        # Group must be at least as wide as its label text so the title never clips
+        fm = lbl.fontMetrics()
+        self.setMinimumWidth(fm.horizontalAdvance(title.upper()) + 16)
 
         vl.addWidget(self._content, 1)
         vl.addWidget(sep_line)
