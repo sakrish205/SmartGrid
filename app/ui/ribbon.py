@@ -16,7 +16,7 @@ from app.path.path_model import UNIT_TO_MM, PaintRoute
 _UNITS   = ['mm', 'cm', 'm', 'in', 'ft']
 _REGIONS = ['TOP', 'BOTTOM', 'FRONT', 'REAR', 'LEFT', 'RIGHT']
 
-RIBBON_H = 88   # total ribbon height in pixels
+RIBBON_H = 104  # total ribbon height in pixels — enough for 3-radio groups
 
 # ---------------------------------------------------------------------------
 # Minimal monochrome SVG icons  (20 × 20 viewBox)
@@ -242,7 +242,7 @@ class _Group(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         vl = QVBoxLayout(self)
-        vl.setContentsMargins(4, 2, 4, 0)
+        vl.setContentsMargins(4, 1, 4, 1)
         vl.setSpacing(0)
 
         self._content = QWidget()
@@ -259,11 +259,11 @@ class _Group(QWidget):
         sep_line.setStyleSheet('color:#d0d0d0;')
 
         lbl = QLabel(title.upper())
-        lbl.setFixedHeight(14)
+        lbl.setFixedHeight(13)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet(_GRP_LABEL_CSS)
         lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._title_lbl = lbl   # kept so showEvent can enforce minimum width
+        self._title_lbl = lbl
 
         vl.addWidget(self._content, 1)
         vl.addWidget(sep_line)
@@ -549,9 +549,9 @@ class SmartRibbon(QWidget):
         target_vl = QVBoxLayout()
         target_vl.setSpacing(2)
         target_vl.setContentsMargins(0, 0, 0, 0)
-        self._bbox_radio      = QRadioButton('Boundary Box')
+        self._bbox_radio      = QRadioButton('Bound. Box')
         self._face_grid_radio = QRadioButton('Face Grid')
-        self._mesh_radio      = QRadioButton('Mesh Surface')
+        self._mesh_radio      = QRadioButton('Mesh Surf.')
         self._bbox_radio.setChecked(True)
         self._bbox_radio.setToolTip(
             'Generates parallel passes across the full bounding-box face.\n'
@@ -576,11 +576,11 @@ class SmartRibbon(QWidget):
         # Face Grid sub-panel — shown only when Face Grid is selected
         fg_vl = QVBoxLayout()
         fg_vl.setSpacing(2)
-        fg_vl.setContentsMargins(4, 0, 0, 0)
+        fg_vl.setContentsMargins(2, 0, 0, 0)
 
         # Sub-mode: Depth-Adaptive vs Surface Conform
-        self._fg_shadow_radio = QRadioButton('Depth-Adaptive')
-        self._fg_mesh_radio   = QRadioButton('Surface Conform')
+        self._fg_shadow_radio = QRadioButton('Adaptive')
+        self._fg_mesh_radio   = QRadioButton('Conform')
         self._fg_shadow_radio.setChecked(True)
         self._fg_shadow_radio.setToolTip(
             'Shadow projection — depth follows outermost surface vertex per band.\n'
@@ -610,7 +610,7 @@ class SmartRibbon(QWidget):
         self._standoff_spin.setDecimals(1)
         self._standoff_spin.setSuffix('  mm')
         self._standoff_spin.setSpecialValueText('off')
-        self._standoff_spin.setFixedWidth(82)
+        self._standoff_spin.setFixedWidth(72)
         self._standoff_spin.setStyleSheet(_SPIN_CSS)
         self._standoff_spin.setToolTip(
             'Distance to lift waypoints above the mesh surface.\n'
