@@ -458,7 +458,7 @@ class SmartRibbon(QWidget):
         # Region toggle buttons
         row1 = QHBoxLayout()
         row1.setSpacing(2)
-        row1.setContentsMargins(0, 0, 4, 0)   # 4 px right pad so RGT isn't flush
+        row1.setContentsMargins(0, 0, 8, 0)   # right pad keeps RGT clear of separator
         for region in _REGIONS:
             short = {'BOTTOM': 'BOT', 'FRONT': 'FRT', 'REAR': 'REAR',
                      'LEFT': 'LEFT', 'RIGHT': 'RGT'}.get(region, region)
