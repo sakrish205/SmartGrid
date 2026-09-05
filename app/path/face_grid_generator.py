@@ -247,7 +247,9 @@ def get_face_grid_plane_corners(
         basis_faces = face_indices
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
 
-    verts = mesh.vertices[mesh.faces[face_indices].ravel()]
+    # Extent from basis_faces (forward-facing surface), not face_indices (may be full mesh)
+    # This keeps the reference plane tight around the actual visible surface area.
+    verts = mesh.vertices[mesh.faces[basis_faces].ravel()]
     pass_proj  = verts @ pass_vec
     step_proj  = verts @ step_vec
     depth_proj = verts @ mean_n
