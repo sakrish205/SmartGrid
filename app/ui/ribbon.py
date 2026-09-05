@@ -259,10 +259,11 @@ class _Group(QWidget):
         sep_line.setStyleSheet('color:#d0d0d0;')
 
         lbl = QLabel(title.upper())
-        lbl.setFixedHeight(13)
+        lbl.setFixedHeight(14)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet(_GRP_LABEL_CSS + 'padding:0px;margin:0px;')
+        lbl.setStyleSheet(_GRP_LABEL_CSS)
         lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._title_lbl = lbl   # kept so showEvent can enforce minimum width
 
         vl.addWidget(self._content, 1)
         vl.addWidget(sep_line)

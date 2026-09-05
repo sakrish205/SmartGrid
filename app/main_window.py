@@ -547,13 +547,7 @@ class MainWindow(QMainWindow):
             self._generate_face_grid_flat(spray_mm)
 
     def _generate_face_grid_flat(self, spray_mm: float) -> None:
-        """Depth-Adaptive: passes projected onto outermost mesh surface + optional standoff.
-
-        Uses ALL mesh face indices for the shadow projection so that each row's depth
-        is the outermost vertex of the entire mesh silhouette (including slopes and
-        transitions) — not just the flat classified-region faces.  The region still
-        controls the projection direction (face_axis / face_sign).
-        """
+        """Depth-Adaptive: passes confined to the selected region's faces."""
         data     = self._model.data
         mesh     = data.trimesh_mesh
         up       = data.up_axis
@@ -561,9 +555,6 @@ class MainWindow(QMainWindow):
         wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
         standoff = self._ribbon.get_standoff_mm()
         bounds   = tuple(data.pyvista_mesh.bounds)
-
-        # All face indices — shadow projection uses the full mesh silhouette
-        all_face_indices = np.arange(len(mesh.faces), dtype=np.int64)
 
         routes: list[PaintRoute] = []
         spray_corners: list[np.ndarray] = []
@@ -575,7 +566,7 @@ class MainWindow(QMainWindow):
                 continue
             try:
                 routes.append(_face_grid_generator.generate_face_grid_route(
-                    region, all_face_indices, mesh, up,
+                    region, region_faces, mesh, up,
                     spray_width_mm=spray_mm,
                     direction_offset=offset,
                     waypoint_spacing_mm=wpt_mm,
