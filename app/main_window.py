@@ -258,7 +258,6 @@ class MainWindow(QMainWindow):
         self._ribbon.view_fit.connect(self._viewer.fit_all)
         self._ribbon.view_set.connect(self._on_view_set)
         self._ribbon.grid_changed.connect(self._update_grid)
-        self._ribbon.plane_changed.connect(self._update_grid)
         self._ribbon.arrows_changed.connect(self._refresh_route_display)
         self._ribbon.region_toggled.connect(self._on_region_shortcut)
         self._ribbon.select_mode_changed.connect(self._on_select_mode_changed)
@@ -604,12 +603,10 @@ class MainWindow(QMainWindow):
         self._on_route_ready(routes)
         if spray_corners:
             self._face_grid_planes_cache = (ref_corners_first, spray_corners[0], spray_mm)
-            show_plane = self._ribbon.is_show_plane()
             self._viewer.show_face_grid_planes(
-                ref_corners_first if show_plane else None,
-                spray_corners[0]  if show_plane else None,
+                ref_corners_first, spray_corners[0],
                 step_spacing=spray_mm,
-                show_grid=self._ribbon.is_show_grid() and show_plane,
+                show_grid=self._ribbon.is_show_grid(),
             )
 
     def _generate_face_grid_mesh(self, spray_mm: float) -> None:
@@ -656,12 +653,10 @@ class MainWindow(QMainWindow):
             standoff_mm=standoff, mesh_bounds=bounds,
         )
         self._face_grid_planes_cache = (ref_corners, spray_corners, spray_mm)
-        show_plane = self._ribbon.is_show_plane()
         self._viewer.show_face_grid_planes(
-            ref_corners if show_plane else None,
-            spray_corners if show_plane else None,
+            ref_corners, spray_corners,
             step_spacing=spray_mm,
-            show_grid=self._ribbon.is_show_grid() and show_plane,
+            show_grid=self._ribbon.is_show_grid(),
         )
         self._viewer.show_bbox(False)
 
@@ -770,12 +765,10 @@ class MainWindow(QMainWindow):
         # Face grid mode: redraw planes/grid from cache
         if self._face_grid_planes_cache is not None:
             ref_c, std_c, spc = self._face_grid_planes_cache
-            show_plane = self._ribbon.is_show_plane()
             self._viewer.show_face_grid_planes(
-                ref_c  if show_plane else None,
-                std_c  if show_plane else None,
+                ref_c, std_c,
                 step_spacing=spc,
-                show_grid=self._ribbon.is_show_grid() and show_plane,
+                show_grid=self._ribbon.is_show_grid(),
             )
             return
 
