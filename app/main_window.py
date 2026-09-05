@@ -544,16 +544,18 @@ class MainWindow(QMainWindow):
             self._generate_face_grid_flat(spray_mm)
 
     def _generate_face_grid_flat(self, spray_mm: float) -> None:
-        """Flat Plane: axis-aligned plane at the mesh face + standoff."""
+        """Shadow Plane: passes projected onto outermost mesh surface + optional standoff."""
         data     = self._model.data
         mesh     = data.trimesh_mesh
         up       = data.up_axis
         offset   = 1 if self._ribbon.is_direction_flipped() else 0
         wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
         standoff = self._ribbon.get_standoff_mm()
-        mesh_bounds = tuple(data.pyvista_mesh.bounds)
+        bounds   = tuple(data.pyvista_mesh.bounds)
         routes: list[PaintRoute] = []
-        all_corners = []
+        spray_corners: list[np.ndarray] = []
+        ref_corners_first: np.ndarray | None = None
+
         for region in sorted(self._selected_regions):
             face_indices = self._model.get_region_faces(region)
             if len(face_indices) == 0:
@@ -565,32 +567,30 @@ class MainWindow(QMainWindow):
                     direction_offset=offset,
                     waypoint_spacing_mm=wpt_mm,
                     standoff_mm=standoff,
-                    mesh_bounds=mesh_bounds,
                 ))
-                all_corners.append(_face_grid_generator.get_face_grid_plane_corners(
+                spray_corners.append(_face_grid_generator.get_face_grid_plane_corners(
                     region, face_indices, mesh, up,
-                    standoff_mm=standoff,
-                    mesh_bounds=mesh_bounds,
+                    standoff_mm=standoff, mesh_bounds=bounds,
                 ))
+                if ref_corners_first is None:
+                    ref_corners_first = _face_grid_generator.get_face_grid_plane_corners(
+                        region, face_indices, mesh, up,
+                        standoff_mm=0.0, mesh_bounds=bounds,
+                    )
             except Exception as exc:
                 QMessageBox.critical(self, 'Generation error',
                     f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
                 return
+
         self._viewer.show_bbox(False)
         if not routes:
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
         self._on_route_ready(routes)
-        if all_corners:
-            region0       = sorted(self._selected_regions)[0]
-            face_indices0 = self._model.get_region_faces(region0)
-            ref_corners   = _face_grid_generator.get_face_grid_plane_corners(
-                region0, face_indices0, mesh, up,
-                standoff_mm=0.0, mesh_bounds=mesh_bounds, region_face_pos=True,
-            )
-            self._face_grid_planes_cache = (ref_corners, all_corners[0], spray_mm)
+        if spray_corners:
+            self._face_grid_planes_cache = (ref_corners_first, spray_corners[0], spray_mm)
             self._viewer.show_face_grid_planes(
-                ref_corners, all_corners[0],
+                ref_corners_first, spray_corners[0],
                 step_spacing=spray_mm,
                 show_grid=self._ribbon.is_show_grid(),
             )
@@ -637,23 +637,40 @@ class MainWindow(QMainWindow):
             )
 
     def _generate_face_grid_mesh(self, spray_mm: float) -> None:
-        """Mesh Surface + Standoff: surface-following paths offset by standoff."""
+        """Mesh Surface + Standoff: surface-following paths + red standoff reference plane."""
         data     = self._model.data
+        mesh     = data.trimesh_mesh
+        up       = data.up_axis
         standoff = self._ribbon.get_standoff_mm()
+        bounds   = tuple(data.pyvista_mesh.bounds)
+
         pairs = [(r, self._model.get_region_faces(r))
                  for r in sorted(self._selected_regions)
                  if len(self._model.get_region_faces(r)) > 0]
         if not pairs:
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
+
+        # Show the red spray plane immediately (paths arrive async via worker)
+        first_region, first_faces = pairs[0]
+        spray_corners = _face_grid_generator.get_face_grid_plane_corners(
+            first_region, first_faces, mesh, up,
+            standoff_mm=standoff, mesh_bounds=bounds,
+        )
+        # Mesh-surface mode: no flat grid — paths follow actual surface, not the plane
+        self._face_grid_planes_cache = (None, spray_corners, spray_mm)
+        self._viewer.show_face_grid_planes(
+            None, spray_corners,
+            step_spacing=spray_mm,
+            show_grid=False,   # grid never shown for mesh-surface mode
+        )
+        self._viewer.show_bbox(False)
+
         wpt_mm = self._ribbon.get_waypoint_spacing_mm()
         self._ribbon.set_generating(True)
         self.statusBar().showMessage('Generating mesh surface paths…')
         worker = _PathWorker(data, pairs, spray_mm, waypoint_spacing_mm=wpt_mm,
                              standoff_mm=standoff)
-        self._face_grid_planes_cache = None
-        self._viewer.clear_face_grid_planes()
-        self._viewer.show_bbox(False)
         worker.finished.connect(self._on_route_ready)
         worker.error.connect(self._on_route_error)
         self._worker = worker
@@ -751,13 +768,18 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('Paths cleared.')
 
     def _update_grid(self) -> None:
-        # Face grid mode: redraw spray plane grid from cache (toggling grid shows/hides lines)
+        # Face grid mode: redraw spray plane from cache
         if self._face_grid_planes_cache is not None:
             ref_c, std_c, spc = self._face_grid_planes_cache
+            # Mesh+Standoff paths follow actual surface — grid on a flat plane is misleading
+            is_mesh_mode = (
+                self._ribbon.get_path_target() == 'face_grid'
+                and self._ribbon.get_face_grid_submode() == 'mesh_standoff'
+            )
             self._viewer.show_face_grid_planes(
                 ref_c, std_c,
                 step_spacing=spc,
-                show_grid=self._ribbon.is_show_grid(),
+                show_grid=False if is_mesh_mode else self._ribbon.is_show_grid(),
             )
             return
 
