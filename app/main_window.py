@@ -75,6 +75,7 @@ def _offset_route_by_standoff(route: 'PaintRoute', mesh, standoff_mm: float) -> 
         region_id=route.region_id, passes=new_passes, connections=new_conns,
         unit=route.unit, spacing_mm=route.spacing_mm,
         total_passes=route.total_passes, total_length_mm=total_length,
+        spray_normal=route.spray_normal.copy(),
     )
 
 
@@ -125,8 +126,6 @@ class _PathWorker(QThread):
 
     def run(self) -> None:
         try:
-            import numpy as _np
-            import trimesh.proximity as _prox
             routes = []
             mesh = self._mesh_data.trimesh_mesh
             for region_id, face_indices in self._pairs:
@@ -533,6 +532,7 @@ class MainWindow(QMainWindow):
                 return
         self._face_grid_planes_cache = None
         self._viewer.clear_face_grid_planes()
+        self._viewer.show_bbox(True)
         self._on_route_ready(routes)
 
     def _generate_face_grid(self, spray_mm: float) -> None:
@@ -678,6 +678,7 @@ class MainWindow(QMainWindow):
                              waypoint_spacing_mm=wpt_mm)
         self._face_grid_planes_cache = None
         self._viewer.clear_face_grid_planes()
+        self._viewer.show_bbox(True)
         worker.finished.connect(self._on_route_ready)
         worker.error.connect(self._on_route_error)
         self._worker = worker
@@ -787,11 +788,15 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, 'Export JSON', '', 'JSON (*.json)')
         if path:
             self.statusBar().showMessage('Exporting toolpath...')
-            export_route_json(
-                self._current_routes, path,
-                show_waypoints=self._ribbon.is_show_waypoints(),
-            )
-            self.statusBar().showMessage(f'Exported: {path}')
+            try:
+                export_route_json(
+                    self._current_routes, path,
+                    show_waypoints=self._ribbon.is_show_waypoints(),
+                )
+                self.statusBar().showMessage(f'Exported: {path}')
+            except Exception as exc:
+                QMessageBox.critical(self, 'Export error', str(exc))
+                self.statusBar().showMessage('Export failed.')
 
     def _export_csv(self) -> None:
         if not self._current_routes:
@@ -800,8 +805,12 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, 'Export CSV', '', 'CSV (*.csv)')
         if path:
             self.statusBar().showMessage('Exporting toolpath...')
-            export_route_csv(
-                self._current_routes, path,
-                show_waypoints=self._ribbon.is_show_waypoints(),
-            )
-            self.statusBar().showMessage(f'Exported: {path}')
+            try:
+                export_route_csv(
+                    self._current_routes, path,
+                    show_waypoints=self._ribbon.is_show_waypoints(),
+                )
+                self.statusBar().showMessage(f'Exported: {path}')
+            except Exception as exc:
+                QMessageBox.critical(self, 'Export error', str(exc))
+                self.statusBar().showMessage('Export failed.')

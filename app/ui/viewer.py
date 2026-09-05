@@ -604,8 +604,19 @@ class MeshViewer(QWidget):
         self.plotter.set_background(colors['background'])
 
         if 'base_mesh' in self._actors:
-            self._actors['base_mesh'].GetProperty().SetColor(
-                *_hex_to_rgb(colors['mesh']))
+            prop = self._actors['base_mesh'].GetProperty()
+            prop.SetColor(*_hex_to_rgb(colors['mesh']))
+            mode = colors.get('mesh_display', 'solid')
+            if mode == 'wireframe':
+                prop.SetRepresentationToWireframe()
+                prop.EdgeVisibilityOff()
+            elif mode == 'edges':
+                prop.SetRepresentationToSurface()
+                prop.EdgeVisibilityOn()
+                prop.SetEdgeColor(*_hex_to_rgb('#455a64'))
+            else:  # solid
+                prop.SetRepresentationToSurface()
+                prop.EdgeVisibilityOff()
 
         if 'bbox_wire' in self._actors:
             self._actors['bbox_wire'].GetProperty().SetColor(

@@ -4,7 +4,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QDialogButtonBox, QGroupBox, QGridLayout, QFrame,
-    QDoubleSpinBox,
+    QDoubleSpinBox, QComboBox,
 )
 from PySide6.QtGui import QColor
 from PySide6.QtCore import Signal, Qt
@@ -13,6 +13,8 @@ from PySide6.QtCore import Signal, Qt
 # All settings in one dict — colour keys are hex strings, numeric keys are
 # stored as float-formatted strings so the dict stays homogeneous.
 DEFAULTS: dict[str, str] = {
+    # mesh display mode: 'solid' | 'edges' | 'wireframe'
+    'mesh_display':   'solid',
     # colours
     'background':     '#e8e8e8',
     'mesh':           '#78909c',
@@ -101,6 +103,20 @@ class ViewSettingsDialog(QDialog):
 
         outer.addWidget(thick_group)
 
+        # ── Mesh display mode ─────────────────────────────────────────
+        disp_group = QGroupBox("Mesh display")
+        disp_hl = QHBoxLayout(disp_group)
+        disp_hl.setSpacing(8)
+        disp_hl.addWidget(QLabel("Style"))
+        self._disp_combo = QComboBox()
+        self._disp_combo.addItems(['Solid', 'Solid + Edges', 'Wireframe'])
+        _mode_to_idx = {'solid': 0, 'edges': 1, 'wireframe': 2}
+        self._disp_combo.setCurrentIndex(
+            _mode_to_idx.get(self._colors.get('mesh_display', 'solid'), 0))
+        self._disp_combo.currentIndexChanged.connect(self._on_disp_changed)
+        disp_hl.addWidget(self._disp_combo)
+        outer.addWidget(disp_group)
+
         # Reset to defaults
         reset_btn = QPushButton("Reset to defaults")
         reset_btn.clicked.connect(self._reset_defaults)
@@ -155,6 +171,11 @@ class ViewSettingsDialog(QDialog):
         self._colors[key] = str(value)
         self.colors_changed.emit(dict(self._colors))
 
+    def _on_disp_changed(self, idx: int) -> None:
+        modes = ['solid', 'edges', 'wireframe']
+        self._colors['mesh_display'] = modes[idx]
+        self.colors_changed.emit(dict(self._colors))
+
     def _reset_defaults(self) -> None:
         self._colors = dict(DEFAULTS)
         for key, btn in self._btns.items():
@@ -163,6 +184,11 @@ class ViewSettingsDialog(QDialog):
             spin.blockSignals(True)
             spin.setValue(float(self._colors[key]))
             spin.blockSignals(False)
+        _mode_to_idx = {'solid': 0, 'edges': 1, 'wireframe': 2}
+        self._disp_combo.blockSignals(True)
+        self._disp_combo.setCurrentIndex(
+            _mode_to_idx.get(self._colors.get('mesh_display', 'solid'), 0))
+        self._disp_combo.blockSignals(False)
         self.colors_changed.emit(dict(self._colors))
 
     def _on_cancel(self) -> None:
