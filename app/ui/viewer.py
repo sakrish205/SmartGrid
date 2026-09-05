@@ -557,11 +557,16 @@ class MeshViewer(QWidget):
                 self._actors[key] = actor
 
                 if show_arrows:
+                    face_normal = _region_face_normal(
+                        route.region_id,
+                        self._mesh_data.up_axis if self._mesh_data else 2,
+                    )
                     _add_pass_chevrons(
                         self.plotter, self._actors,
                         paint_pass.points, color, arrow_len,
                         f'arr_{ri}_{paint_pass.id}_{paint_pass.sub_index}',
                         line_width=float(self._colors.get('arrow_line_width', '4.0')),
+                        face_normal=face_normal,
                     )
 
                 if show_waypoints and len(paint_pass.points) >= 1:
@@ -846,6 +851,21 @@ def _make_plane_grid(
     return mesh
 
 
+def _region_face_normal(region_id: str, up_axis: int) -> np.ndarray:
+    """Return the outward unit normal of the named bbox face."""
+    fwd   = (up_axis + 1) % 3
+    right = (up_axis + 2) % 3
+    sign_map = {
+        'TOP':    (up_axis, +1), 'BOTTOM': (up_axis, -1),
+        'FRONT':  (fwd,     +1), 'REAR':   (fwd,     -1),
+        'RIGHT':  (right,   +1), 'LEFT':   (right,   -1),
+    }
+    axis, sign = sign_map.get(region_id, (up_axis, +1))
+    n = np.zeros(3)
+    n[axis] = float(sign)
+    return n
+
+
 def _add_pass_chevrons(
     plotter,
     actors: dict,
@@ -854,6 +874,7 @@ def _add_pass_chevrons(
     arrow_len: float,
     key_prefix: str,
     line_width: float = 4.0,
+    face_normal: np.ndarray | None = None,
 ) -> None:
     """Draw surveying-style chevron tick marks (><) along a pass line."""
     pts = np.asarray(points, dtype=float)
@@ -893,16 +914,25 @@ def _add_pass_chevrons(
     all_pts: list[np.ndarray] = []
     cells: list[int] = []
     idx = 0
-    _z = np.array([0., 0., 1.])
-    _y = np.array([0., 1., 0.])
+
+    # Perpendicular reference: use the face normal so chevron arms stay
+    # IN the face plane and are visible from the correct viewing direction.
+    # Fallback candidates if the face normal is parallel to seg_dir.
+    _candidates = [
+        face_normal if face_normal is not None else np.array([0., 0., 1.]),
+        np.array([0., 0., 1.]),
+        np.array([0., 1., 0.]),
+        np.array([1., 0., 0.]),
+    ]
 
     for center, seg_dir in positions:
-        perp = np.cross(seg_dir, _z)
-        pn = np.linalg.norm(perp)
-        if pn < 0.15:
-            perp = np.cross(seg_dir, _y)
-            pn = np.linalg.norm(perp)
-        perp = perp / pn if pn > 1e-9 else _y
+        perp = np.zeros(3)
+        for ref in _candidates:
+            candidate = np.cross(seg_dir, ref)
+            pn = float(np.linalg.norm(candidate))
+            if pn > 0.15:
+                perp = candidate / pn
+                break
 
         # Back-left and back-right arms (chevron points forward like ">")
         p1 = center - tick_len * (seg_dir + perp)
