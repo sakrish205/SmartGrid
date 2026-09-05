@@ -4,6 +4,8 @@ import os
 import traceback
 from typing import Optional
 
+import numpy as np
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
     QFileDialog, QMessageBox, QDialog,
@@ -32,6 +34,48 @@ def _detect_unit(max_extent: float) -> str:
     if max_extent > 1:
         return 'cm'
     return 'm'
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _offset_route_by_standoff(route: 'PaintRoute', mesh, standoff_mm: float) -> 'PaintRoute':
+    """Shift every waypoint outward along the nearest mesh face normal."""
+    import trimesh.proximity as _prox
+    from app.path.path_model import PaintPass, Connection, PaintRoute as _PR
+
+    def _offset_pts(pts: np.ndarray) -> np.ndarray:
+        if len(pts) == 0:
+            return pts
+        _, _, face_ids = _prox.closest_point(mesh, pts)
+        normals = mesh.face_normals[face_ids]
+        return pts + normals * standoff_mm
+
+    new_passes = []
+    for p in route.passes:
+        new_passes.append(PaintPass(
+            id=p.id, region_id=p.region_id, direction=p.direction,
+            points=_offset_pts(p.points),
+            is_forward=p.is_forward, sub_index=p.sub_index,
+            slice_position=p.slice_position,
+        ))
+    new_conns = []
+    for c in route.connections:
+        new_conns.append(Connection(
+            id=c.id, from_pass_id=c.from_pass_id, to_pass_id=c.to_pass_id,
+            points=_offset_pts(c.points),
+            is_air_move=c.is_air_move,
+        ))
+    total_length = sum(
+        float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1)))
+        for p in new_passes if len(p.points) >= 2
+    )
+    return _PR(
+        region_id=route.region_id, passes=new_passes, connections=new_conns,
+        unit=route.unit, spacing_mm=route.spacing_mm,
+        total_passes=route.total_passes, total_length_mm=total_length,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -70,24 +114,32 @@ class _PathWorker(QThread):
         pairs: list,
         spray_mm: float,
         waypoint_spacing_mm: float = 0.0,
+        standoff_mm: float = 0.0,
     ) -> None:
         super().__init__()
-        self._mesh_data          = mesh_data
-        self._pairs              = pairs
-        self._spray_mm           = spray_mm
-        self._waypoint_spacing   = waypoint_spacing_mm
+        self._mesh_data        = mesh_data
+        self._pairs            = pairs
+        self._spray_mm         = spray_mm
+        self._waypoint_spacing = waypoint_spacing_mm
+        self._standoff_mm      = standoff_mm
 
     def run(self) -> None:
         try:
+            import numpy as _np
+            import trimesh.proximity as _prox
             routes = []
+            mesh = self._mesh_data.trimesh_mesh
             for region_id, face_indices in self._pairs:
-                routes.append(_generator.generate_route(
+                route = _generator.generate_route(
                     self._mesh_data,
                     region_id=region_id,
                     region_face_indices=face_indices,
                     spray_width_mm=self._spray_mm,
                     waypoint_spacing_mm=self._waypoint_spacing,
-                ))
+                )
+                if self._standoff_mm > 0.0:
+                    route = _offset_route_by_standoff(route, mesh, self._standoff_mm)
+                routes.append(route)
             self.finished.emit(routes)
         except Exception as exc:
             self.error.emit(f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
@@ -481,18 +533,28 @@ class MainWindow(QMainWindow):
         self._on_route_ready(routes)
 
     def _generate_face_grid(self, spray_mm: float) -> None:
-        """Face Grid: axis-aligned plane at the selected face + standoff."""
+        """Face Grid dispatcher — routes to the selected sub-mode."""
         if not self._selected_regions:
             QMessageBox.warning(self, 'No selection',
                 'Select a face region first, then generate.')
             return
+        submode = self._ribbon.get_face_grid_submode()
+        if submode == 'bbox_standoff':
+            self._generate_face_grid_bbox(spray_mm)
+        elif submode == 'mesh_standoff':
+            self._generate_face_grid_mesh(spray_mm)
+        else:
+            self._generate_face_grid_flat(spray_mm)
+
+    def _generate_face_grid_flat(self, spray_mm: float) -> None:
+        """Flat Plane: axis-aligned plane at the mesh face + standoff."""
         data     = self._model.data
         mesh     = data.trimesh_mesh
         up       = data.up_axis
         offset   = 1 if self._ribbon.is_direction_flipped() else 0
         wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
         standoff = self._ribbon.get_standoff_mm()
-        mesh_bounds  = tuple(data.pyvista_mesh.bounds)
+        mesh_bounds = tuple(data.pyvista_mesh.bounds)
         routes: list[PaintRoute] = []
         all_corners = []
         for region in sorted(self._selected_regions):
@@ -517,22 +579,17 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, 'Generation error',
                     f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
                 return
-        # Hide bbox cage
         self._viewer.show_bbox(False)
         if not routes:
-            QMessageBox.warning(self, 'No faces',
-                'Selected regions have no classified faces.')
+            QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
-        # Show routes first (clear_route called inside show_route removes old pass actors)
         self._on_route_ready(routes)
-        # Show planes AFTER routes so they are not erased by clear_route
         if all_corners:
             region0       = sorted(self._selected_regions)[0]
             face_indices0 = self._model.get_region_faces(region0)
             ref_corners   = _face_grid_generator.get_face_grid_plane_corners(
                 region0, face_indices0, mesh, up,
-                standoff_mm=0.0, mesh_bounds=mesh_bounds,
-                region_face_pos=True,
+                standoff_mm=0.0, mesh_bounds=mesh_bounds, region_face_pos=True,
             )
             self._face_grid_planes_cache = (ref_corners, all_corners[0], spray_mm)
             self._viewer.show_face_grid_planes(
@@ -540,6 +597,72 @@ class MainWindow(QMainWindow):
                 step_spacing=spray_mm,
                 show_grid=self._ribbon.is_show_grid(),
             )
+
+    def _generate_face_grid_bbox(self, spray_mm: float) -> None:
+        """Bbox + Standoff: rectangular bbox passes shifted outward by standoff."""
+        data     = self._model.data
+        up       = data.up_axis
+        offset   = 1 if self._ribbon.is_direction_flipped() else 0
+        wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
+        standoff = self._ribbon.get_standoff_mm()
+        bounds   = tuple(data.pyvista_mesh.bounds)
+        routes: list[PaintRoute] = []
+        all_corners = []
+        for region in sorted(self._selected_regions):
+            face_indices = self._model.get_region_faces(region)
+            try:
+                routes.append(_bbox_generator.generate_bbox_route(
+                    region, bounds, spray_mm, up,
+                    direction='horizontal', direction_offset=offset,
+                    waypoint_spacing_mm=wpt_mm,
+                    standoff_mm=standoff,
+                ))
+                all_corners.append(_face_grid_generator.get_face_grid_plane_corners(
+                    region, face_indices if len(face_indices) else np.arange(0),
+                    data.trimesh_mesh, up,
+                    standoff_mm=standoff, mesh_bounds=bounds,
+                ))
+            except Exception as exc:
+                QMessageBox.critical(self, 'Generation error',
+                    f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
+                return
+        self._viewer.show_bbox(False)
+        if not routes:
+            QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
+            return
+        self._on_route_ready(routes)
+        if all_corners:
+            self._face_grid_planes_cache = (None, all_corners[0], spray_mm)
+            self._viewer.show_face_grid_planes(
+                None, all_corners[0],
+                step_spacing=spray_mm,
+                show_grid=self._ribbon.is_show_grid(),
+            )
+
+    def _generate_face_grid_mesh(self, spray_mm: float) -> None:
+        """Mesh Surface + Standoff: surface-following paths offset by standoff."""
+        import numpy as np
+        data     = self._model.data
+        mesh     = data.trimesh_mesh
+        up       = data.up_axis
+        standoff = self._ribbon.get_standoff_mm()
+        pairs = [(r, self._model.get_region_faces(r))
+                 for r in sorted(self._selected_regions)
+                 if len(self._model.get_region_faces(r)) > 0]
+        if not pairs:
+            QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
+            return
+        wpt_mm = self._ribbon.get_waypoint_spacing_mm()
+        self.statusBar().showMessage('Generating mesh surface paths…')
+        worker = _PathWorker(data, pairs, spray_mm, waypoint_spacing_mm=wpt_mm,
+                             standoff_mm=standoff)
+        self._face_grid_planes_cache = None
+        self._viewer.clear_face_grid_planes()
+        self._viewer.show_bbox(False)
+        worker.finished.connect(self._on_route_ready)
+        worker.error.connect(self._on_route_error)
+        self._worker = worker
+        worker.start()
 
     def _generate_mesh(self, spray_mm: float) -> None:
         pairs = []
