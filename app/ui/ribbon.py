@@ -557,10 +557,25 @@ class SmartRibbon(QWidget):
         target_vl.addWidget(self._mesh_radio)
         hl.addLayout(target_vl)
 
-        # Standoff — visible only when Face Grid is selected
-        standoff_vl = QVBoxLayout()
-        standoff_vl.setSpacing(2)
-        standoff_vl.setContentsMargins(0, 0, 0, 0)
+        # Face Grid sub-mode + Standoff — visible only when Face Grid is selected
+        fg_vl = QVBoxLayout()
+        fg_vl.setSpacing(2)
+        fg_vl.setContentsMargins(0, 0, 0, 0)
+
+        self._fg_flat_radio   = QRadioButton('Flat Plane')
+        self._fg_bbox_radio   = QRadioButton('Bbox + Standoff')
+        self._fg_mesh_radio   = QRadioButton('Mesh + Standoff')
+        self._fg_flat_radio.setChecked(True)
+        for r in (self._fg_flat_radio, self._fg_bbox_radio, self._fg_mesh_radio):
+            r.setStyleSheet(_RADIO_CSS)
+        self._fg_sub_grp = QButtonGroup(self)
+        self._fg_sub_grp.addButton(self._fg_flat_radio, 0)
+        self._fg_sub_grp.addButton(self._fg_bbox_radio, 1)
+        self._fg_sub_grp.addButton(self._fg_mesh_radio, 2)
+        fg_vl.addWidget(self._fg_flat_radio)
+        fg_vl.addWidget(self._fg_bbox_radio)
+        fg_vl.addWidget(self._fg_mesh_radio)
+
         self._standoff_label = _row_label('Standoff mm')
         self._standoff_spin  = QDoubleSpinBox()
         self._standoff_spin.setRange(0.0, 500.0)
@@ -569,11 +584,14 @@ class SmartRibbon(QWidget):
         self._standoff_spin.setDecimals(1)
         self._standoff_spin.setFixedWidth(70)
         self._standoff_spin.setStyleSheet(_SPIN_CSS)
-        self._standoff_label.setVisible(False)
-        self._standoff_spin.setVisible(False)
-        standoff_vl.addWidget(self._standoff_label)
-        standoff_vl.addWidget(self._standoff_spin)
-        hl.addLayout(standoff_vl)
+        fg_vl.addWidget(self._standoff_label)
+        fg_vl.addWidget(self._standoff_spin)
+
+        # Hide entire sub-panel until Face Grid is selected
+        self._fg_subpanel = QWidget()
+        self._fg_subpanel.setLayout(fg_vl)
+        self._fg_subpanel.setVisible(False)
+        hl.addWidget(self._fg_subpanel)
 
         self._face_grid_radio.toggled.connect(self._on_target_changed)
         g.add_layout(hl)
@@ -812,10 +830,17 @@ class SmartRibbon(QWidget):
     def get_standoff_mm(self) -> float:
         return self._standoff_spin.value()
 
+    def get_face_grid_submode(self) -> str:
+        """'flat' | 'bbox_standoff' | 'mesh_standoff'"""
+        if self._fg_bbox_radio.isChecked():
+            return 'bbox_standoff'
+        if self._fg_mesh_radio.isChecked():
+            return 'mesh_standoff'
+        return 'flat'
+
     def _on_target_changed(self) -> None:
         is_fg = self._face_grid_radio.isChecked()
-        self._standoff_label.setVisible(is_fg)
-        self._standoff_spin.setVisible(is_fg)
+        self._fg_subpanel.setVisible(is_fg)
 
     def is_direction_flipped(self) -> bool:
         return self._ccw_radio.isChecked()
@@ -844,6 +869,7 @@ class SmartRibbon(QWidget):
                   self._unit_combo, self._pitch_spin,
                   self._cw_radio, self._ccw_radio,
                   self._bbox_radio, self._face_grid_radio, self._mesh_radio,
+                  self._fg_flat_radio, self._fg_bbox_radio, self._fg_mesh_radio,
                   self._standoff_spin,
                   self._waypoints_check, self._wpt_interval_spin,
                   self._gen_btn, self._grid_check, self._arrows_check,
