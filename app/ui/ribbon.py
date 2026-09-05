@@ -394,15 +394,15 @@ class SmartRibbon(QWidget):
         hl.setSpacing(0)
 
         # Keep alive on self so GC never destroys child widgets referenced elsewhere.
-        self._stats_group     = self._build_stats()
-        self._waypoints_group = self._build_waypoints()
+        self._stats_group        = self._build_stats()
+        self._waypoints_group    = self._build_waypoints()
+        self._view_group_hidden  = self._build_view()   # attrs kept; not in ribbon strip
         # Sweep: builds _cw_radio/_ccw_radio/_sweep_grp but the Group widget is
         # NOT added to the ribbon — CW/CCW are rendered inline inside Path Mode.
         self._sweep_group_hidden = self._build_sweep()
 
         groups = [
             self._build_file(),
-            self._build_view(),          # Fit + camera presets — now visible
             self._build_select(),
             self._build_parameters(),
             self._build_path_mode(),     # Path mode + CW/CCW inline
@@ -919,9 +919,7 @@ class SmartRibbon(QWidget):
                   self._fg_shadow_radio, self._fg_mesh_radio,
                   self._standoff_spin,
                   self._waypoints_check, self._wpt_interval_spin,
-                  self._gen_btn, self._grid_check, self._arrows_check,
-                  self._fit_btn, self._top_btn, self._bot_btn,
-                  self._front_btn, self._rear_btn, self._left_btn, self._right_btn):
+                  self._gen_btn, self._grid_check, self._arrows_check):
             w.setEnabled(loaded)
         # Path-specific controls always start disabled on (re)load; set_path_exists enables them
         self._clear_btn.setEnabled(False)
