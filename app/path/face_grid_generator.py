@@ -77,12 +77,11 @@ def generate_face_grid_route(
     standoff_mm: float = 0.0,
     mesh_bounds: tuple | None = None,
 ) -> PaintRoute:
-    """Return a PaintRoute of parallel passes on the face plane of the named region.
+    """Return a PaintRoute of parallel passes projected onto the outermost mesh surface.
 
-    Face plane position is derived from mesh_bounds (the full mesh bbox) when
-    provided — this makes zero-standoff coincide with the blue bbox wire cage face,
-    and standoff is measured outward from there.  Pass width per row is clipped to
-    the region's own vertex extent (mesh-shaped), so passes shorten near mesh edges.
+    Each pass row sits at the actual maximum (or minimum) vertex depth within that
+    row's band — "shadow projection" — so paths never land inside recessed geometry.
+    Standoff is then added outward from that surface depth.
     """
     if region not in _resolve_face_map(up_axis):
         raise ValueError(f'Unknown region: {region!r}')
@@ -91,24 +90,12 @@ def generate_face_grid_route(
     face_axis, face_sign = face_map[region]
     _, pass_axis, step_axis = _plane_axes(region, up_axis)
 
-    # Region tight bounds — used for pass/step extent (mesh-shaped passes)
+    # Region vertices — mesh-shaped pass width AND per-row surface depth
     region_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
-    rmins = region_verts.min(axis=0)
-    rmaxs = region_verts.max(axis=0)
-
-    # Face plane position — from full mesh bbox when provided, else region tight bounds
-    if mesh_bounds is not None:
-        bxmin, bxmax, bymin, bymax, bzmin, bzmax = mesh_bounds
-        bmins = np.array([bxmin, bymin, bzmin], dtype=float)
-        bmaxs = np.array([bxmax, bymax, bzmax], dtype=float)
-        face_pos = float(bmaxs[face_axis] if face_sign > 0 else bmins[face_axis])
-    else:
-        face_pos = float(rmaxs[face_axis] if face_sign > 0 else rmins[face_axis])
-    face_pos += face_sign * standoff_mm
 
     all_passes = compute_mesh_shaped_passes(
         face_axis=face_axis,
-        face_pos=face_pos,
+        face_pos=0.0,          # unused when face_sign is provided
         step_axis=step_axis,
         pass_axis=pass_axis,
         step_spacing=spray_width_mm,
@@ -117,6 +104,8 @@ def generate_face_grid_route(
         region=region,
         direction_offset=direction_offset,
         waypoint_spacing_mm=waypoint_spacing_mm,
+        face_sign=face_sign,
+        standoff_mm=standoff_mm,
     )
 
     connections: list[Connection] = []
@@ -178,23 +167,20 @@ def get_face_grid_plane_corners(
         bxmin, bxmax, bymin, bymax, bzmin, bzmax = mesh_bounds
         bmins = np.array([bxmin, bymin, bzmin], dtype=float)
         bmaxs = np.array([bxmax, bymax, bzmax], dtype=float)
-        # Extents always from mesh bbox
         pass_min = float(bmins[pass_axis])
         pass_max = float(bmaxs[pass_axis])
         step_min = float(bmins[step_axis])
         step_max = float(bmaxs[step_axis])
-        # Face position: region tight bounds (blue) or mesh bbox (red/default)
-        if region_face_pos:
-            face_pos = float(rmaxs[face_axis] if face_sign > 0 else rmins[face_axis])
-        else:
-            face_pos = float(bmaxs[face_axis] if face_sign > 0 else bmins[face_axis])
     else:
-        face_pos = float(rmaxs[face_axis] if face_sign > 0 else rmins[face_axis])
         pass_min = float(rmins[pass_axis])
         pass_max = float(rmaxs[pass_axis])
         step_min = float(rmins[step_axis])
         step_max = float(rmaxs[step_axis])
 
+    # Face position: always from region tight bounds (actual mesh surface), not global bbox.
+    # This matches the shadow-projection path generation so the visual plane lines up.
+    if region_face_pos or True:   # always use region surface depth for accuracy
+        face_pos = float(rmaxs[face_axis] if face_sign > 0 else rmins[face_axis])
     face_pos += face_sign * standoff_mm
 
     corners = np.zeros((4, 3), dtype=float)
@@ -224,13 +210,15 @@ def compute_mesh_shaped_passes(
     region: str,
     direction_offset: int = 0,
     waypoint_spacing_mm: float = 0.0,
+    face_sign: int = 0,
+    standoff_mm: float = 0.0,
 ) -> list[PaintPass]:
-    """Return parallel passes whose width follows the mesh silhouette.
+    """Return parallel passes whose width AND depth follow the mesh silhouette.
 
     Parameters
     ----------
     face_axis   : world axis perpendicular to the face plane (0=X,1=Y,2=Z)
-    face_pos    : coordinate of the face plane along face_axis
+    face_pos    : fallback face-plane coordinate (used only when face_sign=0)
     step_axis   : axis along which passes are stacked (vertical spacing)
     pass_axis   : axis along which each pass sweeps (horizontal)
     step_spacing: distance between consecutive passes (spray pitch, mm)
@@ -239,16 +227,26 @@ def compute_mesh_shaped_passes(
     region      : region name string (stored on each PaintPass)
     direction_offset: 0=CW, 1=CCW first pass
     waypoint_spacing_mm: >0 resamples each pass at this interval
+    face_sign   : +1 or -1 — outward normal sign along face_axis.
+                  When non-zero, each row's depth is the outermost vertex in
+                  that band (shadow projection) + standoff, so paths never
+                  land inside recessed geometry.
+    standoff_mm : outward offset from the projected surface (added along
+                  face_sign direction when face_sign != 0).
 
     At each step position the function samples only the region vertices within
     ±65 % of step_spacing around that row.  The min/max of those vertices along
-    pass_axis become the pass endpoints — so the pass is exactly as wide as the
-    mesh is at that height, not a fixed rectangle.
+    pass_axis become the pass endpoints, and — when face_sign is set — the
+    outermost vertex along face_axis becomes the pass depth (shadow projection).
     """
     step_min = float(region_verts[:, step_axis].min())
     step_max = float(region_verts[:, step_axis].max())
     global_pass_min = float(region_verts[:, pass_axis].min())
     global_pass_max = float(region_verts[:, pass_axis].max())
+    global_face_pos = (
+        float(region_verts[:, face_axis].max()) if face_sign > 0
+        else float(region_verts[:, face_axis].min())
+    ) if face_sign != 0 else face_pos
 
     span = step_max - step_min
     if span <= step_spacing:
@@ -265,19 +263,33 @@ def compute_mesh_shaped_passes(
         pass_id = start_id + local_idx
         is_forward = ((pass_id + direction_offset) % 2 == 0)
 
-        # Vertices within this step band → determines actual pass width
+        # Vertices within this step band → determines pass width AND surface depth
         in_band = np.abs(region_verts[:, step_axis] - step_pos) <= band_half
         band_verts = region_verts[in_band]
         if len(band_verts) == 0:
             pass_min = global_pass_min
             pass_max = global_pass_max
+            row_face_pos = global_face_pos
         else:
             pass_min = float(band_verts[:, pass_axis].min())
             pass_max = float(band_verts[:, pass_axis].max())
+            # Shadow projection: outermost surface vertex in this row's band
+            if face_sign > 0:
+                row_face_pos = float(band_verts[:, face_axis].max())
+            elif face_sign < 0:
+                row_face_pos = float(band_verts[:, face_axis].min())
+            else:
+                row_face_pos = face_pos
+
+        # Apply standoff outward from the actual surface
+        if face_sign != 0:
+            row_face_pos += face_sign * standoff_mm
+        else:
+            row_face_pos = face_pos
 
         pt_a = np.zeros(3, dtype=float)
         pt_b = np.zeros(3, dtype=float)
-        pt_a[face_axis] = pt_b[face_axis] = face_pos
+        pt_a[face_axis] = pt_b[face_axis] = row_face_pos
         pt_a[step_axis] = pt_b[step_axis] = step_pos
         pt_a[pass_axis] = pass_min
         pt_b[pass_axis] = pass_max

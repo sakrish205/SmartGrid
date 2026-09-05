@@ -533,13 +533,13 @@ class MainWindow(QMainWindow):
         self._on_route_ready(routes)
 
     def _generate_face_grid(self, spray_mm: float) -> None:
-        """Face Grid: flat plane when standoff = 0, bbox-offset when standoff > 0."""
+        """Face Grid: shadow projection or mesh-surface standoff."""
         if not self._selected_regions:
             QMessageBox.warning(self, 'No selection',
                 'Select a face region first, then generate.')
             return
-        if self._ribbon.get_standoff_mm() > 0.0:
-            self._generate_face_grid_bbox(spray_mm)
+        if self._ribbon.get_face_grid_submode() == 'mesh_standoff':
+            self._generate_face_grid_mesh(spray_mm)
         else:
             self._generate_face_grid_flat(spray_mm)
 
@@ -635,6 +635,29 @@ class MainWindow(QMainWindow):
                 step_spacing=spray_mm,
                 show_grid=self._ribbon.is_show_grid(),
             )
+
+    def _generate_face_grid_mesh(self, spray_mm: float) -> None:
+        """Mesh Surface + Standoff: surface-following paths offset by standoff."""
+        data     = self._model.data
+        mesh     = data.trimesh_mesh
+        standoff = self._ribbon.get_standoff_mm()
+        pairs = [(r, self._model.get_region_faces(r))
+                 for r in sorted(self._selected_regions)
+                 if len(self._model.get_region_faces(r)) > 0]
+        if not pairs:
+            QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
+            return
+        wpt_mm = self._ribbon.get_waypoint_spacing_mm()
+        self.statusBar().showMessage('Generating mesh surface paths…')
+        worker = _PathWorker(data, pairs, spray_mm, waypoint_spacing_mm=wpt_mm,
+                             standoff_mm=standoff)
+        self._face_grid_planes_cache = None
+        self._viewer.clear_face_grid_planes()
+        self._viewer.show_bbox(False)
+        worker.finished.connect(self._on_route_ready)
+        worker.error.connect(self._on_route_error)
+        self._worker = worker
+        worker.start()
 
     def _generate_mesh(self, spray_mm: float) -> None:
         pairs = []
