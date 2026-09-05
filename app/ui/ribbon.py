@@ -239,7 +239,7 @@ _STAT_VALUE_CSS = 'font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;fon
 class _Group(QWidget):
     def __init__(self, title: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         vl = QVBoxLayout(self)
         vl.setContentsMargins(4, 2, 4, 0)
@@ -247,7 +247,7 @@ class _Group(QWidget):
 
         self._content = QWidget()
         self._content.setSizePolicy(
-            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self._hl = QHBoxLayout(self._content)
         self._hl.setContentsMargins(0, 0, 0, 0)
         self._hl.setSpacing(3)
@@ -259,12 +259,10 @@ class _Group(QWidget):
         sep_line.setStyleSheet('color:#d0d0d0;')
 
         lbl = QLabel(title.upper())
-        lbl.setFixedHeight(14)
+        lbl.setFixedHeight(13)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet(_GRP_LABEL_CSS)
-        # Group must be at least as wide as its label text so the title never clips
-        fm = lbl.fontMetrics()
-        self.setMinimumWidth(fm.horizontalAdvance(title.upper()) + 16)
+        lbl.setStyleSheet(_GRP_LABEL_CSS + 'padding:0px;margin:0px;')
+        lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         vl.addWidget(self._content, 1)
         vl.addWidget(sep_line)
@@ -364,7 +362,6 @@ class SmartRibbon(QWidget):
     view_set            = Signal(str)   # direction string
     grid_changed        = Signal()
     arrows_changed      = Signal()
-    plane_changed       = Signal()
     waypoints_changed   = Signal()
     spacing_changed     = Signal()      # Pt Interval changed (not auto-connected; apply on Generate)
     pitch_changed       = Signal()      # Spray pitch changed (not auto-connected; apply on Generate)
@@ -379,8 +376,8 @@ class SmartRibbon(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setMinimumHeight(RIBBON_H)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setFixedHeight(RIBBON_H)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setStyleSheet(
             f'SmartRibbon{{background:{_RIBBON_BG};'
             f'border-top:2px solid #0078d4;'
@@ -577,8 +574,26 @@ class SmartRibbon(QWidget):
 
         # Face Grid sub-panel — shown only when Face Grid is selected
         fg_vl = QVBoxLayout()
-        fg_vl.setSpacing(3)
+        fg_vl.setSpacing(2)
         fg_vl.setContentsMargins(4, 0, 0, 0)
+
+        # Sub-mode: Depth-Adaptive vs Surface Conform
+        self._fg_shadow_radio = QRadioButton('Depth-Adaptive')
+        self._fg_mesh_radio   = QRadioButton('Surface Conform')
+        self._fg_shadow_radio.setChecked(True)
+        self._fg_shadow_radio.setToolTip(
+            'Shadow projection — depth follows outermost surface vertex per band.\n'
+            'Fast and accurate for most surfaces.')
+        self._fg_mesh_radio.setToolTip(
+            'Slices the actual 3D mesh surface.\n'
+            'Use for highly curved surfaces with complex contours.')
+        for r in (self._fg_shadow_radio, self._fg_mesh_radio):
+            r.setStyleSheet(_RADIO_CSS)
+        self._fg_sub_grp = QButtonGroup(self)
+        self._fg_sub_grp.addButton(self._fg_shadow_radio, 0)
+        self._fg_sub_grp.addButton(self._fg_mesh_radio,   1)
+        fg_vl.addWidget(self._fg_shadow_radio)
+        fg_vl.addWidget(self._fg_mesh_radio)
 
         # Standoff row
         standoff_hl = QHBoxLayout()
@@ -704,12 +719,9 @@ class SmartRibbon(QWidget):
 
         self._grid_check   = QCheckBox('Grid')
         self._arrows_check = QCheckBox('Arrows')
-        self._plane_check  = QCheckBox('Plane')
         self._grid_check.setToolTip('Show the spray-pitch reference grid on the selected face plane')
         self._arrows_check.setToolTip('Show travel-direction chevrons along each pass')
-        self._plane_check.setToolTip('Show the blue reference plane (face surface) and red spray plane')
-        self._plane_check.setChecked(True)
-        for c in (self._grid_check, self._arrows_check, self._plane_check):
+        for c in (self._grid_check, self._arrows_check):
             c.setStyleSheet(_CHK_CSS)
 
         vs_btn = _small_btn('Settings', _make_icon('settings', 16))
@@ -718,7 +730,6 @@ class SmartRibbon(QWidget):
 
         vl.addWidget(self._grid_check)
         vl.addWidget(self._arrows_check)
-        vl.addWidget(self._plane_check)
         vl.addWidget(vs_btn)
         g.add_layout(vl)
         return g
@@ -778,7 +789,6 @@ class SmartRibbon(QWidget):
 
         self._grid_check.toggled.connect(lambda _: self.grid_changed.emit())
         self._arrows_check.toggled.connect(lambda _: self.arrows_changed.emit())
-        self._plane_check.toggled.connect(lambda _: self.plane_changed.emit())
         self._waypoints_check.toggled.connect(self._on_waypoints_toggled)
         self._wpt_interval_spin.valueChanged.connect(self._on_spacing_changed)
 
@@ -874,7 +884,8 @@ class SmartRibbon(QWidget):
         return self._standoff_spin.value()
 
     def get_face_grid_submode(self) -> str:
-        return 'shadow'   # Surface Conform removed — Face Grid always uses Depth-Adaptive
+        """'shadow' | 'mesh_standoff'"""
+        return 'mesh_standoff' if self._fg_mesh_radio.isChecked() else 'shadow'
 
     def _on_target_changed(self) -> None:
         self._fg_subpanel.setVisible(self._face_grid_radio.isChecked())
@@ -887,9 +898,6 @@ class SmartRibbon(QWidget):
 
     def is_show_arrows(self) -> bool:
         return self._arrows_check.isChecked()
-
-    def is_show_plane(self) -> bool:
-        return self._plane_check.isChecked()
 
     def is_show_waypoints(self) -> bool:
         return self._waypoints_check.isChecked()
@@ -909,6 +917,7 @@ class SmartRibbon(QWidget):
                   self._unit_combo, self._pitch_spin,
                   self._cw_radio, self._ccw_radio,
                   self._bbox_radio, self._face_grid_radio, self._mesh_radio,
+                  self._fg_shadow_radio, self._fg_mesh_radio,
                   self._standoff_spin,
                   self._waypoints_check, self._wpt_interval_spin,
                   self._gen_btn, self._grid_check, self._arrows_check):
