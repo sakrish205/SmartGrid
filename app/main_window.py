@@ -639,7 +639,6 @@ class MainWindow(QMainWindow):
     def _generate_face_grid_mesh(self, spray_mm: float) -> None:
         """Mesh Surface + Standoff: surface-following paths offset by standoff."""
         data     = self._model.data
-        mesh     = data.trimesh_mesh
         standoff = self._ribbon.get_standoff_mm()
         pairs = [(r, self._model.get_region_faces(r))
                  for r in sorted(self._selected_regions)
@@ -648,6 +647,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
         wpt_mm = self._ribbon.get_waypoint_spacing_mm()
+        self._ribbon.set_generating(True)
         self.statusBar().showMessage('Generating mesh surface paths…')
         worker = _PathWorker(data, pairs, spray_mm, waypoint_spacing_mm=wpt_mm,
                              standoff_mm=standoff)
