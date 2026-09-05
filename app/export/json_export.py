@@ -46,7 +46,7 @@ def export_route_json(
     directions        = sorted({p.direction for r in routes for p in r.passes})
 
     data = {
-        "version": "1.2",
+        "version": "1.3",
         "author": "Saketha Krishna B S",
         "generated_at": datetime.now().isoformat(timespec='seconds'),
         "summary": {
@@ -79,6 +79,7 @@ def _route_to_dict(route: PaintRoute, route_index: int, show_waypoints: bool = T
         if conn is not None:
             execution_sequence.append({"type": "connection", "id": conn.id})
 
+    sn = route.spray_normal
     return {
         "route_index":        route_index,
         "region_id":          route.region_id,
@@ -87,6 +88,7 @@ def _route_to_dict(route: PaintRoute, route_index: int, show_waypoints: bool = T
         "spacing_mm":         route.spacing_mm,
         "total_passes":       route.total_passes,
         "total_length_mm":    round(route.total_length_mm, 3),
+        "spray_normal":       [round(float(sn[0]), 6), round(float(sn[1]), 6), round(float(sn[2]), 6)],
         "execution_sequence": execution_sequence,
         "passes":      [_pass_to_dict(p, show_waypoints) for p in route.passes],
         "connections": [_conn_to_dict(c) for c in route.connections],
@@ -96,6 +98,13 @@ def _route_to_dict(route: PaintRoute, route_index: int, show_waypoints: bool = T
 def _pass_to_dict(p, show_waypoints: bool = True) -> dict:
     length = float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1))) if len(p.points) >= 2 else 0.0
     pts = [[round(v, 4) for v in row] for row in p.points.tolist()]
+    if len(p.points) >= 2:
+        d_vec = p.points[1] - p.points[0]
+        dn = np.linalg.norm(d_vec)
+        d_vec = d_vec / dn if dn > 1e-9 else d_vec
+        pass_dir = [round(float(d_vec[0]), 6), round(float(d_vec[1]), 6), round(float(d_vec[2]), 6)]
+    else:
+        pass_dir = [0.0, 0.0, 0.0]
     d = {
         "id":             p.id,
         "region_id":      p.region_id,
@@ -104,11 +113,12 @@ def _pass_to_dict(p, show_waypoints: bool = True) -> dict:
         "sub_index":      p.sub_index,
         "slice_position": round(float(p.slice_position), 4),
         "length_mm":      round(length, 3),
+        "pass_direction": pass_dir,
         "start":          pts[0],
         "end":            pts[-1],
     }
     if show_waypoints:
-        d["tcp_waypoints"] = pts   # full list only when Waypoints checkbox is ON
+        d["tcp_waypoints"] = pts
     return d
 
 

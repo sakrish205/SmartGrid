@@ -393,21 +393,23 @@ class SmartRibbon(QWidget):
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(0)
 
-        # Build view group (needed for signals/buttons); not shown in ribbon.
-        # Waypoints group: keep alive (widgets referenced on self) but not shown.
-        # Store on self so Python GC does not destroy the child buttons.
-        self._view_group      = self._build_view()
+        # Keep alive on self so GC never destroys child widgets referenced elsewhere.
         self._stats_group     = self._build_stats()
         self._waypoints_group = self._build_waypoints()
+        # Sweep: builds _cw_radio/_ccw_radio/_sweep_grp but the Group widget is
+        # NOT added to the ribbon — CW/CCW are rendered inline inside Path Mode.
+        self._sweep_group_hidden = self._build_sweep()
 
         groups = [
             self._build_file(),
+            self._build_view(),          # Fit + camera presets — now visible
             self._build_select(),
             self._build_parameters(),
-            self._build_path_mode(),
-            self._build_sweep(),
+            self._build_path_mode(),     # Path mode + CW/CCW inline
             self._build_path(),
             self._build_display(),
+            self._waypoints_group,
+            # _stats_group: kept alive above; shown as 3-D viewport overlay only
             self._build_export(),
         ]
 
@@ -524,6 +526,9 @@ class SmartRibbon(QWidget):
         self._pitch_spin.setMinimumWidth(90)
         self._pitch_spin.setMaximumWidth(110)
         self._pitch_spin.setStyleSheet(_SPIN_CSS)
+        self._pitch_spin.setToolTip(
+            'Centre-to-centre spacing between adjacent spray passes.\n'
+            'Typical values: 80–150 mm for automotive surfaces.')
         pitch_hl.addWidget(self._pitch_spin)
 
         vl.addLayout(unit_hl)
@@ -546,6 +551,15 @@ class SmartRibbon(QWidget):
         self._face_grid_radio = QRadioButton('Face Grid')
         self._mesh_radio      = QRadioButton('Mesh Surface')
         self._bbox_radio.setChecked(True)
+        self._bbox_radio.setToolTip(
+            'Generates parallel passes across the full bounding-box face.\n'
+            'Fast — best for flat or near-flat panels.')
+        self._face_grid_radio.setToolTip(
+            'Generates passes confined to the selected mesh region.\n'
+            'Depth follows the actual mesh surface (no paths inside recesses).')
+        self._mesh_radio.setToolTip(
+            'Slices directly through the mesh triangles.\n'
+            'Accurate on complex curved surfaces.')
         for r in (self._bbox_radio, self._face_grid_radio, self._mesh_radio):
             r.setStyleSheet(_RADIO_CSS)
         self._target_grp = QButtonGroup(self)
@@ -562,10 +576,18 @@ class SmartRibbon(QWidget):
         fg_vl.setSpacing(2)
         fg_vl.setContentsMargins(4, 0, 0, 0)   # 4 px left indent shows subordination
 
-        # Mode: Shadow Plane (default) vs Mesh Surface
-        self._fg_shadow_radio = QRadioButton('Shadow Plane')
-        self._fg_mesh_radio   = QRadioButton('Mesh + Standoff')
+        # Mode: Depth-Adaptive (default) vs Surface Conform
+        self._fg_shadow_radio = QRadioButton('Depth-Adaptive')
+        self._fg_mesh_radio   = QRadioButton('Surface Conform')
         self._fg_shadow_radio.setChecked(True)
+        self._fg_shadow_radio.setToolTip(
+            'Per-row depth follows the outermost surface vertex in each pass band.\n'
+            'Paths always sit on the actual mesh surface, never inside recessed geometry.\n'
+            'Fast — recommended for most surfaces.')
+        self._fg_mesh_radio.setToolTip(
+            'Slices the actual 3D mesh surface (including slopes and contours).\n'
+            'Paths conform exactly to the geometry, then lift by the standoff distance.\n'
+            'Use for highly curved or complex surfaces.')
         for r in (self._fg_shadow_radio, self._fg_mesh_radio):
             r.setStyleSheet(_RADIO_CSS)
         self._fg_sub_grp = QButtonGroup(self)
@@ -588,6 +610,9 @@ class SmartRibbon(QWidget):
         self._standoff_spin.setSpecialValueText('off')
         self._standoff_spin.setFixedWidth(82)
         self._standoff_spin.setStyleSheet(_SPIN_CSS)
+        self._standoff_spin.setToolTip(
+            'Distance to lift waypoints above the mesh surface.\n'
+            '"off" (0) places paths directly on the surface.')
         standoff_hl.addWidget(self._standoff_label)
         standoff_hl.addWidget(self._standoff_spin)
         fg_vl.addLayout(standoff_hl)
@@ -598,29 +623,42 @@ class SmartRibbon(QWidget):
         self._fg_subpanel.setVisible(False)
         hl.addWidget(self._fg_subpanel)
 
+        # ── Sweep (CW / CCW) inline — no separate group ──────────────────
+        sweep_sep = QFrame()
+        sweep_sep.setFrameShape(QFrame.Shape.VLine)
+        sweep_sep.setFixedWidth(1)
+        sweep_sep.setStyleSheet(f'color:{_SEP_COLOR};')
+        hl.addWidget(sweep_sep)
+
+        sweep_vl = QVBoxLayout()
+        sweep_vl.setSpacing(2)
+        sweep_vl.setContentsMargins(4, 0, 0, 0)
+        sweep_lbl = _row_label('Sweep')
+        # CW / CCW created here; _build_sweep() must NOT recreate them
+        self._cw_radio  = QRadioButton('↺ CW')
+        self._ccw_radio = QRadioButton('↻ CCW')
+        self._cw_radio.setChecked(True)
+        self._cw_radio.setToolTip('Clockwise pass order (first pass forward)')
+        self._ccw_radio.setToolTip('Counter-clockwise pass order (first pass reversed)')
+        for r in (self._cw_radio, self._ccw_radio):
+            r.setStyleSheet(_RADIO_CSS)
+        self._sweep_grp = QButtonGroup(self)
+        self._sweep_grp.addButton(self._cw_radio,  0)
+        self._sweep_grp.addButton(self._ccw_radio, 1)
+        sweep_vl.addWidget(sweep_lbl)
+        sweep_vl.addWidget(self._cw_radio)
+        sweep_vl.addWidget(self._ccw_radio)
+        hl.addLayout(sweep_vl)
+
         self._face_grid_radio.toggled.connect(self._on_target_changed)
         g.add_layout(hl)
         return g
 
     # ── Sweep ─────────────────────────────────────────────────────────────
+    # CW/CCW are created inside _build_path_mode and rendered there inline.
+    # This stub returns an empty hidden group so existing call-sites don't break.
     def _build_sweep(self) -> _Group:
-        g = _Group('Sweep')
-
-        vl = QVBoxLayout()
-        vl.setSpacing(2)
-        vl.setContentsMargins(0, 0, 0, 0)
-        self._cw_radio  = QRadioButton('CW')
-        self._ccw_radio = QRadioButton('CCW')
-        self._cw_radio.setChecked(True)
-        self._cw_radio.setStyleSheet(_RADIO_CSS)
-        self._ccw_radio.setStyleSheet(_RADIO_CSS)
-        self._sweep_grp = QButtonGroup(self)
-        self._sweep_grp.addButton(self._cw_radio,  0)
-        self._sweep_grp.addButton(self._ccw_radio, 1)
-        vl.addWidget(self._cw_radio)
-        vl.addWidget(self._ccw_radio)
-        g.add_layout(vl)
-        return g
+        return _Group('Sweep')
 
     # ── Waypoints ─────────────────────────────────────────────────────────
     def _build_waypoints(self) -> _Group:
@@ -632,6 +670,7 @@ class SmartRibbon(QWidget):
 
         self._waypoints_check = QCheckBox('Show')
         self._waypoints_check.setStyleSheet(_CHK_CSS)
+        self._waypoints_check.setToolTip('Render individual waypoint dots along each pass')
         vl.addWidget(self._waypoints_check)
 
         interval_hl = QHBoxLayout()
@@ -647,6 +686,10 @@ class SmartRibbon(QWidget):
         self._wpt_interval_spin.setMinimumWidth(80)
         self._wpt_interval_spin.setMaximumWidth(110)
         self._wpt_interval_spin.setStyleSheet(_SPIN_CSS)
+        self._wpt_interval_spin.setToolTip(
+            'Resample pass points at this spacing.\n'
+            '"off" keeps raw slicer points (no resampling).\n'
+            'Set to your robot controller\'s point spacing (e.g. 20 mm).')
         interval_hl.addWidget(self._wpt_interval_spin)
         vl.addLayout(interval_hl)
 
@@ -658,6 +701,8 @@ class SmartRibbon(QWidget):
         g = _Group('Path')
         self._gen_btn   = _primary_btn('Generate\nPath', _make_icon('generate', 20))
         self._clear_btn = _danger_btn('Clear\nPath',  _make_icon('clear', 20))
+        self._gen_btn.setToolTip('Generate spray path for selected regions  [Ctrl+G / F5]')
+        self._clear_btn.setToolTip('Remove all generated paths from the viewport')
         g.add(self._gen_btn)
         g.add_spacing(2)
         g.add(self._clear_btn)
@@ -673,6 +718,8 @@ class SmartRibbon(QWidget):
 
         self._grid_check   = QCheckBox('Grid')
         self._arrows_check = QCheckBox('Arrows')
+        self._grid_check.setToolTip('Show the spray-pitch reference grid on the selected face plane')
+        self._arrows_check.setToolTip('Show travel-direction chevrons along each pass')
         self._grid_check.setStyleSheet(_CHK_CSS)
         self._arrows_check.setStyleSheet(_CHK_CSS)
 

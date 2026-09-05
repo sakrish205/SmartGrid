@@ -297,7 +297,10 @@ class MainWindow(QMainWindow):
         view_menu.addAction('View Settings...', self._open_view_settings)
 
         path_menu = mb.addMenu('Path')
-        path_menu.addAction('Generate\tCtrl+G', self._on_generate)
+        gen_act = QAction('Generate', self)
+        gen_act.setShortcuts(['Ctrl+G', 'F5'])
+        gen_act.triggered.connect(self._on_generate)
+        path_menu.addAction(gen_act)
         path_menu.addAction('Flip Direction',   self._flip_direction)
         path_menu.addSeparator()
         path_menu.addAction('Clear Paths', self._clear_paths)
@@ -544,7 +547,13 @@ class MainWindow(QMainWindow):
             self._generate_face_grid_flat(spray_mm)
 
     def _generate_face_grid_flat(self, spray_mm: float) -> None:
-        """Shadow Plane: passes projected onto outermost mesh surface + optional standoff."""
+        """Depth-Adaptive: passes projected onto outermost mesh surface + optional standoff.
+
+        Uses ALL mesh face indices for the shadow projection so that each row's depth
+        is the outermost vertex of the entire mesh silhouette (including slopes and
+        transitions) — not just the flat classified-region faces.  The region still
+        controls the projection direction (face_axis / face_sign).
+        """
         data     = self._model.data
         mesh     = data.trimesh_mesh
         up       = data.up_axis
@@ -552,29 +561,32 @@ class MainWindow(QMainWindow):
         wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
         standoff = self._ribbon.get_standoff_mm()
         bounds   = tuple(data.pyvista_mesh.bounds)
+
+        # All face indices — shadow projection uses the full mesh silhouette
+        all_face_indices = np.arange(len(mesh.faces), dtype=np.int64)
+
         routes: list[PaintRoute] = []
         spray_corners: list[np.ndarray] = []
         ref_corners_first: np.ndarray | None = None
 
         for region in sorted(self._selected_regions):
-            face_indices = self._model.get_region_faces(region)
-            if len(face_indices) == 0:
+            if len(self._model.get_region_faces(region)) == 0:
                 continue
             try:
                 routes.append(_face_grid_generator.generate_face_grid_route(
-                    region, face_indices, mesh, up,
+                    region, all_face_indices, mesh, up,
                     spray_width_mm=spray_mm,
                     direction_offset=offset,
                     waypoint_spacing_mm=wpt_mm,
                     standoff_mm=standoff,
                 ))
                 spray_corners.append(_face_grid_generator.get_face_grid_plane_corners(
-                    region, face_indices, mesh, up,
+                    region, all_face_indices, mesh, up,
                     standoff_mm=standoff, mesh_bounds=bounds,
                 ))
                 if ref_corners_first is None:
                     ref_corners_first = _face_grid_generator.get_face_grid_plane_corners(
-                        region, face_indices, mesh, up,
+                        region, all_face_indices, mesh, up,
                         standoff_mm=0.0, mesh_bounds=bounds,
                     )
             except Exception as exc:
@@ -595,80 +607,60 @@ class MainWindow(QMainWindow):
                 show_grid=self._ribbon.is_show_grid(),
             )
 
-    def _generate_face_grid_bbox(self, spray_mm: float) -> None:
-        """Bbox + Standoff: rectangular bbox passes shifted outward by standoff."""
-        data     = self._model.data
-        up       = data.up_axis
-        offset   = 1 if self._ribbon.is_direction_flipped() else 0
-        wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
-        standoff = self._ribbon.get_standoff_mm()
-        bounds   = tuple(data.pyvista_mesh.bounds)
-        routes: list[PaintRoute] = []
-        all_corners = []
-        for region in sorted(self._selected_regions):
-            face_indices = self._model.get_region_faces(region)
-            try:
-                routes.append(_bbox_generator.generate_bbox_route(
-                    region, bounds, spray_mm, up,
-                    direction='horizontal', direction_offset=offset,
-                    waypoint_spacing_mm=wpt_mm,
-                    standoff_mm=standoff,
-                ))
-                all_corners.append(_face_grid_generator.get_face_grid_plane_corners(
-                    region, face_indices if len(face_indices) else np.arange(0),
-                    data.trimesh_mesh, up,
-                    standoff_mm=standoff, mesh_bounds=bounds,
-                ))
-            except Exception as exc:
-                QMessageBox.critical(self, 'Generation error',
-                    f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
-                return
-        self._viewer.show_bbox(False)
-        if not routes:
-            QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
-            return
-        self._on_route_ready(routes)
-        if all_corners:
-            self._face_grid_planes_cache = (None, all_corners[0], spray_mm)
-            self._viewer.show_face_grid_planes(
-                None, all_corners[0],
-                step_spacing=spray_mm,
-                show_grid=self._ribbon.is_show_grid(),
-            )
-
     def _generate_face_grid_mesh(self, spray_mm: float) -> None:
-        """Mesh Surface + Standoff: surface-following paths + red standoff reference plane."""
+        """Surface Conform: 3D surface-following paths on all forward-facing mesh faces.
+
+        Uses all faces whose normal points in the projection direction (face_sign > 0)
+        so the slicer covers the full visible surface including slopes, not just the
+        flat classified-region faces.  The flat reference grid is always standard
+        (drawn on the plane, not conformed to the 3D surface) and obeys the Grid checkbox.
+        """
         data     = self._model.data
         mesh     = data.trimesh_mesh
         up       = data.up_axis
         standoff = self._ribbon.get_standoff_mm()
         bounds   = tuple(data.pyvista_mesh.bounds)
 
-        pairs = [(r, self._model.get_region_faces(r))
-                 for r in sorted(self._selected_regions)
-                 if len(self._model.get_region_faces(r)) > 0]
+        # Build per-region face lists using ALL forward-facing faces for full coverage
+        from app.path.face_grid_generator import _resolve_face_map as _rfm
+        face_map = _rfm(up)
+        pairs = []
+        for region in sorted(self._selected_regions):
+            if len(self._model.get_region_faces(region)) == 0:
+                continue
+            face_axis, face_sign = face_map[region]
+            # Include every face whose normal has a component in the projection direction
+            visible = np.where(mesh.face_normals[:, face_axis] * face_sign > 0.0)[0].astype(np.int64)
+            if len(visible) == 0:
+                visible = self._model.get_region_faces(region)  # fallback
+            pairs.append((region, visible))
+
         if not pairs:
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
 
-        # Show the red spray plane immediately (paths arrive async via worker)
-        first_region, first_faces = pairs[0]
+        # Show reference planes immediately — paths arrive async via worker
+        # Use the visible (forward-facing) faces for correct surface tilt
+        first_region, first_visible = pairs[0]
+        ref_corners = _face_grid_generator.get_face_grid_plane_corners(
+            first_region, first_visible, mesh, up,
+            standoff_mm=0.0, mesh_bounds=bounds,
+        )
         spray_corners = _face_grid_generator.get_face_grid_plane_corners(
-            first_region, first_faces, mesh, up,
+            first_region, first_visible, mesh, up,
             standoff_mm=standoff, mesh_bounds=bounds,
         )
-        # Mesh-surface mode: no flat grid — paths follow actual surface, not the plane
-        self._face_grid_planes_cache = (None, spray_corners, spray_mm)
+        self._face_grid_planes_cache = (ref_corners, spray_corners, spray_mm)
         self._viewer.show_face_grid_planes(
-            None, spray_corners,
+            ref_corners, spray_corners,
             step_spacing=spray_mm,
-            show_grid=False,   # grid never shown for mesh-surface mode
+            show_grid=self._ribbon.is_show_grid(),   # flat reference grid, user-controlled
         )
         self._viewer.show_bbox(False)
 
         wpt_mm = self._ribbon.get_waypoint_spacing_mm()
         self._ribbon.set_generating(True)
-        self.statusBar().showMessage('Generating mesh surface paths…')
+        self.statusBar().showMessage('Generating surface-conform paths…')
         worker = _PathWorker(data, pairs, spray_mm, waypoint_spacing_mm=wpt_mm,
                              standoff_mm=standoff)
         worker.finished.connect(self._on_route_ready)
@@ -771,15 +763,11 @@ class MainWindow(QMainWindow):
         # Face grid mode: redraw spray plane from cache
         if self._face_grid_planes_cache is not None:
             ref_c, std_c, spc = self._face_grid_planes_cache
-            # Mesh+Standoff paths follow actual surface — grid on a flat plane is misleading
-            is_mesh_mode = (
-                self._ribbon.get_path_target() == 'face_grid'
-                and self._ribbon.get_face_grid_submode() == 'mesh_standoff'
-            )
+            # Grid is always the flat standard reference (pitch divisions) — user controls it
             self._viewer.show_face_grid_planes(
                 ref_c, std_c,
                 step_spacing=spc,
-                show_grid=False if is_mesh_mode else self._ribbon.is_show_grid(),
+                show_grid=self._ribbon.is_show_grid(),
             )
             return
 

@@ -40,3 +40,5 @@ class PaintRoute:
     spacing_mm: float
     total_passes: int
     total_length_mm: float
+    spray_normal: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    # Unit vector: spray gun approach direction perpendicular to the surface plane.
