@@ -787,11 +787,16 @@ def _make_plane_grid(
     corners: np.ndarray,
     spacing: float,
 ) -> Optional[pv.PolyData]:
-    """Return a full grid (both axes) on a quad plane at `spacing` intervals.
+    """Grid lines that denote actual spray pass positions on a face plane.
+
+    Pass centerlines run along edge_a (pass direction) at spacing/2,
+    spacing*3/2, spacing*5/2 … — exactly where generate_face_grid_route
+    places each pass (first = step_min + spacing/2, then every spacing).
+    Pass boundary lines run along edge_b at 0, spacing, 2*spacing … to
+    show the full spray band width.  Together they form a square grid
+    aligned to the real toolpath, not an arbitrary offset from the corner.
 
     corners — (4,3): [BL, BR, TR, TL] from get_face_grid_plane_corners.
-    Mirrors the _make_grid_lines approach: np.arange sweep, mesh.lines assign,
-    tiny outward offset to avoid z-fighting with the plane fill.
     """
     c = np.asarray(corners, dtype=float)
     edge_a = c[1] - c[0]   # pass direction  BL→BR
@@ -801,11 +806,10 @@ def _make_plane_grid(
     if len_a < 1e-9 or len_b < 1e-9 or spacing <= 0:
         return None
 
-    # Unit vectors
     ua = edge_a / len_a
     ub = edge_b / len_b
 
-    # Tiny normal offset (0.2 % of shorter edge) to avoid z-fighting
+    # Tiny normal offset to avoid z-fighting with the plane fill
     normal = np.cross(ua, ub)
     n_len  = float(np.linalg.norm(normal))
     offs   = normal / n_len * min(len_a, len_b) * 0.002 if n_len > 1e-9 else np.zeros(3)
@@ -820,16 +824,17 @@ def _make_plane_grid(
         cells.extend([2, idx, idx + 1])
         idx += 2
 
-    # Lines along edge_a (pass direction) — one every `spacing` along edge_b
-    for t in np.arange(0.0, len_b + spacing * 0.01, spacing):
-        t = min(t, len_b)
+    # Pass CENTERLINES along edge_a — start at spacing/2, step by spacing
+    # (matches compute_mesh_shaped_passes: first = step_min + spacing/2)
+    t = spacing / 2.0
+    while t < len_b - 1e-6:
         p0 = c[0] + ub * t
         _seg(p0, p0 + edge_a)
+        t += spacing
 
-    # Lines along edge_b (step direction) — one every `spacing` along edge_a
+    # Pass BOUNDARIES along edge_b — at 0, spacing, 2*spacing …
     for t in np.arange(0.0, len_a + spacing * 0.01, spacing):
-        t = min(t, len_a)
-        p0 = c[0] + ua * t
+        p0 = c[0] + ua * min(float(t), len_a)
         _seg(p0, p0 + edge_b)
 
     if not all_pts:
