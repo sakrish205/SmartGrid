@@ -1,21 +1,19 @@
-"""Generate flat spray-paint passes on the face plane of a named mesh region.
+"""Generate spray-paint passes on a named mesh region face using shadow projection.
 
 Public API
 ----------
 generate_face_grid_route(...)
-    Mesh-shaped passes: each pass spans only as wide as the mesh is at that
-    height, derived from region vertex bands.  Face plane position anchors to
-    the full mesh bbox face (blue reference line); standoff is measured from
-    there outward (red robot path plane).
+    Shadow-projected passes: each row's depth is the outermost vertex in that
+    row's band, so paths always sit on (or above, with standoff) the actual
+    mesh surface rather than a global flat bbox plane.
 
 get_face_grid_plane_corners(...)
-    Returns the 4 corners of either the blue (standoff=0) or red (standoff>0)
-    reference rectangle for 3-D visualisation.
+    Returns the 4 corners of the spray plane rectangle for 3-D visualisation.
+    Always uses region vertex tight bounds for face depth (matches paths).
 
 compute_mesh_shaped_passes(...)
-    Low-level: given explicit geometry parameters and the region vertex cloud,
-    returns a list[PaintPass] with per-row width clipped to the mesh silhouette.
-    Call this directly if you need the pass list without the full route wrapper.
+    Low-level: given geometry parameters and the region vertex cloud, returns
+    list[PaintPass] with per-row width AND depth clipped to the mesh silhouette.
 """
 from __future__ import annotations
 import numpy as np
@@ -24,9 +22,8 @@ import trimesh
 from app.path.path_model import PaintPass, Connection, PaintRoute
 from app.path.resampler import resample_arc
 
-# Public plane names — shown in viewer legend and used as actor keys
-FACE_PLANE_NAME  = 'Face Plane'   # blue: bbox face at zero standoff
-SPRAY_PLANE_NAME = 'Spray Plane'  # red:  robot path at standoff distance
+FACE_PLANE_NAME  = 'Face Plane'
+SPRAY_PLANE_NAME = 'Spray Plane'
 
 
 def _axes(up_axis: int) -> tuple[int, int, int]:
@@ -50,21 +47,21 @@ def _resolve_face_map(up_axis: int) -> dict[str, tuple[int, int]]:
 def _plane_axes(region: str, up_axis: int) -> tuple[int, int, int]:
     """Return (face_axis, pass_axis, step_axis) for the named region."""
     up, fwd, right = _axes(up_axis)
-    face_map = _resolve_face_map(up_axis)
-    face_axis = face_map[region][0]
+    face_axis = _resolve_face_map(up_axis)[region][0]
 
     if region in ('TOP', 'BOTTOM'):
-        pass_axis = right
-        step_axis = fwd
+        pass_axis, step_axis = right, fwd
     elif region in ('FRONT', 'REAR'):
-        pass_axis = right
-        step_axis = up
+        pass_axis, step_axis = right, up
     else:  # LEFT / RIGHT
-        pass_axis = fwd
-        step_axis = up
+        pass_axis, step_axis = fwd, up
 
     return face_axis, pass_axis, step_axis
 
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 def generate_face_grid_route(
     region: str,
@@ -75,13 +72,12 @@ def generate_face_grid_route(
     direction_offset: int = 0,
     waypoint_spacing_mm: float = 0.0,
     standoff_mm: float = 0.0,
-    mesh_bounds: tuple | None = None,
 ) -> PaintRoute:
-    """Return a PaintRoute of parallel passes projected onto the outermost mesh surface.
+    """Return a PaintRoute of parallel passes using shadow projection.
 
-    Each pass row sits at the actual maximum (or minimum) vertex depth within that
-    row's band — "shadow projection" — so paths never land inside recessed geometry.
-    Standoff is then added outward from that surface depth.
+    Each row's depth is the outermost vertex within that row's band along the
+    face axis.  Standoff is added outward from that surface, so paths never
+    land inside recessed geometry.
     """
     if region not in _resolve_face_map(up_axis):
         raise ValueError(f'Unknown region: {region!r}')
@@ -90,12 +86,10 @@ def generate_face_grid_route(
     face_axis, face_sign = face_map[region]
     _, pass_axis, step_axis = _plane_axes(region, up_axis)
 
-    # Region vertices — mesh-shaped pass width AND per-row surface depth
     region_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
 
     all_passes = compute_mesh_shaped_passes(
         face_axis=face_axis,
-        face_pos=0.0,          # unused when face_sign is provided
         step_axis=step_axis,
         pass_axis=pass_axis,
         step_spacing=spray_width_mm,
@@ -123,8 +117,7 @@ def generate_face_grid_route(
 
     total_length = sum(
         float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1)))
-        for p in all_passes
-        if len(p.points) >= 2
+        for p in all_passes if len(p.points) >= 2
     )
 
     return PaintRoute(
@@ -145,15 +138,12 @@ def get_face_grid_plane_corners(
     up_axis: int,
     standoff_mm: float = 0.0,
     mesh_bounds: tuple | None = None,
-    region_face_pos: bool = False,
 ) -> np.ndarray:
-    """Return (4, 3) corners of the face grid plane rectangle for visualization.
+    """Return (4, 3) corners of the spray plane rectangle for visualization.
 
-    mesh_bounds  — when given, plane extents (width/height) use the full mesh bbox.
-    region_face_pos — when True, face position is taken from region vertex tight
-                      bounds rather than the mesh bbox, while extents still follow
-                      mesh_bounds.  Use this for the blue Face Plane so it sits
-                      exactly on the actual mesh face surface.
+    Face depth always comes from region vertex tight bounds (matching path
+    shadow projection).  Width/height come from mesh_bounds when provided so
+    the visual plane spans the full bbox face, giving a clear reference frame.
     """
     face_map = _resolve_face_map(up_axis)
     face_axis, face_sign = face_map[region]
@@ -163,24 +153,19 @@ def get_face_grid_plane_corners(
     rmins = region_verts.min(axis=0)
     rmaxs = region_verts.max(axis=0)
 
+    # Width/height: full bbox when available, else region extent
     if mesh_bounds is not None:
-        bxmin, bxmax, bymin, bymax, bzmin, bzmax = mesh_bounds
-        bmins = np.array([bxmin, bymin, bzmin], dtype=float)
-        bmaxs = np.array([bxmax, bymax, bzmax], dtype=float)
-        pass_min = float(bmins[pass_axis])
-        pass_max = float(bmaxs[pass_axis])
-        step_min = float(bmins[step_axis])
-        step_max = float(bmaxs[step_axis])
+        bx0, bx1, by0, by1, bz0, bz1 = mesh_bounds
+        b0 = np.array([bx0, by0, bz0], dtype=float)
+        b1 = np.array([bx1, by1, bz1], dtype=float)
+        pass_min, pass_max = float(b0[pass_axis]), float(b1[pass_axis])
+        step_min, step_max = float(b0[step_axis]), float(b1[step_axis])
     else:
-        pass_min = float(rmins[pass_axis])
-        pass_max = float(rmaxs[pass_axis])
-        step_min = float(rmins[step_axis])
-        step_max = float(rmaxs[step_axis])
+        pass_min, pass_max = float(rmins[pass_axis]), float(rmaxs[pass_axis])
+        step_min, step_max = float(rmins[step_axis]), float(rmaxs[step_axis])
 
-    # Face position: always from region tight bounds (actual mesh surface), not global bbox.
-    # This matches the shadow-projection path generation so the visual plane lines up.
-    if region_face_pos or True:   # always use region surface depth for accuracy
-        face_pos = float(rmaxs[face_axis] if face_sign > 0 else rmins[face_axis])
+    # Depth: always region outermost surface + standoff
+    face_pos = float(rmaxs[face_axis] if face_sign > 0 else rmins[face_axis])
     face_pos += face_sign * standoff_mm
 
     corners = np.zeros((4, 3), dtype=float)
@@ -197,11 +182,12 @@ def get_face_grid_plane_corners(
     return corners
 
 
-# ── Public low-level helper ──────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Low-level helper
+# ---------------------------------------------------------------------------
 
 def compute_mesh_shaped_passes(
     face_axis: int,
-    face_pos: float,
     step_axis: int,
     pass_axis: int,
     step_spacing: float,
@@ -212,41 +198,26 @@ def compute_mesh_shaped_passes(
     waypoint_spacing_mm: float = 0.0,
     face_sign: int = 0,
     standoff_mm: float = 0.0,
+    face_pos: float = 0.0,   # used only when face_sign == 0
 ) -> list[PaintPass]:
     """Return parallel passes whose width AND depth follow the mesh silhouette.
 
-    Parameters
-    ----------
-    face_axis   : world axis perpendicular to the face plane (0=X,1=Y,2=Z)
-    face_pos    : fallback face-plane coordinate (used only when face_sign=0)
-    step_axis   : axis along which passes are stacked (vertical spacing)
-    pass_axis   : axis along which each pass sweeps (horizontal)
-    step_spacing: distance between consecutive passes (spray pitch, mm)
-    region_verts: (N,3) float array — ALL vertices of the selected region
-    start_id    : first pass id (for multi-region indexing)
-    region      : region name string (stored on each PaintPass)
-    direction_offset: 0=CW, 1=CCW first pass
-    waypoint_spacing_mm: >0 resamples each pass at this interval
-    face_sign   : +1 or -1 — outward normal sign along face_axis.
-                  When non-zero, each row's depth is the outermost vertex in
-                  that band (shadow projection) + standoff, so paths never
-                  land inside recessed geometry.
-    standoff_mm : outward offset from the projected surface (added along
-                  face_sign direction when face_sign != 0).
-
-    At each step position the function samples only the region vertices within
-    ±65 % of step_spacing around that row.  The min/max of those vertices along
-    pass_axis become the pass endpoints, and — when face_sign is set — the
-    outermost vertex along face_axis becomes the pass depth (shadow projection).
+    When face_sign is non-zero each row's depth is the outermost vertex in
+    that row's band along face_axis (shadow projection), and standoff_mm is
+    added outward from there.  When face_sign == 0 the fixed face_pos is used.
     """
     step_min = float(region_verts[:, step_axis].min())
     step_max = float(region_verts[:, step_axis].max())
     global_pass_min = float(region_verts[:, pass_axis].min())
     global_pass_max = float(region_verts[:, pass_axis].max())
-    global_face_pos = (
-        float(region_verts[:, face_axis].max()) if face_sign > 0
-        else float(region_verts[:, face_axis].min())
-    ) if face_sign != 0 else face_pos
+
+    # Global fallback depth (outermost vertex of whole region)
+    if face_sign > 0:
+        global_surface = float(region_verts[:, face_axis].max())
+    elif face_sign < 0:
+        global_surface = float(region_verts[:, face_axis].min())
+    else:
+        global_surface = face_pos
 
     span = step_max - step_min
     if span <= step_spacing:
@@ -255,37 +226,32 @@ def compute_mesh_shaped_passes(
         first = step_min + step_spacing / 2.0
         step_positions = list(np.arange(first, step_max, step_spacing))
 
-    # Search band: wide enough to always find some vertices near each step line
-    band_half = step_spacing * 0.65
+    band_half = step_spacing * 0.65   # wide enough to find vertices at each row
 
     passes: list[PaintPass] = []
     for local_idx, step_pos in enumerate(step_positions):
-        pass_id = start_id + local_idx
+        pass_id   = start_id + local_idx
         is_forward = ((pass_id + direction_offset) % 2 == 0)
 
-        # Vertices within this step band → determines pass width AND surface depth
-        in_band = np.abs(region_verts[:, step_axis] - step_pos) <= band_half
+        in_band    = np.abs(region_verts[:, step_axis] - step_pos) <= band_half
         band_verts = region_verts[in_band]
-        if len(band_verts) == 0:
-            pass_min = global_pass_min
-            pass_max = global_pass_max
-            row_face_pos = global_face_pos
-        else:
-            pass_min = float(band_verts[:, pass_axis].min())
-            pass_max = float(band_verts[:, pass_axis].max())
-            # Shadow projection: outermost surface vertex in this row's band
-            if face_sign > 0:
-                row_face_pos = float(band_verts[:, face_axis].max())
-            elif face_sign < 0:
-                row_face_pos = float(band_verts[:, face_axis].min())
-            else:
-                row_face_pos = face_pos
 
-        # Apply standoff outward from the actual surface
-        if face_sign != 0:
-            row_face_pos += face_sign * standoff_mm
+        if len(band_verts) == 0:
+            pass_min   = global_pass_min
+            pass_max   = global_pass_max
+            row_surface = global_surface
         else:
-            row_face_pos = face_pos
+            pass_min    = float(band_verts[:, pass_axis].min())
+            pass_max    = float(band_verts[:, pass_axis].max())
+            if face_sign > 0:
+                row_surface = float(band_verts[:, face_axis].max())
+            elif face_sign < 0:
+                row_surface = float(band_verts[:, face_axis].min())
+            else:
+                row_surface = face_pos
+
+        row_face_pos = (row_surface + face_sign * standoff_mm
+                        if face_sign != 0 else face_pos)
 
         pt_a = np.zeros(3, dtype=float)
         pt_b = np.zeros(3, dtype=float)
