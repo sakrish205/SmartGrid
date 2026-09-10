@@ -242,9 +242,34 @@ class MainWindow(QMainWindow):
         ribbon_scroll.setStyleSheet('QScrollArea{background:transparent;border:none;}')
         vl.addWidget(ribbon_scroll)
 
-        # 3-D viewport — takes all remaining space
+        # 3-D viewport — takes all remaining space; ViewCube overlaid bottom-right
+        from app.ui.view_cube import ViewCube
+        viewer_container = QWidget()
+        viewer_container.setContentsMargins(0, 0, 0, 0)
+        from PySide6.QtWidgets import QStackedLayout
+        viewer_stack = QStackedLayout(viewer_container)
+        viewer_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
+
         self._viewer = MeshViewer()
-        vl.addWidget(self._viewer, stretch=1)
+        viewer_stack.addWidget(self._viewer)
+
+        cube_anchor = QWidget()
+        cube_anchor.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        cube_anchor.setStyleSheet('background:transparent;')
+        from PySide6.QtWidgets import QHBoxLayout
+        ca_hl = QHBoxLayout(cube_anchor)
+        ca_hl.setContentsMargins(0, 0, 8, 8)
+        ca_hl.addStretch()
+        from PySide6.QtWidgets import QVBoxLayout as _QVL
+        ca_vl = _QVL()
+        ca_vl.addStretch()
+        self._view_cube = ViewCube()
+        self._view_cube.view_changed.connect(self._viewer.set_view)
+        ca_vl.addWidget(self._view_cube)
+        ca_hl.addLayout(ca_vl)
+        viewer_stack.addWidget(cube_anchor)
+
+        vl.addWidget(viewer_container, stretch=1)
 
         self._viewer.installEventFilter(self)
 
