@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QRadioButton, QButtonGroup,
     QLabel, QVBoxLayout as QVBox, QScrollArea, QFrame,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QEvent
+from PySide6.QtCore import Qt, QThread, Signal, QEvent, QSettings
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 
 from models.mesh_model import MeshModel
@@ -212,7 +212,7 @@ class MainWindow(QMainWindow):
         self._last_params:       GenerationParams | None = None
         self._worker:        Optional[QThread] = None
         self._load_worker:   Optional[QThread] = None
-        self._current_colors: dict[str, str]  = dict(_COLOR_DEFAULTS)
+        self._current_colors: dict[str, str]  = self._load_view_settings()
         self._face_grid_planes_cache: tuple | None = None   # (ref_corners, standoff_corners, spray_mm)
 
         self._build_ui()
@@ -331,7 +331,39 @@ class MainWindow(QMainWindow):
         return super().eventFilter(obj, event)
 
     # ------------------------------------------------------------------
-    # View settings
+    # Settings persistence
+    # ------------------------------------------------------------------
+
+    _SETTINGS_ORG = 'SmartGrid'
+    _SETTINGS_APP = 'SmartGrid'
+
+    def _load_view_settings(self) -> dict[str, str]:
+        """Return view-settings dict: saved values merged over defaults."""
+        s = QSettings(self._SETTINGS_ORG, self._SETTINGS_APP)
+        colors = dict(_COLOR_DEFAULTS)
+        s.beginGroup('view')
+        for key in colors:
+            val = s.value(key)
+            if val is not None:
+                colors[key] = str(val)
+        s.endGroup()
+        return colors
+
+    def _save_view_settings(self) -> None:
+        """Persist current view settings to QSettings (Windows registry)."""
+        s = QSettings(self._SETTINGS_ORG, self._SETTINGS_APP)
+        s.beginGroup('view')
+        for key, val in self._current_colors.items():
+            s.setValue(key, val)
+        s.endGroup()
+        s.sync()
+
+    def closeEvent(self, event) -> None:
+        self._save_view_settings()
+        super().closeEvent(event)
+
+    # ------------------------------------------------------------------
+    # View settings dialog
     # ------------------------------------------------------------------
 
     def _open_view_settings(self) -> None:
@@ -339,6 +371,7 @@ class MainWindow(QMainWindow):
         dlg.colors_changed.connect(self._on_colors_changed)
         if dlg.exec():
             self._current_colors = dlg.colors
+            self._save_view_settings()
         # On cancel: ViewSettingsDialog emits colors_changed with the original
         # colors, which _on_colors_changed already handles — no extra call needed.
 
