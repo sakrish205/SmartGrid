@@ -8,7 +8,7 @@ def main() -> None:
     from PySide6.QtWidgets import QApplication
     app = QApplication(sys.argv)
     app.setApplicationName("SmartGrid")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion("1.3")
 
     # Deferred import so Qt is ready before VTK registers its OpenGL context
     from app.main_window import MainWindow

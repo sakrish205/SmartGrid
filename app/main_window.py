@@ -309,7 +309,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction('Exit', self.close)
 
         view_menu = mb.addMenu('View')
-        view_menu.addAction('Fit All\tCtrl+Home', lambda: self._viewer.fit_all())
+        view_menu.addAction('Fit All\tCtrl+Home', lambda: self._viewer and self._viewer.fit_all())
         view_menu.addAction('Top View',    lambda: self._on_view_set('top'))
         view_menu.addAction('Bottom View', lambda: self._on_view_set('bottom'))
         view_menu.addAction('Front View',  lambda: self._on_view_set('front'))
@@ -317,8 +317,8 @@ class MainWindow(QMainWindow):
         view_menu.addAction('Left View',   lambda: self._on_view_set('left'))
         view_menu.addAction('Right View',  lambda: self._on_view_set('right'))
         view_menu.addSeparator()
-        view_menu.addAction('Rotate Left  90',  lambda: self._viewer.roll_view(-90))
-        view_menu.addAction('Rotate Right 90',  lambda: self._viewer.roll_view(+90))
+        view_menu.addAction('Rotate Left  90',  lambda: self._viewer and self._viewer.roll_view(-90))
+        view_menu.addAction('Rotate Right 90',  lambda: self._viewer and self._viewer.roll_view(+90))
         view_menu.addSeparator()
         view_menu.addAction('View Settings...', self._open_view_settings)
 
@@ -575,7 +575,7 @@ class MainWindow(QMainWindow):
 
         up_labels = {0: 'X', 1: 'Y', 2: 'Z'}
         src = ''
-        if self._model.data and self._model.data.source_path:
+        if self._model.data is not None and self._model.data.source_path:
             src = _os.path.basename(self._model.data.source_path)
 
         return GenerationParams(
