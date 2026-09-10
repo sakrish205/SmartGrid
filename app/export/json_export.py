@@ -2,13 +2,18 @@
 
 Structure:
   root
-  ├── version, author, generated_at
-  ├── summary          — totals across all routes
+  ├── version
+  ├── generation_params   — software, timestamp, source file, all path settings
+  ├── summary             — totals across all routes
   └── routes[]
-      ├── route metadata (region, spacing, etc.)
+      ├── route metadata (region, spacing, spray_normal)
+      │     spray_normal is the OUTWARD surface unit normal.
+      │     OLP tool approach direction = -spray_normal (gun points into surface).
+      │     Full 6-DOF tool frame: Z = -spray_normal, X = pass_direction,
+      │                            Y = cross(Z, X).
       ├── execution_sequence[]  — ordered list of {type, id} for robot program
-      ├── passes[]     — full pass data (points are the TCP waypoints)
-      └── connections[] — straight-line air moves between passes
+      ├── passes[]     — full pass data (points are the TCP waypoints in mm)
+      └── connections[] — air moves between passes (is_spray = False)
 """
 from __future__ import annotations
 import json

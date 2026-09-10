@@ -47,7 +47,7 @@ _FIELDS = [
 def _write_metadata(f, params: GenerationParams) -> None:
     """Write # comment lines documenting the generation run."""
     lines = [
-        '# ── SmartGrid Toolpath Export ───────────────────────────────────',
+        '# -- SmartGrid Toolpath Export ------------------------------------------',
         f'# software          : {params.software}',
         f'# generated_at      : {params.generated_at}',
         f'# source_file       : {params.source_file}',
@@ -63,7 +63,12 @@ def _write_metadata(f, params: GenerationParams) -> None:
         ),
         f'# direction         : {params.direction}',
         f'# sweep             : {params.sweep}',
-        '# ─────────────────────────────────────────────────────────────────',
+        '#',
+        '# OLP tool frame convention:',
+        '#   spray_nx/ny/nz = outward surface normal (gun approach = -spray_n)',
+        '#   pass_dx/dy/dz  = travel direction (tool X-axis)',
+        '#   tool Y = cross(tool_Z, tool_X)  where tool_Z = -spray_n',
+        '# -----------------------------------------------------------------------',
         '',
     ]
     for line in lines:
