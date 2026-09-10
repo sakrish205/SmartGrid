@@ -460,8 +460,6 @@ class SmartRibbon(QWidget):
         for region in _REGIONS:
             short = {'BOTTOM': 'BOT', 'FRONT': 'FRT', 'REAR': 'REAR',
                      'LEFT': 'LEFT', 'RIGHT': 'RIGHT'}.get(region, region)
-            if region == 'RIGHT':
-                row1.addStretch(1)   # push RGT to the far right
             btn = _toggle_btn(short)
             btn.setToolTip(region)
             self._region_btns[region] = btn
@@ -633,7 +631,7 @@ class SmartRibbon(QWidget):
     # ── Sweep ─────────────────────────────────────────────────────────────
     def _build_sweep(self) -> _Group:
         g = _Group('Sweep')
-        g.setMinimumWidth(68)
+        g.setMinimumWidth(84)
         vl = QVBoxLayout()
         vl.setSpacing(2)
         vl.setContentsMargins(4, 0, 4, 0)
@@ -655,6 +653,7 @@ class SmartRibbon(QWidget):
     # ── Waypoints ─────────────────────────────────────────────────────────
     def _build_waypoints(self) -> _Group:
         g = _Group('Waypoints')
+        g.setMinimumWidth(100)
 
         vl = QVBoxLayout()
         vl.setSpacing(3)
