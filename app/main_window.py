@@ -243,15 +243,8 @@ class MainWindow(QMainWindow):
         ribbon_scroll.setStyleSheet('QScrollArea{background:transparent;border:none;}')
         vl.addWidget(ribbon_scroll)
 
-        # 3-D viewport — ViewCube floats as a child widget (no layout, positioned by move())
         self._viewer = MeshViewer()
         vl.addWidget(self._viewer, stretch=1)
-
-        from app.ui.view_cube import ViewCube
-        self._view_cube = ViewCube(self._viewer)   # child of viewer — renders on top
-        self._view_cube.view_changed.connect(self._viewer.set_view)
-        self._view_cube.show()
-        self._view_cube.raise_()
 
         self._viewer.installEventFilter(self)
 
@@ -335,11 +328,6 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage('Navigate — drag to rotate, scroll to zoom.')
 
     def eventFilter(self, obj, event) -> bool:
-        if obj is self._viewer and event.type() == QEvent.Type.Resize:
-            cube = self._view_cube
-            vw, vh = self._viewer.width(), self._viewer.height()
-            cube.move(vw - cube.width() - 8, vh - cube.height() - 8)
-            cube.raise_()
         return super().eventFilter(obj, event)
 
     # ------------------------------------------------------------------
