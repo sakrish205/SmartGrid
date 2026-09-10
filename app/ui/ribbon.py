@@ -157,7 +157,7 @@ _TOGGLE_CSS = (
     'QPushButton{'
     '  background:#ffffff;border:1px solid #c0c0c0;border-radius:0px;'
     '  padding:2px 5px;font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;'
-    '  min-width:32px;min-height:20px;'
+    '  min-width:36px;min-height:20px;'
     '}'
     'QPushButton:hover{background:#e5e5e5;border-color:#888;}'
     'QPushButton:checked{background:#0078d4;border-color:#005a9e;color:#ffffff;}'
@@ -249,8 +249,8 @@ class _Group(QWidget):
         self._content.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self._hl = QHBoxLayout(self._content)
-        self._hl.setContentsMargins(0, 0, 0, 0)
-        self._hl.setSpacing(3)
+        self._hl.setContentsMargins(4, 0, 4, 0)
+        self._hl.setSpacing(4)
         self._hl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         sep_line = QFrame()
@@ -377,8 +377,8 @@ class SmartRibbon(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(RIBBON_H)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(RIBBON_H)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.setStyleSheet(
             f'SmartRibbon{{background:{_RIBBON_BG};'
             f'border-top:2px solid #0078d4;'
@@ -392,22 +392,20 @@ class SmartRibbon(QWidget):
     # ------------------------------------------------------------------
     def _build(self) -> None:
         hl = QHBoxLayout(self)
-        hl.setContentsMargins(0, 0, 0, 0)
-        hl.setSpacing(0)
+        hl.setContentsMargins(4, 0, 4, 0)
+        hl.setSpacing(4)
 
         # Keep alive on self so GC never destroys child widgets referenced elsewhere.
         self._stats_group        = self._build_stats()
-        self._waypoints_group    = self._build_waypoints()
-        self._view_group_hidden  = self._build_view()   # attrs kept; not in ribbon strip
-        # Sweep: builds _cw_radio/_ccw_radio/_sweep_grp but the Group widget is
-        # NOT added to the ribbon — CW/CCW are rendered inline inside Path Mode.
-        self._sweep_group_hidden = self._build_sweep()
+        self._waypoints_group   = self._build_waypoints()
+        self._view_group_hidden = self._build_view()   # attrs kept; not in ribbon strip
 
         groups = [
             self._build_file(),
             self._build_select(),
             self._build_parameters(),
-            self._build_path_mode(),     # Path mode + CW/CCW inline
+            self._build_path_mode(),
+            self._build_sweep(),
             self._build_path(),
             self._build_display(),
             self._waypoints_group,
@@ -458,10 +456,12 @@ class SmartRibbon(QWidget):
         # Region toggle buttons
         row1 = QHBoxLayout()
         row1.setSpacing(2)
-        row1.setContentsMargins(0, 0, 8, 0)   # right pad keeps RGT clear of separator
+        row1.setContentsMargins(0, 0, 0, 0)
         for region in _REGIONS:
             short = {'BOTTOM': 'BOT', 'FRONT': 'FRT', 'REAR': 'REAR',
-                     'LEFT': 'LEFT', 'RIGHT': 'RGT'}.get(region, region)
+                     'LEFT': 'LEFT', 'RIGHT': 'RIGHT'}.get(region, region)
+            if region == 'RIGHT':
+                row1.addStretch(1)   # push RGT to the far right
             btn = _toggle_btn(short)
             btn.setToolTip(region)
             self._region_btns[region] = btn
@@ -549,9 +549,9 @@ class SmartRibbon(QWidget):
         target_vl = QVBoxLayout()
         target_vl.setSpacing(2)
         target_vl.setContentsMargins(0, 0, 0, 0)
-        self._bbox_radio      = QRadioButton('Bound. Box')
+        self._bbox_radio      = QRadioButton('Boundary Box')
         self._face_grid_radio = QRadioButton('Face Grid')
-        self._mesh_radio      = QRadioButton('Mesh Surf.')
+        self._mesh_radio      = QRadioButton('Mesh Surface')
         self._bbox_radio.setChecked(True)
         self._bbox_radio.setToolTip(
             'Generates parallel passes across the full bounding-box face.\n'
@@ -571,7 +571,10 @@ class SmartRibbon(QWidget):
         target_vl.addWidget(self._bbox_radio)
         target_vl.addWidget(self._face_grid_radio)
         target_vl.addWidget(self._mesh_radio)
-        hl.addLayout(target_vl)
+        target_w = QWidget()
+        target_w.setLayout(target_vl)
+        target_w.setMinimumWidth(100)
+        hl.addWidget(target_w)
 
         # Face Grid sub-panel — shown only when Face Grid is selected
         fg_vl = QVBoxLayout()
@@ -601,15 +604,12 @@ class SmartRibbon(QWidget):
         standoff_hl.setSpacing(4)
         standoff_hl.setContentsMargins(0, 0, 0, 0)
         self._standoff_label = _row_label('Standoff')
-        self._standoff_label.setStyleSheet(
-            'font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;font-weight:600;')
         self._standoff_spin  = QDoubleSpinBox()
         self._standoff_spin.setRange(0.0, 500.0)
         self._standoff_spin.setValue(0.0)
         self._standoff_spin.setSingleStep(5.0)
         self._standoff_spin.setDecimals(1)
         self._standoff_spin.setSuffix('  mm')
-        self._standoff_spin.setSpecialValueText('off')
         self._standoff_spin.setFixedWidth(72)
         self._standoff_spin.setStyleSheet(_SPIN_CSS)
         self._standoff_spin.setToolTip(
@@ -622,21 +622,21 @@ class SmartRibbon(QWidget):
         # Hide until Face Grid is selected
         self._fg_subpanel = QWidget()
         self._fg_subpanel.setLayout(fg_vl)
+        self._fg_subpanel.setMinimumWidth(130)
         self._fg_subpanel.setVisible(False)
         hl.addWidget(self._fg_subpanel)
 
-        # ── Sweep (CW / CCW) inline — no separate group ──────────────────
-        sweep_sep = QFrame()
-        sweep_sep.setFrameShape(QFrame.Shape.VLine)
-        sweep_sep.setFixedWidth(1)
-        sweep_sep.setStyleSheet(f'color:{_SEP_COLOR};')
-        hl.addWidget(sweep_sep)
+        self._face_grid_radio.toggled.connect(self._on_target_changed)
+        g.add_layout(hl)
+        return g
 
-        sweep_vl = QVBoxLayout()
-        sweep_vl.setSpacing(2)
-        sweep_vl.setContentsMargins(4, 0, 0, 0)
-        sweep_lbl = _row_label('Sweep')
-        # CW / CCW created here; _build_sweep() must NOT recreate them
+    # ── Sweep ─────────────────────────────────────────────────────────────
+    def _build_sweep(self) -> _Group:
+        g = _Group('Sweep')
+        g.setMinimumWidth(68)
+        vl = QVBoxLayout()
+        vl.setSpacing(2)
+        vl.setContentsMargins(4, 0, 4, 0)
         self._cw_radio  = QRadioButton('↺ CW')
         self._ccw_radio = QRadioButton('↻ CCW')
         self._cw_radio.setChecked(True)
@@ -647,20 +647,10 @@ class SmartRibbon(QWidget):
         self._sweep_grp = QButtonGroup(self)
         self._sweep_grp.addButton(self._cw_radio,  0)
         self._sweep_grp.addButton(self._ccw_radio, 1)
-        sweep_vl.addWidget(sweep_lbl)
-        sweep_vl.addWidget(self._cw_radio)
-        sweep_vl.addWidget(self._ccw_radio)
-        hl.addLayout(sweep_vl)
-
-        self._face_grid_radio.toggled.connect(self._on_target_changed)
-        g.add_layout(hl)
+        vl.addWidget(self._cw_radio)
+        vl.addWidget(self._ccw_radio)
+        g.add_layout(vl)
         return g
-
-    # ── Sweep ─────────────────────────────────────────────────────────────
-    # CW/CCW are created inside _build_path_mode and rendered there inline.
-    # This stub returns an empty hidden group so existing call-sites don't break.
-    def _build_sweep(self) -> _Group:
-        return _Group('Sweep')
 
     # ── Waypoints ─────────────────────────────────────────────────────────
     def _build_waypoints(self) -> _Group:
@@ -849,11 +839,21 @@ class SmartRibbon(QWidget):
             self.region_toggled.emit(region, False)
 
     def _on_unit_changed(self, new_unit: str) -> None:
-        old_mm = self._pitch_spin.value() * UNIT_TO_MM.get(self._current_unit, 1.0)
+        factor_old = UNIT_TO_MM.get(self._current_unit, 1.0)
+        factor_new = UNIT_TO_MM.get(new_unit, 1.0)
+
         self._pitch_spin.blockSignals(True)
-        self._pitch_spin.setValue(old_mm / UNIT_TO_MM.get(new_unit, 1.0))
+        self._pitch_spin.setValue(self._pitch_spin.value() * factor_old / factor_new)
         self._pitch_spin.setSuffix(f'  {new_unit}')
         self._pitch_spin.blockSignals(False)
+
+        standoff_val = self._standoff_spin.value() * factor_old / factor_new
+        self._standoff_spin.blockSignals(True)
+        self._standoff_spin.setRange(0.0, 500.0 * factor_old / factor_new)
+        self._standoff_spin.setValue(standoff_val)
+        self._standoff_spin.setSuffix(f'  {new_unit}')
+        self._standoff_spin.blockSignals(False)
+
         self._current_unit = new_unit
         self.grid_changed.emit()
 
@@ -882,7 +882,7 @@ class SmartRibbon(QWidget):
         return 'mesh'
 
     def get_standoff_mm(self) -> float:
-        return self._standoff_spin.value()
+        return self._standoff_spin.value() * UNIT_TO_MM.get(self._current_unit, 1.0)
 
     def get_face_grid_submode(self) -> str:
         """'shadow' | 'mesh_standoff'"""
@@ -890,6 +890,7 @@ class SmartRibbon(QWidget):
 
     def _on_target_changed(self) -> None:
         self._fg_subpanel.setVisible(self._face_grid_radio.isChecked())
+        self.updateGeometry()
 
     def is_direction_flipped(self) -> bool:
         return self._ccw_radio.isChecked()

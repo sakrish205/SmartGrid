@@ -1,68 +1,11 @@
-# SmartGrid — 3D Surface Grid & Spray Path Generator
+# SmartGrid — 3D Spray Path Generator
 
-> Automated offline path planning for spray-paint robots over automotive 3D mesh surfaces.  
-> Built from scratch as an academic research project.
+Offline robot path planning for spray-paint operations over 3D mesh surfaces.  
+Loads an STL/OBJ, selects spray regions, generates a complete lawnmower toolpath, exports to JSON or CSV.
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green)](https://pypi.org/project/PySide6/)
-
----
-
-## What it does
-
-SmartGrid loads a 3D mesh (STL or OBJ), lets you select bounding box faces as spray regions, and generates a complete lawnmower robot path automatically. The toolpath exports to JSON or CSV for any robot controller.
-
-Designed for automotive body panel painting — bumpers, bonnets, doors — where the robot needs a dense, gap-free coverage pattern with alternating pass directions.
-
----
-
-## Screenshot
-
-```
-[ Ribbon bar: File | View | Surface Selection | Path Settings | Path | Statistics | Export ]
-[                                                                                          ]
-[                          3D Viewport (PyVista / VTK)                                    ]
-[          Selected face highlighted yellow — passes shown in blue/red                    ]
-[                                                                                          ]
-[ Status bar: Loaded: GT86FrontBumper.stl | 48,320 triangles | 12 passes, 11 connections  ]
-```
-
----
-
-## Features
-
-| Feature | Description |
-|---|---|
-| STL / OBJ loading | Drag-and-drop or File › Open. Trimesh repairs normals on load |
-| Up-axis selection | Choose X / Y / Z at load time — not hardcoded |
-| Bbox face selection | Click a face in 3D or use ribbon toggle buttons (TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT) |
-| Select Faces mode | Click directly on the bounding box in 3D; camera freezes so you don't accidentally orbit |
-| Lawnmower path | Passes alternate direction automatically (boustrophedon pattern) |
-| Pitch control | Set spray width in mm / cm / m / in / ft — value converts without changing physical distance |
-| CW / CCW sweep | Flip the starting direction of the whole route |
-| Grid preview | Show the pass-width divisions on the face before generating |
-| Direction arrows | Chevron tick marks along each pass show travel direction |
-| Boundary Box mode | Flat paths on the bbox face — instant, no geometry needed |
-| Mesh Surface mode | Paths follow actual mesh curvature via trimesh plane intersection |
-| Pink connectors | Link end of each pass to start of the next (no air moves in bbox mode) |
-| Export JSON | Full structured toolpath with metadata, pass details, and 3D points |
-| Export CSV | One row per 3D point, compatible with Excel and any robot preprocessor |
-| View Settings | Per-element colour and line width control, live preview |
-| Non-blocking load | File reading runs in a QThread worker — UI never freezes |
-
----
-
-## Tech stack
-
-| Layer | Library | Version |
-|---|---|---|
-| GUI | PySide6 (Qt 6) | ≥ 6.6 |
-| 3D rendering | PyVista + pyvistaqt | ≥ 0.44 |
-| Mesh I/O & repair | Trimesh | ≥ 4.3 |
-| Geometry math | NumPy | ≥ 1.26 |
-| Spatial queries | SciPy | ≥ 1.11 |
-| Language | Python | 3.12 |
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
 ---
 
@@ -72,56 +15,225 @@ Designed for automotive body panel painting — bumpers, bonnets, doors — wher
 pip install PySide6 pyvista pyvistaqt "trimesh[easy]" numpy scipy
 ```
 
-## Running
+**Run:**
 
 ```bash
 python main.py
 ```
 
----
-
-## How to use
-
-1. **Open a mesh** — File › Open or drag an STL / OBJ file onto the window
-2. **Set up-axis** — choose which axis is UP in your file (default: Z)
-3. **Select regions** — click a face of the blue bounding box, or use the ribbon toggle buttons. Selected faces turn yellow
-4. **Set pitch** — enter spray width and choose your unit
-5. **Preview** — tick **Grid** to see pass divisions on the face before generating
-6. **Generate** — click **Generate Path**; blue = forward pass, red = reversed pass, pink = connector
-7. **Adjust** — change pitch or flip CW/CCW direction and regenerate
-8. **Export** — Export JSON or Export CSV from the ribbon
+Or double-click `SmartGrid.pyw` (no console window).
 
 ---
 
-## Path generation algorithm
+## Workflow
 
-### Bbox mode (flat — instant)
-
-1. Identifies the bbox face plane for the selected region (TOP, FRONT, etc.)
-2. Computes step positions along the perpendicular axis:
-   - First pass at `face_min + pitch / 2` (centred in first strip)
-   - Subsequent passes every `pitch` mm
-3. Each pass is a straight line sweeping the full face width
-4. Passes alternate direction: even index = forward, odd index = reversed (lawnmower)
-5. A connector is drawn as a straight line from the end of pass N to the start of pass N+1
-6. The snake pattern means connectors alternate between the left and right edges of the face
-
-### Mesh Surface mode (curved — uses geometry)
-
-1. Computes slice plane positions using the region's actual bounding extent along the step axis
-2. For each position, calls `trimesh.intersections.mesh_plane` with `return_faces=True`
-3. Filters returned segments to only those whose source triangle belongs to the selected region
-4. Stitches unordered segments into ordered polylines (graph-walk with quantised endpoints)
-5. Alternates direction by plane index (not pass count) so holes / sub-passes don't break the pattern
-6. Connects primary passes (sub_index = 0) with boundary-following connectors
-
-### Multi-region
-
-Multiple regions (e.g. TOP + FRONT together) each get an independent route. All routes are displayed simultaneously.
+1. **Open mesh** — File › Open or drag an STL / OBJ onto the window
+2. **Set up-axis** — choose which axis is vertical in your file (X / Y / Z)
+3. **Select regions** — click the blue bounding box in 3D, or use the ribbon buttons
+4. **Set parameters** — spray width, unit, standoff distance, sweep direction
+5. **Preview** — enable Grid to visualise pass divisions before generating
+6. **Generate** — click Generate Path
+7. **Export** — Export JSON or Export CSV
 
 ---
 
-## Understanding the exports
+## Ribbon Controls
+
+### SELECT
+
+| Control | Function |
+|---|---|
+| **TOP / BOT / FRT / REAR / LEFT / RIGHT** | Toggle individual bounding-box faces as spray regions. Multiple faces can be active simultaneously. |
+| **All / None** | Select or deselect all six faces at once. |
+| **Select Faces** | Enters 3D pick mode — click directly on the bounding box in the viewport. Camera orbiting is locked while active so accidental drags don't change the view. |
+
+### PARAMETERS
+
+| Control | Function |
+|---|---|
+| **Unit** | Sets the display unit for all distance inputs: mm / cm / m / in / ft. Switching unit converts the displayed value so the physical distance stays unchanged. |
+| **Spray Width** | Step distance between adjacent passes (centre-to-centre). Determines pass count: `n = ⌈face_span / pitch⌉`. |
+
+### PATH MODE
+
+Selects the path generation algorithm. Choose based on surface geometry and required accuracy.
+
+---
+
+#### Boundary Box
+
+Generates flat lawnmower passes on the axis-aligned bounding-box face plane. The face plane position is fixed at the outermost extent of the mesh along the face's normal axis.
+
+**How it works:**
+
+1. Identify the face plane (e.g. TOP → maximum Z coordinate of the mesh bounding box).
+2. Apply standoff: `face_pos = bbox_max[face_axis] + standoff_mm`.
+3. Compute pass count: `n = ⌈face_span / spray_width⌉`.
+4. Place each pass at: `step_i = step_min + spray_width/2 + i × spray_width`.
+5. Alternate direction (boustrophedon): `is_forward = (i + direction_offset) % 2 == 0`.
+6. Connect pass endpoints with straight-line transit moves.
+
+**Where to use:** flat panels, sheet metal, rectangular parts where the surface does not significantly deviate from the bounding face. Fastest mode — no mesh geometry queried during generation.
+
+**Not suitable for:** curved or contoured surfaces — paths float above or intersect the geometry wherever the surface deviates from the flat bounding face.
+
+---
+
+#### Face Grid — Adaptive
+
+Generates surface-following passes that tilt and contour to match the actual mesh geometry, without slicing the mesh. Uses shadow projection on a mean-normal basis.
+
+**How it works:**
+
+1. Compute the mean outward normal `n̂` of the selected faces (faces with a positive dot product against the face axis direction).
+2. Build an orthonormal spray-plane basis: `pass_vec = normalize(n̂ × up)`, `step_vec = normalize(pass_vec × n̂)`.
+3. Project all region vertices onto this basis: `pass_proj = v · pass_vec`, `step_proj = v · step_vec`, `depth_proj = v · n̂`.
+4. Divide the step extent into bands of width = spray width (band half-width = `spray_width × 0.65`).
+5. For each band, find the outermost vertex: `row_depth = max(depth_proj)` for vertices within the band. This is the shadow-projected surface peak.
+6. Build endpoints in world space: `P = (row_depth + standoff_mm) × n̂ + p_min × pass_vec + step_pos × step_vec`.
+7. Alternate direction by pass index. Connect with straight-line transit moves.
+
+**Where to use:** moderately curved surfaces — bonnets, bumpers, panels with a dominant curvature direction. The spray plane tilts to match the surface orientation and pass elevation tracks the contour peak per row. Much faster than Conform.
+
+**Limitation:** each pass is a straight line between its two endpoints. It does not follow the surface along the sweep direction. Significant curvature along the sweep axis will leave the path floating above the part mid-pass.
+
+---
+
+#### Face Grid — Conform
+
+Slices the actual 3D mesh surface using all forward-facing faces of the selected region — not just the bbox-classified face subset. Uses the same trimesh plane-intersection pipeline as Mesh Surface mode, but casts a wider net to capture slopes and transitions that the classifier may not assign to a region.
+
+**How it works:**
+
+1. For each selected region, collect every face whose normal has a component in the outward direction: `np.where(mesh.face_normals[:, face_axis] * face_sign > 0)`. This includes sloped faces adjacent to the flat region that the normal-threshold classifier missed.
+2. Pass these face indices into `generator.generate_route()` — the same trimesh plane-intersection pipeline used by Mesh Surface mode.
+3. Cutting planes are spaced at `spray_width` intervals along the slice axis, derived from the selected faces' own bounding box (not the full mesh).
+4. Each plane intersection is filtered to the selected forward-facing faces, stitched into polylines, RDP-simplified (ε = 0.3 mm), and boustrophedon-ordered.
+5. Standoff is applied post-generation: each waypoint is projected onto the nearest mesh face and offset outward by `standoff_mm × face_normal`.
+
+**How it differs from Mesh Surface:** Mesh Surface uses only the faces the region classifier assigned to a named face (TOP / FRONT / etc.). Conform uses all geometrically forward-facing faces, giving better coverage on parts with rounded edges or compound curves where the classifier boundary falls short.
+
+**Where to use:** parts with blended transitions between faces, rounded edges, or compound curves where Adaptive paths visibly float mid-pass and Mesh Surface paths stop short of the actual surface extent.
+
+**Limitation:** same performance cost as Mesh Surface — one `trimesh.mesh_plane` call per pass. On dense meshes generation takes a few seconds.
+
+---
+
+#### Mesh Surface
+
+Generates passes by intersecting the triangulated mesh with equally spaced planes. Pass lines follow the actual mesh surface exactly.
+
+**How it works:**
+
+1. Compute the step-axis extent of the selected region from its vertex coordinates.
+2. Place cutting planes at: `step_i = step_min + spray_width/2 + i × spray_width`.
+3. For each plane, call `trimesh.intersections.mesh_plane(plane_normal, plane_origin, return_faces=True)` to get intersection segments and the triangle index each segment came from.
+4. Filter segments: keep only those whose source triangle index is in the selected region's face set.
+5. Stitch unordered segments into ordered polylines via a graph-walk on quantised endpoints (tolerance 1 × 10⁻⁶ m).
+6. Apply RDP simplification (ε = 0.3 mm) to remove micro-jaggies from mesh triangulation.
+7. Filter short fragments and diagonal corner clips; cap sub-passes per slice level at 6.
+8. Sort and boustrophedon-order passes by slice level. Direction alternates by plane index, not pass count, so holes and sub-passes don't disrupt the serpentine pattern.
+9. Connect consecutive passes with straight-line transit moves.
+
+**Where to use:** complex curved surfaces, compound contours, parts with holes or cutouts. The paths are guaranteed to lie on the mesh surface — they follow curvature in both the step and sweep directions. Use this when Adaptive paths visibly float above the part.
+
+**Limitation:** slower than the other modes on dense meshes (each plane queries the entire mesh). If the mesh has many faces, generation takes a few seconds.
+
+---
+
+**Standoff** — lifts every pass point outward by the specified distance along the spray normal. Applied after path generation:
+
+```
+P′ = P + standoff_mm × n̂
+```
+
+In Boundary Box mode `n̂` is the face's axis-aligned normal. In Face Grid mode `n̂` is the mean face normal. `0` places paths directly on the surface.
+
+### SWEEP
+
+| Option | Effect |
+|---|---|
+| **↺ CW** | Even-indexed passes run in the positive axis direction (forward). Pass 0 starts at `face_min + pitch/2`. |
+| **↻ CCW** | Flips the starting direction — odd-indexed passes run forward instead. Equivalent to a `direction_offset = 1` in the boustrophedon alternation formula. |
+
+### WAYPOINTS
+
+| Control | Function |
+|---|---|
+| **Waypoints** checkbox | Enables intermediate waypoint resampling. When off, each pass has only its two endpoints. |
+| **Interval** | Spacing between resampled waypoints along the pass. Set to 0 to disable resampling. Only active when the Waypoints checkbox is on — export excludes waypoints if unchecked. |
+
+### PATH (Generate / Clear)
+
+| Button | Action |
+|---|---|
+| **Generate Path** | Runs the selected path mode algorithm on all active regions. Runs in a background thread — UI stays responsive. Blue = forward pass, red = reversed pass, pink = connector. |
+| **Clear Path** | Removes all generated paths from the viewport and resets route statistics. |
+
+### DISPLAY
+
+| Control | Function |
+|---|---|
+| **Grid** | Overlays pass-width division lines on the selected regions. Updates live when spray width or region selection changes. Useful for verifying coverage before generating. |
+| **Arrows** | Shows chevron tick marks along each pass indicating travel direction. |
+| **View Settings** | Opens the colour and display picker. Controls background colour, mesh colour, pass/connector/waypoint colours, line widths, and mesh display style (Solid / Solid + Edges / Wireframe). Changes apply live to the viewport. |
+
+### EXPORT
+
+| Button | Output |
+|---|---|
+| **Export JSON** | Structured toolpath file: metadata, per-pass 3D point arrays, connector points, lengths. Suitable for robot controller import scripts. |
+| **Export CSV** | Flat table — one row per 3D point, in execution order. Readable in Excel or any robot preprocessor. |
+
+---
+
+## Path Generation — Algorithms
+
+### Boundary Box mode
+
+Pass positions along the step axis:
+
+```
+step_i = face_min + pitch/2 + i × pitch,   i = 0, 1, …, n-1
+```
+
+Direction alternation (boustrophedon):
+
+```
+is_forward = (i + direction_offset) % 2 == 0
+```
+
+`direction_offset = 0` for CW, `1` for CCW. Connectors are straight-line transit moves between the end of pass `i` and the start of pass `i+1`.
+
+### Mesh Surface mode
+
+1. Compute the region's bounding extent along the step axis from the vertices of all selected faces.
+2. For each step position, call `trimesh.intersections.mesh_plane(plane_normal, plane_origin, return_faces=True)`.
+3. Retain only segments whose source face index is in the selected region set.
+4. Stitch unordered segments into ordered polylines via a graph-walk on quantised endpoints (tolerance 1 × 10⁻⁶ mm).
+5. Alternate direction by plane index so sub-passes through holes don't break the serpentine pattern.
+
+### Face Grid — Adaptive (shadow projection)
+
+1. Compute the mean face normal of the selected region (`basis_normal`).
+2. Project all region vertices onto the plane perpendicular to `basis_normal`.
+3. Divide the projected extent into bands of width = spray width.
+4. For each band, find the vertex with the maximum coordinate along `basis_normal` (the outermost point).
+5. The pass elevation for that band is set to this depth — the path "shadows" the surface peak.
+
+### Standoff offset
+
+After generating any route, each 3D point `P` is shifted:
+
+```
+P′ = P + standoff_mm × n̂
+```
+
+where `n̂` is the unit outward normal of the spray plane. Applied uniformly to all passes and connectors.
+
+---
+
+## Export formats
 
 ### JSON
 
@@ -131,71 +243,35 @@ output.json
 ├── summary
 │   ├── total_routes, total_passes, total_connections
 │   ├── total_length_mm
-│   ├── regions        e.g. ["TOP", "FRONT"]
-│   └── directions     e.g. ["horizontal"]
+│   └── regions, directions
 └── routes[]
-    ├── route_index    0 = first route, 1 = second, ...
-    ├── region_id      which bbox face
-    ├── spacing_mm     pitch between passes
-    ├── total_length_mm
-    ├── passes[]
-    │   ├── id, is_forward, length_mm
-    │   ├── start / end    [x, y, z] convenience fields
-    │   └── points         [[x,y,z], ...]  full point list
-    └── connections[]
-        ├── id, from_pass_id, to_pass_id, is_air_move, length_mm
-        ├── start / end    [x, y, z]
-        └── points         [[x,y,z], ...]
-```
-
-**Reading in Python:**
-
-```python
-import json
-
-with open("output.json") as f:
-    data = json.load(f)
-
-for route in data["routes"]:
-    for p in route["passes"]:
-        print(p["start"], "→", p["end"], "  forward:", p["is_forward"])
+    ├── region_id, spacing_mm, total_length_mm
+    ├── passes[]   → id, is_forward, length_mm, start, end, points[]
+    └── connections[]  → id, from_pass_id, to_pass_id, is_air_move, length_mm, points[]
 ```
 
 **Robot controller key fields:**
 
 | Field | Meaning |
 |---|---|
-| `segment_type` | `pass` = spray gun ON · `connection` = travel move |
-| `is_forward` | True = sweep one way, False = reversed |
-| `is_air_move` | True = gun off, lift away from surface |
-| `points` | Full 3D path — more than 2 points on curved mesh paths |
-
----
+| `segment_type` | `pass` = spray gun ON · `connection` = transit move |
+| `is_forward` | Sweep direction for this pass |
+| `is_air_move` | Gun off when `true` |
+| `points` | Full 3D waypoint list in mm |
 
 ### CSV
 
-One row = one 3D point, written in route order.
+One row per 3D point in execution order.
 
-| Column | What it contains |
+| Column | Content |
 |---|---|
-| `segment_type` | `pass` = spraying · `connection` = travel between passes |
-| `route_index` | Which route (0-based) |
-| `region` | Bbox face: TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT |
-| `direction` | `horizontal` or `vertical` |
-| `pass_id` | Pass number within route |
-| `is_forward` | TRUE = forward sweep, FALSE = reversed |
-| `sub_index` | 0 = standard pass. >0 = extra chain through a hole |
-| `conn_id` | Connection ID (blank on pass rows) |
-| `is_air_move` | TRUE = gun off travel (blank on pass rows) |
-| `length_mm` | Length of this segment — written only at `pt_idx = 0` |
-| `pt_idx` | Point index within the segment (0 = start) |
-| `x, y, z` | World coordinates in mm, 4 decimal places |
-
-**Useful Excel filters:**
-
-- `segment_type = pass`, sum `length_mm` at `pt_idx = 0` → total spray distance
-- `is_forward = FALSE` → all reversed passes (verify lawnmower alternation)
-- `route_index = 0` → first route only
+| `segment_type` | `pass` or `connection` |
+| `region` | Bbox face (TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT) |
+| `pass_id` | Pass index within route |
+| `is_forward` | TRUE / FALSE |
+| `length_mm` | Segment length — written only at `pt_idx = 0` |
+| `pt_idx` | Point index within segment |
+| `x, y, z` | World coordinates in mm (4 decimal places) |
 
 ---
 
@@ -203,19 +279,20 @@ One row = one 3D point, written in route order.
 
 ```
 SmartGrid/
-├── main.py                        entry point
+├── SmartGrid.pyw              entry point (no console)
 ├── app/
-│   ├── main_window.py             window layout, signal wiring, QThread workers
+│   ├── main_window.py         window, signal wiring, QThread workers
 │   ├── ui/
-│   │   ├── ribbon.py              single Ribbon bar (all controls)
-│   │   ├── viewer.py              3D viewport — PyVista / VTK actor management
-│   │   └── view_settings_dialog.py  colour + line-width picker
+│   │   ├── ribbon.py          single ribbon bar — all controls
+│   │   ├── viewer.py          PyVista / VTK viewport and actor management
+│   │   └── view_settings_dialog.py  colour + display picker
 │   ├── mesh/
-│   │   ├── loader.py              trimesh load + repair
-│   │   ├── preprocessor.py        cached normals, centroids, bbox (computed once)
-│   │   └── regions.py             face-to-region classification
+│   │   ├── loader.py          trimesh load + normal repair
+│   │   ├── preprocessor.py    cached normals, centroids, bbox (computed once)
+│   │   └── regions.py         face-to-region classification via face normals
 │   ├── path/
 │   │   ├── bbox_generator.py      flat lawnmower paths on bbox face planes
+│   │   ├── face_grid_generator.py  adaptive shadow + conform mesh-surface paths
 │   │   ├── generator.py           mesh-surface path orchestration
 │   │   ├── slicer.py              trimesh plane intersection + face filtering
 │   │   ├── stitcher.py            segment graph-walk → ordered polylines
@@ -225,124 +302,38 @@ SmartGrid/
 │       ├── json_export.py
 │       └── csv_export.py
 ├── models/
-│   └── mesh_model.py              single source of truth for loaded mesh
-└── tests/                         unit tests (pytest)
+│   └── mesh_model.py          single source of truth for the loaded mesh
+└── tests/                     pytest unit tests
 ```
 
 ---
 
-## Development process (academic)
+## Supported file formats
 
-This project was built iteratively from scratch as a research exercise in offline robot path planning. The process followed below is documented here for academic reproducibility.
-
-### Build order
-
-| Phase | What was built | Key decision |
+| Format | Import | Export |
 |---|---|---|
-| 1 | Mesh loading + preprocessing | `trimesh` for repair; cached `MeshData` to avoid recomputing normals |
-| 2 | Region classification | Dot-product of face normals against bbox axes → TOP / BOTTOM / etc. |
-| 3 | Segment stitcher | Graph-walk with quantised endpoints; handles holes and multi-chain slices |
-| 4 | Slicer | `trimesh.intersections.mesh_plane` + face-index filter for region masking |
-| 5 | Bbox flat path generator | 2-point passes, boustrophedon alternation, `step_min + pitch/2` centering |
-| 6 | PySide6 + PyVista window | `QtInteractor` embedded in `QVBoxLayout`; all actors stored in `_actors` dict |
-| 7 | VTK face picking | `vtkCellPicker` on invisible solid box; `vtkInteractorStyleUser` to freeze camera |
-| 8 | Ribbon UI | Single `SmartRibbon(QWidget)` replaces sidebar; SVG icons rendered via `QSvgRenderer` |
-| 9 | Non-blocking load | `_LoadWorker(QThread)` emits `progress` signal → status bar (no overlay) |
-| 10 | Export | JSON (`json.JSONEncoder` subclass for `np.ndarray`) and flat CSV |
+| STL (binary or ASCII) | ✓ | — |
+| OBJ (single- or multi-body) | ✓ | — |
+| JSON (toolpath) | — | ✓ |
+| CSV (toolpath) | — | ✓ |
 
-### Design principles applied
-
-- **Single source of truth** — `MeshModel` owns the mesh; `MeshData` is read-only after preprocessing
-- **Actor lifetime** — every VTK actor is immediately stored in `self._actors[key]`; never let them go out of scope
-- **Thread safety** — PyVista / VTK is called only from the main Qt thread; workers emit signals carrying plain Python objects
-- **No double-fire** — `QButtonGroup.idClicked` used instead of `QRadioButton.toggled` to emit `sweep_changed` exactly once per click
-- **Signal isolation** — `blockSignals(True/False)` wraps programmatic UI updates that must not trigger downstream regeneration
-
-### Known approximations (scope of MVP)
-
-- Bbox mode places paths on the face plane, not the curved mesh surface
-- Pass spacing is measured along a straight world axis, not arc-length along the surface
-- Connectors in bbox mode are straight-line transit moves, not surface-following
-- No robot kinematic constraints (reach envelope, joint limits, overspray overlap)
+Multi-body OBJ files are merged into a single mesh at load time via `trimesh.load(force='mesh')`. All distances are stored and exported in millimetres; unit conversion is display-only.
 
 ---
 
-## License — Apache 2.0 (Academic)
+## Tech stack
 
-This project is released under the **Apache License, Version 2.0**.
-
-### What this means for academic use
-
-You are free to:
-- **Study** — read, run, and modify the code for research and learning
-- **Cite** — use results or methods in papers (see attribution below)
-- **Fork** — build derivative research tools on top of SmartGrid
-- **Distribute** — share copies or modified versions, including in course materials
-
-You must:
-- **Retain the copyright notice** in every source file you distribute
-- **State changes** — if you modify files, add a note saying what you changed
-- **Include the license text** — keep this section (or a link to apache.org/licenses/LICENSE-2.0) in any redistribution
-
-You must not:
-- Remove or alter the `Copyright 2024 Saketha Krishna B S` notice
-- Use the author's name to endorse derived work without permission
-
-### How to maintain Apache 2 compliance in your fork
-
-1. **Keep the header** — every `.py` file you distribute must retain or add:
-
-   ```python
-   # Copyright 2024 Saketha Krishna B S
-   #
-   # Licensed under the Apache License, Version 2.0 (the "License");
-   # you may not use this file except in compliance with the License.
-   # You may obtain a copy of the License at
-   #
-   #     http://www.apache.org/licenses/LICENSE-2.0
-   ```
-
-2. **Mark your changes** — for any file you modify, add a line below the header:
-
-   ```python
-   # Modified by <Your Name>, <Year> — <brief description of change>
-   ```
-
-3. **Add a NOTICE file** if you publish a packaged/installed version. It should contain:
-
-   ```
-   SmartGrid
-   Copyright 2024 Saketha Krishna B S
-   This product includes software developed by Saketha Krishna B S.
-   ```
-
-4. **Transitive dependencies** — all runtime libraries used (PySide6, PyVista, Trimesh, NumPy, SciPy) carry their own open-source licenses. They are compatible with Apache 2.0. If you redistribute a bundled executable (e.g. PyInstaller build), include their license texts in a `third_party_licenses/` folder.
-
-### Academic citation
-
-If you use SmartGrid in a paper or thesis, please cite:
-
-```
-Saketha Krishna B S. SmartGrid — 3D Surface Grid & Spray Path Generator. 2024.
-https://github.com/sakrish205/SmartGrid
-```
-
-BibTeX:
-
-```bibtex
-@software{smartgrid2024,
-  author  = {Saketha Krishna B S},
-  title   = {SmartGrid — 3D Surface Grid \& Spray Path Generator},
-  year    = {2024},
-  url     = {https://github.com/sakrish205/SmartGrid},
-  license = {Apache-2.0}
-}
-```
+| Layer | Library |
+|---|---|
+| GUI | PySide6 (Qt 6 ≥ 6.6) |
+| 3D rendering | PyVista + pyvistaqt (≥ 0.44) |
+| Mesh I/O & repair | Trimesh (≥ 4.3) |
+| Geometry / linear algebra | NumPy (≥ 1.26) |
+| Spatial queries | SciPy (≥ 1.11) |
 
 ---
 
-## Author
+## License
 
-**Saketha Krishna B S**  
-Email:   
-GitHub: [sakrish205](https://github.com/sakrish205)
+Apache 2.0 — © 2024 Saketha Krishna B S  
+See [LICENSE](LICENSE) for full terms.

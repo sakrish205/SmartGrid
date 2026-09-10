@@ -724,6 +724,7 @@ class MainWindow(QMainWindow):
             )
         self.statusBar().showMessage(
             f'Path generation complete  —  {total_passes} passes, {total_conns} connections.')
+        self._update_grid()
 
     def _refresh_route_display(self) -> None:
         if self._current_routes:
