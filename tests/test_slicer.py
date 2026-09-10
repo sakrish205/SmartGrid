@@ -25,6 +25,6 @@ def test_slice_returns_none_when_plane_misses(unit_box_mesh):
 def test_slice_config_top_region(unit_box_mesh):
     data = preprocess(unit_box_mesh, "test", up_axis=2)
     cfg = compute_slice_config('TOP', up_axis=2)
-    # For TOP with Z-up: slice_axis should be the front/rear axis (Y = axis 1)
-    assert cfg['slice_axis'] == 1
-    assert cfg['plane_normal'][1] == 1.0
+    # fwd_axis = (up_axis + 1) % 3 = (2+1)%3 = 0 — TOP slices along fwd axis
+    assert cfg['slice_axis'] == 0
+    assert cfg['plane_normal'][0] == 1.0
