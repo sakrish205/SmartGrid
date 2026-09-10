@@ -12,16 +12,12 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QRadioButton, QButtonGroup,
     QLabel, QVBoxLayout as QVBox, QScrollArea, QFrame,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QEvent, QSettings
+from PySide6.QtCore import Qt, QThread, Signal, QEvent, QSettings, QTimer
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 
-from models.mesh_model import MeshModel
-from app.mesh.preprocessor import MeshData
+# Heavy imports (trimesh, pyvista, pyvistaqt) are deferred to first use
+# so the window appears before the 2-3 s cold-start load completes.
 from app.path.path_model import PaintRoute, GenerationParams
-from app.path import generator as _generator
-from app.path import bbox_generator as _bbox_generator
-from app.path import face_grid_generator as _face_grid_generator
-from app.ui.viewer import MeshViewer
 from app.ui.ribbon import SmartRibbon
 from app.export.json_export import export_route_json
 from app.export.csv_export import export_route_csv
@@ -111,7 +107,7 @@ class _PathWorker(QThread):
 
     def __init__(
         self,
-        mesh_data: MeshData,
+        mesh_data,
         pairs: list,
         spray_mm: float,
         waypoint_spacing_mm: float = 0.0,
@@ -126,10 +122,11 @@ class _PathWorker(QThread):
 
     def run(self) -> None:
         try:
+            from app.path import generator as _gen
             routes = []
             mesh = self._mesh_data.trimesh_mesh
             for region_id, face_indices in self._pairs:
-                route = _generator.generate_route(
+                route = _gen.generate_route(
                     self._mesh_data,
                     region_id=region_id,
                     region_face_indices=face_indices,
@@ -206,14 +203,15 @@ class MainWindow(QMainWindow):
         )
         self.menuBar().setStyleSheet(self._MENUBAR_STYLE)
 
-        self._model              = MeshModel()
-        self._selected_regions:  set[str]         = set()
+        self._model              = None          # set after heavy imports load
+        self._viewer             = None          # set after viewer deferred init
+        self._selected_regions:  set[str]        = set()
         self._current_routes:    list[PaintRoute] = []
         self._last_params:       GenerationParams | None = None
         self._worker:        Optional[QThread] = None
         self._load_worker:   Optional[QThread] = None
         self._current_colors: dict[str, str]  = self._load_view_settings()
-        self._face_grid_planes_cache: tuple | None = None   # (ref_corners, standoff_corners, spray_mm)
+        self._face_grid_planes_cache: tuple | None = None
 
         self._build_ui()
         self._build_menus()
@@ -243,32 +241,61 @@ class MainWindow(QMainWindow):
         ribbon_scroll.setStyleSheet('QScrollArea{background:transparent;border:none;}')
         vl.addWidget(ribbon_scroll)
 
-        self._viewer = MeshViewer()
-        vl.addWidget(self._viewer, stretch=1)
+        # Placeholder shown while heavy imports load in the background
+        self._viewer_placeholder = QLabel('Loading viewer…')
+        self._viewer_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._viewer_placeholder.setStyleSheet(
+            'color:#666;font-size:13px;font-family:"Segoe UI",Arial;'
+            'background:#e8e8e8;')
+        self._viewer_vl = vl                  # saved so _init_viewer can splice in
+        vl.addWidget(self._viewer_placeholder, stretch=1)
 
-        self._viewer.installEventFilter(self)
-
-        # Initial state
+        # Initial state — ribbon enabled after viewer is ready
         self._ribbon.set_model_loaded(False)
-        self.statusBar().showMessage('Ready — open an STL or OBJ file to begin.')
+        self.statusBar().showMessage('Starting up…')
 
-        # Wire ribbon signals → window handlers
+        # Signals that do not touch the viewer — safe to wire now
         self._ribbon.open_requested.connect(self._open_file)
-        self._ribbon.view_fit.connect(self._viewer.fit_all)
-        self._ribbon.view_set.connect(self._on_view_set)
-        self._ribbon.grid_changed.connect(self._update_grid)
-        self._ribbon.arrows_changed.connect(self._refresh_route_display)
         self._ribbon.region_toggled.connect(self._on_region_shortcut)
         self._ribbon.select_mode_changed.connect(self._on_select_mode_changed)
         self._ribbon.generate_requested.connect(self._on_generate)
         self._ribbon.clear_requested.connect(self._clear_paths)
         self._ribbon.sweep_changed.connect(self._on_sweep_changed)
-        self._ribbon.waypoints_changed.connect(self._refresh_route_display)
-        # pitch_changed and spacing_changed no longer auto-generate —
-        # settings are applied only when the user clicks Generate Path.
         self._ribbon.export_json.connect(self._export_json)
         self._ribbon.export_csv.connect(self._export_csv)
         self._ribbon.view_settings_req.connect(self._open_view_settings)
+
+        # Defer heavy imports (trimesh, pyvista, pyvistaqt) to after first paint
+        QTimer.singleShot(0, self._init_viewer)
+
+    def _init_viewer(self) -> None:
+        """Deferred: import and instantiate MeshViewer after the window is painted."""
+        from app.ui.viewer import MeshViewer
+        from models.mesh_model import MeshModel
+
+        self._model = MeshModel()
+        self._viewer = MeshViewer()
+
+        # Replace placeholder with the real viewer
+        idx = self._viewer_vl.indexOf(self._viewer_placeholder)
+        self._viewer_vl.insertWidget(idx, self._viewer, stretch=1)
+        self._viewer_vl.removeWidget(self._viewer_placeholder)
+        self._viewer_placeholder.deleteLater()
+        self._viewer_placeholder = None
+
+        self._viewer.installEventFilter(self)
+
+        # Wire the remaining viewer-dependent signals
+        self._ribbon.view_fit.connect(self._viewer.fit_all)
+        self._ribbon.view_set.connect(self._on_view_set)
+        self._ribbon.grid_changed.connect(self._update_grid)
+        self._ribbon.arrows_changed.connect(self._refresh_route_display)
+        self._ribbon.waypoints_changed.connect(self._refresh_route_display)
+
+        # Apply persisted view colours to the now-ready viewer
+        self._on_colors_changed(self._current_colors)
+
+        self.statusBar().showMessage('Ready — open an STL or OBJ file to begin.')
 
     def _build_menus(self) -> None:
         mb = self.menuBar()
@@ -313,6 +340,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_view_set(self, direction: str) -> None:
+        if self._viewer is None:
+            return
         self._viewer.set_view(direction)
 
     # ------------------------------------------------------------------
@@ -320,6 +349,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_select_mode_changed(self, active: bool) -> None:
+        if self._viewer is None:
+            return
         self._viewer.set_select_mode(active)
         if active:
             self.statusBar().showMessage(
@@ -376,6 +407,8 @@ class MainWindow(QMainWindow):
         # colors, which _on_colors_changed already handles — no extra call needed.
 
     def _on_colors_changed(self, colors: dict[str, str]) -> None:
+        if self._viewer is None:
+            return
         self._viewer.apply_colors(colors)
         if self._current_routes:
             self._viewer.show_route(
@@ -450,6 +483,8 @@ class MainWindow(QMainWindow):
         self._model = model
         n_faces = len(model.data.trimesh_mesh.faces)
 
+        if self._viewer is None:
+            return
         self._viewer.load_mesh(model.data)
         self._viewer.enable_bbox_clicking(self._on_bbox_region_clicked)
 
@@ -487,6 +522,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_bbox_region_clicked(self, region: str) -> None:
+        if self._viewer is None:
+            return
         if region in self._selected_regions:
             self._selected_regions.discard(region)
             self._viewer.highlight_bbox_region(region, False)
@@ -503,7 +540,9 @@ class MainWindow(QMainWindow):
         self._update_grid()
 
     def _on_region_shortcut(self, region_id: str, checked: bool) -> None:
-        if self._model.data is None:
+        if self._model is None or self._model.data is None:
+            return
+        if self._viewer is None:
             return
         if checked:
             self._selected_regions.add(region_id)
@@ -552,7 +591,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_generate(self) -> None:
-        if not self._model.is_loaded:
+        if self._model is None or not self._model.is_loaded:
             return
         if self._worker and self._worker.isRunning():
             return
@@ -571,6 +610,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'No selection',
                 'Click a bounding box face to select it, then generate.')
             return
+        from app.path import bbox_generator as _bbox_gen
         bounds    = self._model.data.pyvista_mesh.bounds
         up        = self._model.data.up_axis
         direction = self._ribbon.get_direction()
@@ -581,12 +621,12 @@ class MainWindow(QMainWindow):
         for region in sorted(self._selected_regions):
             try:
                 if direction in ('horizontal', 'both'):
-                    routes.append(_bbox_generator.generate_bbox_route(
+                    routes.append(_bbox_gen.generate_bbox_route(
                         region, bounds, spray_mm, up,
                         direction='horizontal', direction_offset=offset,
                         waypoint_spacing_mm=wpt_mm))
                 if direction in ('vertical', 'both'):
-                    routes.append(_bbox_generator.generate_bbox_route(
+                    routes.append(_bbox_gen.generate_bbox_route(
                         region, bounds, v_mm, up,
                         direction='vertical', direction_offset=offset,
                         waypoint_spacing_mm=wpt_mm))
@@ -612,6 +652,7 @@ class MainWindow(QMainWindow):
 
     def _generate_face_grid_flat(self, spray_mm: float) -> None:
         """Depth-Adaptive: passes confined to the selected region's faces."""
+        from app.path import face_grid_generator as _fg_gen
         data     = self._model.data
         mesh     = data.trimesh_mesh
         up       = data.up_axis
@@ -629,20 +670,19 @@ class MainWindow(QMainWindow):
             if len(region_faces) == 0:
                 continue
             try:
-                routes.append(_face_grid_generator.generate_face_grid_route(
+                routes.append(_fg_gen.generate_face_grid_route(
                     region, region_faces, mesh, up,
                     spray_width_mm=spray_mm,
                     direction_offset=offset,
                     waypoint_spacing_mm=wpt_mm,
                     standoff_mm=standoff,
                 ))
-                # Plane corners use region_faces — tight around the selected region only
-                spray_corners.append(_face_grid_generator.get_face_grid_plane_corners(
+                spray_corners.append(_fg_gen.get_face_grid_plane_corners(
                     region, region_faces, mesh, up,
                     standoff_mm=standoff, mesh_bounds=bounds,
                 ))
                 if ref_corners_first is None:
-                    ref_corners_first = _face_grid_generator.get_face_grid_plane_corners(
+                    ref_corners_first = _fg_gen.get_face_grid_plane_corners(
                         region, region_faces, mesh, up,
                         standoff_mm=0.0, mesh_bounds=bounds,
                     )
@@ -666,6 +706,7 @@ class MainWindow(QMainWindow):
 
     def _generate_face_grid_mesh(self, spray_mm: float) -> None:
         """Conform: tilted-basis cutting planes + trimesh intersection + uniform standoff."""
+        from app.path import face_grid_generator as _fg_gen
         data     = self._model.data
         mesh     = data.trimesh_mesh
         up       = data.up_axis
@@ -686,11 +727,11 @@ class MainWindow(QMainWindow):
 
         # Reference planes use classifier-assigned faces for correct tilt
         first_region, first_faces = pairs[0]
-        ref_corners = _face_grid_generator.get_face_grid_plane_corners(
+        ref_corners = _fg_gen.get_face_grid_plane_corners(
             first_region, first_faces, mesh, up,
             standoff_mm=0.0, mesh_bounds=bounds,
         )
-        spray_corners = _face_grid_generator.get_face_grid_plane_corners(
+        spray_corners = _fg_gen.get_face_grid_plane_corners(
             first_region, first_faces, mesh, up,
             standoff_mm=standoff, mesh_bounds=bounds,
         )
@@ -717,7 +758,7 @@ class MainWindow(QMainWindow):
                 try:
                     routes = []
                     for region, faces in self._pairs:
-                        r = _face_grid_generator.generate_conform_route(
+                        r = _fg_gen.generate_conform_route(
                             region, faces, self._mesh, self._up,
                             spray_width_mm=self._spray,
                             direction_offset=self._offset,
@@ -802,12 +843,13 @@ class MainWindow(QMainWindow):
         self._update_grid()
 
     def _refresh_route_display(self) -> None:
-        if self._current_routes:
-            self._viewer.show_route(
-                self._current_routes,
-                show_arrows=self._ribbon.is_show_arrows(),
-                show_waypoints=self._ribbon.is_show_waypoints(),
-            )
+        if self._viewer is None or not self._current_routes:
+            return
+        self._viewer.show_route(
+            self._current_routes,
+            show_arrows=self._ribbon.is_show_arrows(),
+            show_waypoints=self._ribbon.is_show_waypoints(),
+        )
 
     def _on_route_error(self, message: str) -> None:
         self._ribbon.set_generating(False)
@@ -819,6 +861,8 @@ class MainWindow(QMainWindow):
 
     def _clear_paths(self) -> None:
         self._face_grid_planes_cache = None
+        if self._viewer is None:
+            return
         self._viewer.clear_route()
         self._viewer.clear_face_grid_planes()
         self._viewer.clear_bbox_grid()
@@ -830,6 +874,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('Paths cleared.')
 
     def _update_grid(self) -> None:
+        if self._viewer is None:
+            return
         # Face grid mode: redraw planes/grid from cache
         if self._face_grid_planes_cache is not None:
             ref_c, std_c, spc = self._face_grid_planes_cache
@@ -844,7 +890,7 @@ class MainWindow(QMainWindow):
         self._viewer.clear_bbox_grid()
         if not self._ribbon.is_show_grid():
             return
-        if self._model.data is None:
+        if self._model is None or self._model.data is None:
             return
         bounds = tuple(self._model.data.pyvista_mesh.bounds)
         h_mm = self._ribbon.get_spray_width_mm()
