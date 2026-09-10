@@ -1,16 +1,16 @@
-"""Generate spray-paint passes on a named mesh region face using shadow projection.
+"""Generate spray-paint passes on a named mesh region face.
 
 Public API
 ----------
 generate_face_grid_route(...)
-    Surface-tilted passes: computes mean normal of selected faces, builds an
-    orthonormal spray-plane basis (mean_normal, pass_vec, step_vec), then
-    shadow-projects each row's depth from the outermost vertex in that band.
-    The spray plane automatically tilts to match the actual surface orientation.
+    Adaptive shadow-projection: tilted basis, straight-line passes, fast.
+
+generate_conform_route(...)
+    Conform: tilted basis planes + trimesh intersection + uniform standoff.
+    Hybrid of Adaptive (correct step spacing) and Mesh Surface (exact paths).
 
 get_face_grid_plane_corners(...)
     Returns 4 corners of the tilted spray plane for 3-D visualisation.
-    Plane normal and extent are derived from the actual face normals.
 
 compute_mesh_shaped_passes(...)
     Low-level axis-aligned helper (used by bbox path mode).
@@ -20,7 +20,7 @@ import numpy as np
 import trimesh
 
 from app.path.path_model import PaintPass, Connection, PaintRoute
-from app.path.resampler import resample_arc
+from app.path.resampler import resample_arc, rdp_simplify
 
 FACE_PLANE_NAME  = 'Face Plane'
 SPRAY_PLANE_NAME = 'Spray Plane'
@@ -193,6 +193,209 @@ def generate_face_grid_route(
             sub_index=0,
             slice_position=float(step_pos),
         ))
+
+    connections: list[Connection] = []
+    for i in range(len(all_passes) - 1):
+        connections.append(Connection(
+            id=i,
+            from_pass_id=all_passes[i].id,
+            to_pass_id=all_passes[i + 1].id,
+            points=np.array([
+                all_passes[i].points[-1].copy(),
+                all_passes[i + 1].points[0].copy(),
+            ], dtype=float),
+            is_air_move=False,
+        ))
+
+    total_length = sum(
+        float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1)))
+        for p in all_passes if len(p.points) >= 2
+    )
+
+    return PaintRoute(
+        region_id=region,
+        passes=all_passes,
+        connections=connections,
+        unit='mm',
+        spacing_mm=spray_width_mm,
+        total_passes=len(all_passes),
+        total_length_mm=total_length,
+        spray_normal=mean_n.copy(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Conform route — tilted-basis planes + trimesh intersection + uniform standoff
+# ---------------------------------------------------------------------------
+
+_RDP_EPS        = 0.3    # mm — same as generator.py
+_MIN_PASS_FRAC  = 0.10
+_MIN_PASS_ABS   = 5.0    # mm
+_MAX_ANGLE_DEV  = 65.0   # degrees
+_MAX_SUB_LEVEL  = 6
+
+
+def _stitch_segments(segments: np.ndarray, tol: float = 1e-6) -> list[np.ndarray]:
+    """Graph-walk on quantised endpoints → ordered polylines. Same logic as stitcher.py."""
+    from collections import defaultdict
+    scale = 1.0 / tol
+    quant = (segments * scale).round().astype(np.int64)  # (N,2,3)
+
+    adj: dict = defaultdict(list)
+    for i, seg in enumerate(quant):
+        a, b = tuple(seg[0]), tuple(seg[1])
+        adj[a].append((b, i))
+        adj[b].append((a, i))
+
+    visited: set[int] = set()
+    chains: list[list] = []
+    starts = [n for n, nb in adj.items() if len(nb) == 1]
+    if not starts:
+        starts = list(adj.keys())[:1]
+
+    for start in starts:
+        if all(idx in visited for _, idx in adj[start]):
+            continue
+        chain = [start]
+        while True:
+            cur = chain[-1]
+            prev = chain[-2] if len(chain) > 1 else None
+            moved = False
+            for nb, idx in adj[cur]:
+                if idx not in visited and nb != prev:
+                    visited.add(idx)
+                    chain.append(nb)
+                    moved = True
+                    break
+            if not moved:
+                break
+        if len(chain) >= 2:
+            pts = np.array([list(n) for n in chain], dtype=float) / scale
+            chains.append(pts)
+
+    return chains
+
+
+def _filter_chains(chains: list[np.ndarray], spray_width_mm: float) -> list[np.ndarray]:
+    if not chains:
+        return chains
+    lengths = [float(np.sum(np.linalg.norm(np.diff(c, axis=0), axis=1))) for c in chains]
+    order = sorted(range(len(chains)), key=lambda i: lengths[i], reverse=True)
+    chains = [chains[i] for i in order]
+    lengths = [lengths[i] for i in order]
+    min_len = max(spray_width_mm * _MIN_PASS_FRAC, _MIN_PASS_ABS)
+    cos_lim = np.cos(np.radians(_MAX_ANGLE_DEV))
+    pdir = chains[0][-1] - chains[0][0]
+    pn = np.linalg.norm(pdir)
+    primary_dir = pdir / pn if pn > 1e-9 else np.array([1., 0., 0.])
+    kept = [chains[0]]
+    for c, arc in zip(chains[1:], lengths[1:]):
+        if arc < min_len:
+            continue
+        d = c[-1] - c[0]
+        dn = np.linalg.norm(d)
+        if dn > 1e-9 and abs(np.dot(d / dn, primary_dir)) < cos_lim:
+            continue
+        kept.append(c)
+    return kept[:_MAX_SUB_LEVEL]
+
+
+def generate_conform_route(
+    region: str,
+    face_indices: np.ndarray,
+    mesh: trimesh.Trimesh,
+    up_axis: int,
+    spray_width_mm: float,
+    direction_offset: int = 0,
+    waypoint_spacing_mm: float = 0.0,
+    standoff_mm: float = 0.0,
+) -> PaintRoute:
+    """Conform toolpath: tilted-basis cutting planes + trimesh intersection.
+
+    Uses Adaptive's mean-normal basis so planes are perpendicular to the
+    surface step direction (correct arc-length spacing on tilted surfaces).
+    Intersects the actual mesh (like Mesh Surface) for exact path geometry.
+    Standoff applied uniformly via mean_n — no per-waypoint nearest-face snap.
+    Face set: classifier-assigned faces only (no full-mesh forward-face leakage).
+    """
+    if len(face_indices) == 0:
+        raise ValueError(f"Conform: region '{region}' has no faces.")
+
+    face_axis, face_sign = _resolve_face_map(up_axis)[region]
+    basis_faces = np.where(mesh.face_normals[:, face_axis] * face_sign > 0.0)[0].astype(np.int64)
+    if len(basis_faces) == 0:
+        basis_faces = face_indices
+    mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
+
+    # Step extent along step_vec from the selected region vertices
+    verts = mesh.vertices[mesh.faces[face_indices].ravel()]
+    step_proj = verts @ step_vec
+    step_min = float(step_proj.min()) - 0.001
+    step_max = float(step_proj.max()) + 0.001
+
+    span = step_max - step_min
+    if span <= spray_width_mm:
+        step_positions = [(step_min + step_max) / 2.0]
+    else:
+        first = step_min + spray_width_mm / 2.0
+        step_positions = list(np.arange(first, step_max, spray_width_mm))
+
+    face_indices_set = set(face_indices.tolist())
+    all_passes: list[PaintPass] = []
+    pass_id = 0
+
+    for plane_index, step_pos in enumerate(step_positions):
+        # Cutting plane: normal = step_vec, origin = step_pos along step_vec
+        plane_origin = step_pos * step_vec
+        result = trimesh.intersections.mesh_plane(
+            mesh,
+            plane_normal=step_vec,
+            plane_origin=plane_origin,
+            return_faces=True,
+        )
+        if result is None:
+            continue
+        segments, seg_face_ids = result
+        if segments is None or len(segments) == 0:
+            continue
+
+        # Filter to classifier-assigned faces only
+        mask = np.array([fid in face_indices_set for fid in seg_face_ids])
+        segments = segments[mask]
+        if len(segments) == 0:
+            continue
+
+        # Remove degenerate segments
+        lens = np.linalg.norm(segments[:, 1, :] - segments[:, 0, :], axis=1)
+        segments = segments[lens > 1e-12]
+        if len(segments) == 0:
+            continue
+
+        chains = _stitch_segments(segments)
+        chains = _filter_chains(chains, spray_width_mm)
+
+        is_forward = (plane_index % 2 == 0) if direction_offset == 0 else (plane_index % 2 == 1)
+
+        for sub_idx, chain in enumerate(chains):
+            pts = chain if is_forward else chain[::-1].copy()
+            pts = rdp_simplify(pts, _RDP_EPS)
+            if len(pts) < 2:
+                continue
+            # Uniform standoff along mean surface normal — no per-point snap
+            if standoff_mm > 0.0:
+                pts = pts + standoff_mm * mean_n
+            if waypoint_spacing_mm > 0 and len(pts) >= 2:
+                pts = resample_arc(pts, waypoint_spacing_mm)
+            all_passes.append(PaintPass(
+                id=pass_id,
+                region_id=region,
+                direction='horizontal',
+                points=pts,
+                is_forward=is_forward,
+                sub_index=sub_idx,
+                slice_position=float(step_pos),
+            ))
+            pass_id += 1
 
     connections: list[Connection] = []
     for i in range(len(all_passes) - 1):

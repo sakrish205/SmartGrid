@@ -242,34 +242,15 @@ class MainWindow(QMainWindow):
         ribbon_scroll.setStyleSheet('QScrollArea{background:transparent;border:none;}')
         vl.addWidget(ribbon_scroll)
 
-        # 3-D viewport — takes all remaining space; ViewCube overlaid bottom-right
-        from app.ui.view_cube import ViewCube
-        viewer_container = QWidget()
-        viewer_container.setContentsMargins(0, 0, 0, 0)
-        from PySide6.QtWidgets import QStackedLayout
-        viewer_stack = QStackedLayout(viewer_container)
-        viewer_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
-
+        # 3-D viewport — ViewCube floats as a child widget (no layout, positioned by move())
         self._viewer = MeshViewer()
-        viewer_stack.addWidget(self._viewer)
+        vl.addWidget(self._viewer, stretch=1)
 
-        cube_anchor = QWidget()
-        cube_anchor.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        cube_anchor.setStyleSheet('background:transparent;')
-        from PySide6.QtWidgets import QHBoxLayout
-        ca_hl = QHBoxLayout(cube_anchor)
-        ca_hl.setContentsMargins(0, 0, 8, 8)
-        ca_hl.addStretch()
-        from PySide6.QtWidgets import QVBoxLayout as _QVL
-        ca_vl = _QVL()
-        ca_vl.addStretch()
-        self._view_cube = ViewCube()
+        from app.ui.view_cube import ViewCube
+        self._view_cube = ViewCube(self._viewer)   # child of viewer — renders on top
         self._view_cube.view_changed.connect(self._viewer.set_view)
-        ca_vl.addWidget(self._view_cube)
-        ca_hl.addLayout(ca_vl)
-        viewer_stack.addWidget(cube_anchor)
-
-        vl.addWidget(viewer_container, stretch=1)
+        self._view_cube.show()
+        self._view_cube.raise_()
 
         self._viewer.installEventFilter(self)
 
@@ -353,6 +334,11 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage('Navigate — drag to rotate, scroll to zoom.')
 
     def eventFilter(self, obj, event) -> bool:
+        if obj is self._viewer and event.type() == QEvent.Type.Resize:
+            cube = self._view_cube
+            vw, vh = self._viewer.width(), self._viewer.height()
+            cube.move(vw - cube.width() - 8, vh - cube.height() - 8)
+            cube.raise_()
         return super().eventFilter(obj, event)
 
     # ------------------------------------------------------------------
@@ -626,46 +612,33 @@ class MainWindow(QMainWindow):
             )
 
     def _generate_face_grid_mesh(self, spray_mm: float) -> None:
-        """Surface Conform: 3D surface-following paths on all forward-facing mesh faces.
-
-        Uses all faces whose normal points in the projection direction (face_sign > 0)
-        so the slicer covers the full visible surface including slopes, not just the
-        flat classified-region faces.  The flat reference grid is always standard
-        (drawn on the plane, not conformed to the 3D surface) and obeys the Grid checkbox.
-        """
+        """Conform: tilted-basis cutting planes + trimesh intersection + uniform standoff."""
         data     = self._model.data
         mesh     = data.trimesh_mesh
         up       = data.up_axis
         standoff = self._ribbon.get_standoff_mm()
         bounds   = tuple(data.pyvista_mesh.bounds)
+        offset   = 1 if self._ribbon.is_direction_flipped() else 0
+        wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
 
-        # Build per-region face lists using ALL forward-facing faces for full coverage
-        from app.path.face_grid_generator import _resolve_face_map as _rfm
-        face_map = _rfm(up)
         pairs = []
         for region in sorted(self._selected_regions):
-            if len(self._model.get_region_faces(region)) == 0:
-                continue
-            face_axis, face_sign = face_map[region]
-            # Include every face whose normal has a component in the projection direction
-            visible = np.where(mesh.face_normals[:, face_axis] * face_sign > 0.0)[0].astype(np.int64)
-            if len(visible) == 0:
-                visible = self._model.get_region_faces(region)  # fallback
-            pairs.append((region, visible))
+            faces = self._model.get_region_faces(region)
+            if len(faces) > 0:
+                pairs.append((region, faces))
 
         if not pairs:
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
 
-        # Show reference planes immediately — paths arrive async via worker
-        # Use the visible (forward-facing) faces for correct surface tilt
-        first_region, first_visible = pairs[0]
+        # Reference planes use classifier-assigned faces for correct tilt
+        first_region, first_faces = pairs[0]
         ref_corners = _face_grid_generator.get_face_grid_plane_corners(
-            first_region, first_visible, mesh, up,
+            first_region, first_faces, mesh, up,
             standoff_mm=0.0, mesh_bounds=bounds,
         )
         spray_corners = _face_grid_generator.get_face_grid_plane_corners(
-            first_region, first_visible, mesh, up,
+            first_region, first_faces, mesh, up,
             standoff_mm=standoff, mesh_bounds=bounds,
         )
         self._face_grid_planes_cache = (ref_corners, spray_corners, spray_mm)
@@ -676,11 +649,35 @@ class MainWindow(QMainWindow):
         )
         self._viewer.show_bbox(False)
 
-        wpt_mm = self._ribbon.get_waypoint_spacing_mm()
         self._ribbon.set_generating(True)
-        self.statusBar().showMessage('Generating surface-conform paths…')
-        worker = _PathWorker(data, pairs, spray_mm, waypoint_spacing_mm=wpt_mm,
-                             standoff_mm=standoff)
+        self.statusBar().showMessage('Generating conform paths…')
+
+        class _ConformWorker(QThread):
+            finished = Signal(object)
+            error    = Signal(str)
+            def __init__(self, pairs, mesh, up, spray_mm, standoff_mm, offset, wpt_mm):
+                super().__init__()
+                self._pairs, self._mesh = pairs, mesh
+                self._up, self._spray = up, spray_mm
+                self._standoff, self._offset, self._wpt = standoff_mm, offset, wpt_mm
+            def run(self):
+                try:
+                    routes = []
+                    for region, faces in self._pairs:
+                        r = _face_grid_generator.generate_conform_route(
+                            region, faces, self._mesh, self._up,
+                            spray_width_mm=self._spray,
+                            direction_offset=self._offset,
+                            waypoint_spacing_mm=self._wpt,
+                            standoff_mm=self._standoff,
+                        )
+                        routes.append(r)
+                    self.finished.emit(routes)
+                except Exception as exc:
+                    import traceback as _tb
+                    self.error.emit(f'{type(exc).__name__}: {exc}\n{_tb.format_exc()}')
+
+        worker = _ConformWorker(pairs, mesh, up, spray_mm, standoff, offset, wpt_mm)
         worker.finished.connect(self._on_route_ready)
         worker.error.connect(self._on_route_error)
         self._worker = worker
