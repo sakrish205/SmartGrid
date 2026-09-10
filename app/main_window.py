@@ -267,10 +267,12 @@ class MainWindow(QMainWindow):
         self._ribbon.view_settings_req.connect(self._open_view_settings)
 
         # Defer heavy imports (trimesh, pyvista, pyvistaqt) to after first paint
-        QTimer.singleShot(0, self._init_viewer)
+        QTimer.singleShot(150, self._init_viewer)
 
     def _init_viewer(self) -> None:
         """Deferred: import and instantiate MeshViewer after the window is painted."""
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()   # ensure ribbon + placeholder are painted before VTK init
         from app.ui.viewer import MeshViewer
         from models.mesh_model import MeshModel
 
