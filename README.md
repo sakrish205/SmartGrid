@@ -20,8 +20,7 @@ Launch:
 python main.py
 ```
 
-Or run `run.bat` (Windows shell launcher).  
-Or double-click `SmartGrid.pyw` (no console window).
+Or run `run.bat` (Windows shell launcher).
 
 ---
 
@@ -216,7 +215,6 @@ Multi-body OBJ files are merged at load via `trimesh.load(force='mesh')`.
 
 ```
 SmartGrid/
-├── SmartGrid.pyw
 ├── app/
 │   ├── main_window.py             window, signal wiring, QThread workers
 │   ├── ui/
