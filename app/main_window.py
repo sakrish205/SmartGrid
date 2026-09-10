@@ -17,7 +17,7 @@ from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 
 from models.mesh_model import MeshModel
 from app.mesh.preprocessor import MeshData
-from app.path.path_model import PaintRoute
+from app.path.path_model import PaintRoute, GenerationParams
 from app.path import generator as _generator
 from app.path import bbox_generator as _bbox_generator
 from app.path import face_grid_generator as _face_grid_generator
@@ -209,6 +209,7 @@ class MainWindow(QMainWindow):
         self._model              = MeshModel()
         self._selected_regions:  set[str]         = set()
         self._current_routes:    list[PaintRoute] = []
+        self._last_params:       GenerationParams | None = None
         self._worker:        Optional[QThread] = None
         self._load_worker:   Optional[QThread] = None
         self._current_colors: dict[str, str]  = dict(_COLOR_DEFAULTS)
@@ -499,6 +500,36 @@ class MainWindow(QMainWindow):
     # Path generation
     # ------------------------------------------------------------------
 
+    def _build_params(self, path_target: str, spray_mm: float) -> GenerationParams:
+        """Snapshot all UI settings into a GenerationParams for export metadata."""
+        import os as _os
+        submode = self._ribbon.get_face_grid_submode()
+        if path_target == 'bbox':
+            mode = 'Boundary Box'
+        elif path_target == 'face_grid' and submode == 'shadow':
+            mode = 'Face Grid / Adaptive'
+        elif path_target == 'face_grid' and submode == 'mesh_standoff':
+            mode = 'Face Grid / Conform'
+        else:
+            mode = 'Mesh Surface'
+
+        up_labels = {0: 'X', 1: 'Y', 2: 'Z'}
+        src = ''
+        if self._model.data and self._model.data.source_path:
+            src = _os.path.basename(self._model.data.source_path)
+
+        return GenerationParams(
+            source_file         = src,
+            path_mode           = mode,
+            regions             = sorted(self._selected_regions),
+            up_axis             = up_labels.get(self._model.data.up_axis, '?'),
+            spray_width_mm      = round(spray_mm, 4),
+            standoff_mm         = round(self._ribbon.get_standoff_mm(), 4),
+            waypoint_spacing_mm = round(self._ribbon.get_waypoint_spacing_mm(), 4),
+            direction           = self._ribbon.get_direction(),
+            sweep               = 'CCW' if self._ribbon.is_direction_flipped() else 'CW',
+        )
+
     def _on_generate(self) -> None:
         if not self._model.is_loaded:
             return
@@ -506,6 +537,7 @@ class MainWindow(QMainWindow):
             return
         spray_mm    = self._ribbon.get_spray_width_mm()
         path_target = self._ribbon.get_path_target()
+        self._last_params = self._build_params(path_target, spray_mm)
         if path_target == 'bbox':
             self._generate_bbox(spray_mm)
         elif path_target == 'face_grid':
@@ -815,6 +847,7 @@ class MainWindow(QMainWindow):
                 export_route_json(
                     self._current_routes, path,
                     show_waypoints=self._ribbon.is_show_waypoints(),
+                    params=self._last_params,
                 )
                 self.statusBar().showMessage(f'Exported: {path}')
             except Exception as exc:
@@ -832,6 +865,7 @@ class MainWindow(QMainWindow):
                 export_route_csv(
                     self._current_routes, path,
                     show_waypoints=self._ribbon.is_show_waypoints(),
+                    params=self._last_params,
                 )
                 self.statusBar().showMessage(f'Exported: {path}')
             except Exception as exc:

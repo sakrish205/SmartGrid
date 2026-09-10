@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+from datetime import datetime
 import numpy as np
 
 UNIT_TO_MM: dict[str, float] = {
@@ -9,6 +10,25 @@ UNIT_TO_MM: dict[str, float] = {
     'in': 25.4,
     'ft': 304.8,
 }
+
+
+_SOFTWARE = 'SmartGrid 1.3'
+
+
+@dataclass
+class GenerationParams:
+    """All settings used for one path generation run — included in every export for repeatability."""
+    source_file:         str        # mesh filename (basename only)
+    path_mode:           str        # 'Boundary Box' | 'Face Grid / Adaptive' | 'Face Grid / Conform' | 'Mesh Surface'
+    regions:             list       # e.g. ['TOP', 'FRONT']
+    up_axis:             str        # 'X' | 'Y' | 'Z'
+    spray_width_mm:      float
+    standoff_mm:         float      # 0.0 = none applied
+    waypoint_spacing_mm: float      # 0.0 = disabled (uniform mesh vertices used as-is)
+    direction:           str        # 'horizontal' | 'vertical' | 'both'
+    sweep:               str        # 'CW' | 'CCW'
+    generated_at:        str = field(default_factory=lambda: datetime.now().isoformat(timespec='seconds'))
+    software:            str = field(default=_SOFTWARE)
 
 
 @dataclass

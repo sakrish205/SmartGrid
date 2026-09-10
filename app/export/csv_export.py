@@ -4,19 +4,20 @@ Rows are written in robot execution order:
   pass points → connector points → next pass points → …
 
 Each row is one TCP waypoint. Key columns for OLP import:
-  seq_id      – global sequence number (robot program line order)
+  seq_id       – global sequence number (robot program line order)
   segment_type – 'pass' (spray move) or 'connection' (air move)
-  is_spray    – True while gun is on, False for air travel
-  x, y, z    – TCP position in mm
+  is_spray     – True while gun is on, False for air travel
+  x, y, z     – TCP position in mm
 
-Metadata columns (region, direction, pass_id, etc.) allow grouping/filtering
-in Excel or a preprocessing script.
+A generation metadata block is written as # comment lines before the CSV
+header so OLP tools that strip comments can still parse the data columns
+while the raw file remains self-documenting.
 """
 from __future__ import annotations
 import csv
 
 import numpy as np
-from app.path.path_model import PaintRoute
+from app.path.path_model import PaintRoute, GenerationParams
 
 _FIELDS = [
     'seq_id',           # global execution order (0, 1, 2, …)
@@ -43,17 +44,48 @@ _FIELDS = [
 ]
 
 
+def _write_metadata(f, params: GenerationParams) -> None:
+    """Write # comment lines documenting the generation run."""
+    lines = [
+        '# ── SmartGrid Toolpath Export ───────────────────────────────────',
+        f'# software          : {params.software}',
+        f'# generated_at      : {params.generated_at}',
+        f'# source_file       : {params.source_file}',
+        f'# path_mode         : {params.path_mode}',
+        f'# regions           : {", ".join(params.regions)}',
+        f'# up_axis           : {params.up_axis}',
+        f'# spray_width_mm    : {params.spray_width_mm}',
+        f'# standoff_mm       : {params.standoff_mm if params.standoff_mm else "off"}',
+        (
+            f'# waypoint_interval : {params.waypoint_spacing_mm} mm'
+            if params.waypoint_spacing_mm
+            else '# waypoint_interval : off  (mesh vertices used as-is)'
+        ),
+        f'# direction         : {params.direction}',
+        f'# sweep             : {params.sweep}',
+        '# ─────────────────────────────────────────────────────────────────',
+        '',
+    ]
+    for line in lines:
+        f.write(line + '\n')
+
+
 def export_route_csv(
     routes: list[PaintRoute],
     filepath: str,
     show_waypoints: bool = True,
+    params: GenerationParams | None = None,
 ) -> None:
     """Export routes to CSV.
 
     show_waypoints=True  → all TCP waypoints per pass (full resampled path).
     show_waypoints=False → only start and end point per pass (minimal robot program).
+    params               → if provided, written as # comment block before the header.
     """
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
+        if params is not None:
+            _write_metadata(f, params)
+
         writer = csv.DictWriter(f, fieldnames=_FIELDS, extrasaction='ignore')
         writer.writeheader()
 
@@ -74,7 +106,6 @@ def export_route_csv(
                     round(float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1))), 3)
                     if len(p.points) >= 2 else 0.0
                 )
-                # Travel direction unit vector at pass start
                 if len(p.points) >= 2:
                     d = p.points[1] - p.points[0]
                     dn = np.linalg.norm(d)

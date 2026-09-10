@@ -15,7 +15,7 @@ import json
 from datetime import datetime
 
 import numpy as np
-from app.path.path_model import PaintRoute
+from app.path.path_model import PaintRoute, GenerationParams
 
 
 class _NumpyEncoder(json.JSONEncoder):
@@ -33,11 +33,13 @@ def export_route_json(
     routes: list[PaintRoute],
     filepath: str,
     show_waypoints: bool = True,
+    params: GenerationParams | None = None,
 ) -> None:
     """Export routes to JSON.
 
     show_waypoints=True  → full tcp_waypoints array per pass.
     show_waypoints=False → only start/end in each pass (no tcp_waypoints key).
+    params               → if provided, written as generation_params for repeatability.
     """
     total_passes      = sum(r.total_passes for r in routes)
     total_connections = sum(len(r.connections) for r in routes)
@@ -45,10 +47,29 @@ def export_route_json(
     regions           = sorted({r.region_id for r in routes})
     directions        = sorted({p.direction for r in routes for p in r.passes})
 
+    gen_block: dict = {}
+    if params is not None:
+        gen_block = {
+            "software":            params.software,
+            "source_file":         params.source_file,
+            "generated_at":        params.generated_at,
+            "path_mode":           params.path_mode,
+            "regions":             params.regions,
+            "up_axis":             params.up_axis,
+            "spray_width_mm":      params.spray_width_mm,
+            "standoff_mm":         params.standoff_mm if params.standoff_mm else "off",
+            "waypoint_interval_mm": (
+                params.waypoint_spacing_mm
+                if params.waypoint_spacing_mm
+                else "off"
+            ),
+            "direction":           params.direction,
+            "sweep":               params.sweep,
+        }
+
     data = {
         "version": "1.3",
-        "author": "Saketha Krishna B S",
-        "generated_at": datetime.now().isoformat(timespec='seconds'),
+        "generation_params": gen_block,
         "summary": {
             "total_routes":       len(routes),
             "total_passes":       total_passes,
