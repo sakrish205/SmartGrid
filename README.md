@@ -20,6 +20,7 @@ Launch:
 python main.py
 ```
 
+Or run `run.bat` (Windows shell launcher).  
 Or double-click `SmartGrid.pyw` (no console window).
 
 ---
