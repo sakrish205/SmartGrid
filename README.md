@@ -96,6 +96,8 @@ for i, step_pos in enumerate(step_positions):
     pt_a[pass_axis] = pass_min;  pt_b[pass_axis] = pass_max
 ```
 
+> **Boustrophedon traversal** — Choset, H. (2000). *Coverage of Known Spaces: The Boustrophedon Cellular Decomposition*. Autonomous Robots, 9(3), 247–253.
+
 **Best for:** flat panels and sheet-metal surfaces that do not deviate significantly from the bounding face plane.
 
 ### Face Grid — Adaptive
@@ -119,6 +121,8 @@ for step_pos in step_positions:
     pt_b = row_depth*mean_n + p_max*pass_vec + step_pos*step_vec
 ```
 
+> **Orthonormal basis projection** — standard linear algebra (cross product basis construction). No single attribution.
+
 **Best for:** curved panels with a dominant normal direction (bonnets, bumpers, side panels). Passes float mid-pass on surfaces with high curvature along the sweep direction.
 
 ### Face Grid — Conform
@@ -140,6 +144,10 @@ for plane_idx, step_pos in enumerate(step_positions):
     pts += standoff_mm * mean_n                           # uniform standoff
 ```
 
+> **Triangle–plane intersection** — via [Trimesh](https://trimesh.org/) (Dawson-Haggerty et al.). Standard computational geometry.
+> **RDP simplification** — Ramer, U. (1972). *CGIP 1(3)*. Douglas & Peucker (1973). *Cartographica 10(2)*.
+> **Tilted-basis cutting planes** (mean-normal as slice normal) — original combination, not drawn from any published method.
+
 **Best for:** blended edges and compound curves where Mesh Surface paths stop short of the actual surface extent.
 
 ### Mesh Surface
@@ -160,6 +168,10 @@ for plane_idx, step_pos in enumerate(step_positions):
     pts = rdp_simplify(pts, eps=0.3)                      # RDP ε = 0.3 mm
     is_forward = (plane_idx % 2 == 0)                     # boustrophedon
 ```
+
+> **Triangle–plane intersection** — via [Trimesh](https://trimesh.org/) (Dawson-Haggerty et al.). Standard computational geometry.
+> **RDP simplification** — Ramer, U. (1972). *CGIP 1(3)*. Douglas & Peucker (1973). *Cartographica 10(2)*.
+> **Boustrophedon traversal** — Choset, H. (2000). *Coverage of Known Spaces*. Autonomous Robots, 9(3), 247–253.
 
 **Best for:** complex curved surfaces and parts with holes or cutouts. Paths lie on the mesh surface in both axes.
 
@@ -438,21 +450,6 @@ AUTOMATED COATING
 ```
 
 The project is therefore best positioned as a **Mechanical Engineering + Manufacturing Automation + Robotics** application, with Python and computational geometry providing the implementation.
-
----
-
-## Algorithmic Attribution
-
-SmartGrid is original work. The following well-known algorithms are used as components:
-
-| Algorithm | Used for | Reference |
-|---|---|---|
-| **Boustrophedon traversal** | Alternating pass direction for full-surface coverage | Choset, H. (2000). *Coverage of Known Spaces: The Boustrophedon Cellular Decomposition*. Autonomous Robots, 9(3), 247–253. |
-| **Ramer–Douglas–Peucker (RDP)** | Polyline simplification — removes micro-jaggies from triangle-mesh discretisation | Ramer, U. (1972). *An iterative procedure for the polygonal approximation of plane curves*. CGIP 1(3). Douglas, D. & Peucker, T. (1973). *Algorithms for the reduction of the number of points required to represent a digitized line or its caricature*. Cartographica 10(2). |
-| **Triangle–plane intersection** | Cutting planes through the mesh for Conform and Mesh Surface modes | Via [Trimesh](https://trimesh.org/) — Dawson-Haggerty et al. Standard computational geometry. |
-| **Orthonormal basis projection** | Mean-normal spray plane for Adaptive and Conform modes | Standard linear algebra — no single attribution. |
-
-The **Face Grid — Conform** hybrid (tilted mean-normal cutting planes combined with trimesh intersection for correct arc-length spacing and exact surface geometry) is an original combination not drawn from any published method.
 
 ---
 
