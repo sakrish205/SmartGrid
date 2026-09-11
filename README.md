@@ -83,54 +83,85 @@ SmartGrid provides four toolpath generation modes for different workpiece geomet
 
 ### Boundary Box
 
-Flat lawnmower passes on the axis-aligned bounding-box face plane.
+Flat lawnmower passes on the axis-aligned bounding-box face plane. No mesh geometry queried during generation.
 
-- Uses the outermost mesh extent along the face normal.
-- Passes are spaced by the specified pitch.
-- Direction alternates between passes.
-- Straight-line connectors join pass endpoints.
-- No mesh geometry is queried during generation.
+```python
+# core: bbox_generator.py — _make_passes
+face_pos = bbox_max[face_axis] + standoff_mm          # fixed face plane
+step_positions = np.arange(step_min + pitch/2, step_max, pitch)
+for i, step_pos in enumerate(step_positions):
+    is_forward = (i + direction_offset) % 2 == 0      # boustrophedon
+    pt_a[face_axis] = pt_b[face_axis] = face_pos
+    pt_a[step_axis] = pt_b[step_axis] = step_pos
+    pt_a[pass_axis] = pass_min;  pt_b[pass_axis] = pass_max
+```
 
 **Best for:** flat panels and sheet-metal surfaces that do not deviate significantly from the bounding face plane.
 
 ### Face Grid — Adaptive
 
-Surface-following passes using shadow projection on a mean-normal spray-plane basis.
+Shadow-projection on a mean-normal tilted spray-plane. No mesh slicing — each pass is a straight line between its two endpoints.
 
-- Calculates the mean outward normal of the selected forward-facing region.
-- Builds a pass/step coordinate basis.
-- Projects region vertices into the spray-plane coordinate system.
-- Divides the step extent into pitch-based bands.
-- Tracks the outermost surface depth for each band.
-- Applies the specified standoff.
+```python
+# core: face_grid_generator.py — generate_face_grid_route
+mean_n   = normalize(mesh.face_normals[forward_faces].mean(axis=0))
+pass_vec = normalize(cross(mean_n, up))      # left-right axis
+step_vec = normalize(cross(pass_vec, mean_n))  # step axis
 
-**Best for:** curved panels with a dominant normal direction, such as bonnets, bumpers, and side panels.
+pass_proj  = verts @ pass_vec   # 1-D coords along sweep axis
+step_proj  = verts @ step_vec   # 1-D coords along step axis
+depth_proj = verts @ mean_n     # outermost surface depth
 
-**Limitation:** straight passes can float on surfaces with significant curvature along the sweep direction.
+for step_pos in step_positions:
+    band = verts[|step_proj - step_pos| <= pitch * 0.65]
+    row_depth = (band @ mean_n).max() + standoff_mm
+    pt_a = row_depth*mean_n + p_min*pass_vec + step_pos*step_vec
+    pt_b = row_depth*mean_n + p_max*pass_vec + step_pos*step_vec
+```
+
+**Best for:** curved panels with a dominant normal direction (bonnets, bumpers, side panels). Passes float mid-pass on surfaces with high curvature along the sweep direction.
 
 ### Face Grid — Conform
 
-Trimesh plane-intersection slicing on all geometrically outward-facing faces of the selected region.
+Tilted mean-normal cutting planes + trimesh mesh intersection. Combines Adaptive's correct arc-length spacing with Mesh Surface's exact path geometry.
 
-- Uses cutting planes at pitch intervals.
-- Intersects the mesh and stitches resulting segments.
-- Applies RDP simplification.
-- Maintains boustrophedon ordering.
-- Applies standoff using the nearest mesh-face normal.
+```python
+# core: face_grid_generator.py — generate_conform_route
+mean_n, pass_vec, step_vec = _compute_surface_basis(forward_faces, mesh)
+step_positions = np.arange(step_min + pitch/2, step_max, pitch)
 
-**Best for:** blended edges and compound curves where classifier-based paths may stop short of the actual surface extent.
+for plane_idx, step_pos in enumerate(step_positions):
+    segments, face_ids = trimesh.intersections.mesh_plane(
+        mesh, plane_normal=step_vec,
+        plane_origin=step_pos * step_vec, return_faces=True)
+    segments = segments[np.isin(face_ids, face_indices)]  # classifier faces only
+    chains = _stitch_segments(segments)                   # graph-walk
+    pts = rdp_simplify(chain, eps=0.3)                    # remove micro-jaggies
+    pts += standoff_mm * mean_n                           # uniform standoff
+```
+
+**Best for:** blended edges and compound curves where Mesh Surface paths stop short of the actual surface extent.
 
 ### Mesh Surface
 
-Trimesh plane-intersection slicing on the classifier-assigned region faces.
+Axis-aligned cutting planes + trimesh mesh intersection on the exact classifier-assigned face set.
 
-- Generates cutting planes at pitch intervals.
-- Intersects the mesh and filters segments to the selected region.
-- Stitches and simplifies the resulting paths.
-- Removes small corner fragments.
-- Uses boustrophedon ordering and straight-line connectors.
+```python
+# core: generator.py — generate_route  +  slicer.py
+step_positions = np.arange(step_min + pitch/2, step_max, pitch)
 
-**Best for:** complex curved surfaces and parts with holes or cutouts.
+for plane_idx, step_pos in enumerate(step_positions):
+    segments, face_ids = trimesh.intersections.mesh_plane(
+        mesh, plane_normal=step_normal,
+        plane_origin=..., return_faces=True)
+    segments = segments[np.isin(face_ids, region_faces)]  # region filter
+    polylines = stitcher.stitch(segments)                 # graph-walk → chains
+    polylines = _filter_polylines(polylines, pitch)       # drop corner fragments
+    pts = rdp_simplify(pts, eps=0.3)                      # RDP ε = 0.3 mm
+    is_forward = (plane_idx % 2 == 0)                     # boustrophedon
+```
+
+**Best for:** complex curved surfaces and parts with holes or cutouts. Paths lie on the mesh surface in both axes.
 
 ---
 
