@@ -441,6 +441,21 @@ The project is therefore best positioned as a **Mechanical Engineering + Manufac
 
 ---
 
+## Algorithmic Attribution
+
+SmartGrid is original work. The following well-known algorithms are used as components:
+
+| Algorithm | Used for | Reference |
+|---|---|---|
+| **Boustrophedon traversal** | Alternating pass direction for full-surface coverage | Choset, H. (2000). *Coverage of Known Spaces: The Boustrophedon Cellular Decomposition*. Autonomous Robots, 9(3), 247–253. |
+| **Ramer–Douglas–Peucker (RDP)** | Polyline simplification — removes micro-jaggies from triangle-mesh discretisation | Ramer, U. (1972). *An iterative procedure for the polygonal approximation of plane curves*. CGIP 1(3). Douglas, D. & Peucker, T. (1973). *Algorithms for the reduction of the number of points required to represent a digitized line or its caricature*. Cartographica 10(2). |
+| **Triangle–plane intersection** | Cutting planes through the mesh for Conform and Mesh Surface modes | Via [Trimesh](https://trimesh.org/) — Dawson-Haggerty et al. Standard computational geometry. |
+| **Orthonormal basis projection** | Mean-normal spray plane for Adaptive and Conform modes | Standard linear algebra — no single attribution. |
+
+The **Face Grid — Conform** hybrid (tilted mean-normal cutting planes combined with trimesh intersection for correct arc-length spacing and exact surface geometry) is an original combination not drawn from any published method.
+
+---
+
 ## License
 
 Apache 2.0 — © 2026 Saketha Krishna B S
