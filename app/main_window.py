@@ -272,12 +272,14 @@ class MainWindow(QMainWindow):
     def _init_viewer(self) -> None:
         """Deferred: import and instantiate MeshViewer after the window is painted."""
         from PySide6.QtWidgets import QApplication
-        QApplication.processEvents()   # flush paint before VTK cold-start import
+        QApplication.processEvents()           # flush paint before VTK cold-start
         from app.ui.viewer import MeshViewer   # pyvista/VTK cold-load (~1-3 s)
-        from models.mesh_model import MeshModel
-        QApplication.processEvents()   # pump again — VTK import holds the thread; tells Windows we're alive
+        QApplication.processEvents()           # pump after VTK import
+        from models.mesh_model import MeshModel  # trimesh cold-load (~0.5-1 s)
+        QApplication.processEvents()           # pump after trimesh import
         self._model = MeshModel()
-        self._viewer = MeshViewer()    # QtInteractor OpenGL init (~1-2 s)
+        self._viewer = MeshViewer()            # QtInteractor OpenGL init (~1-2 s)
+        QApplication.processEvents()           # pump after OpenGL init
 
         # Replace placeholder with the real viewer
         idx = self._viewer_vl.indexOf(self._viewer_placeholder)
