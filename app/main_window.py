@@ -272,12 +272,12 @@ class MainWindow(QMainWindow):
     def _init_viewer(self) -> None:
         """Deferred: import and instantiate MeshViewer after the window is painted."""
         from PySide6.QtWidgets import QApplication
-        QApplication.processEvents()   # ensure ribbon + placeholder are painted before VTK init
-        from app.ui.viewer import MeshViewer
+        QApplication.processEvents()   # flush paint before VTK cold-start import
+        from app.ui.viewer import MeshViewer   # pyvista/VTK cold-load (~1-3 s)
         from models.mesh_model import MeshModel
-
+        QApplication.processEvents()   # pump again — VTK import holds the thread; tells Windows we're alive
         self._model = MeshModel()
-        self._viewer = MeshViewer()
+        self._viewer = MeshViewer()    # QtInteractor OpenGL init (~1-2 s)
 
         # Replace placeholder with the real viewer
         idx = self._viewer_vl.indexOf(self._viewer_placeholder)
