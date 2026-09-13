@@ -373,6 +373,7 @@ class SmartRibbon(QWidget):
     sweep_changed       = Signal()
     export_json         = Signal()
     export_csv          = Signal()
+    export_olp          = Signal()
     view_settings_req   = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -757,8 +758,10 @@ class SmartRibbon(QWidget):
         g = _Group('Export')
         self._exp_json_btn = _large_btn('Export\nJSON', _make_icon('export', 20))
         self._exp_csv_btn  = _large_btn('Export\nCSV',  _make_icon('export', 20))
+        self._exp_olp_btn  = _large_btn('Export\nOLP',  _make_icon('export', 20))
         g.add(self._exp_json_btn)
         g.add(self._exp_csv_btn)
+        g.add(self._exp_olp_btn)
         return g
 
     # ------------------------------------------------------------------
@@ -800,6 +803,7 @@ class SmartRibbon(QWidget):
 
         self._exp_json_btn.clicked.connect(self.export_json)
         self._exp_csv_btn.clicked.connect(self.export_csv)
+        self._exp_olp_btn.clicked.connect(self.export_olp)
 
     def _on_pitch_changed(self, _value: float) -> None:
         """Spray pitch changed — update grid display and trigger regeneration."""
@@ -923,6 +927,7 @@ class SmartRibbon(QWidget):
         self._clear_btn.setEnabled(False)
         self._exp_json_btn.setEnabled(False)
         self._exp_csv_btn.setEnabled(False)
+        self._exp_olp_btn.setEnabled(False)
 
     def set_generating(self, generating: bool) -> None:
         self._gen_btn.setEnabled(not generating)
@@ -933,6 +938,7 @@ class SmartRibbon(QWidget):
         self._clear_btn.setEnabled(exists)
         self._exp_json_btn.setEnabled(exists)
         self._exp_csv_btn.setEnabled(exists)
+        self._exp_olp_btn.setEnabled(exists)
 
     def set_unit(self, unit: str) -> None:
         if unit in _UNITS and unit != self._current_unit:

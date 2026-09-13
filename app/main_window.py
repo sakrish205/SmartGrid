@@ -8,7 +8,7 @@ import numpy as np
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
-    QFileDialog, QMessageBox, QDialog,
+    QFileDialog, QMessageBox, QDialog, QInputDialog,
     QDialogButtonBox, QRadioButton, QButtonGroup,
     QLabel, QVBoxLayout as QVBox, QScrollArea, QFrame,
 )
@@ -21,6 +21,7 @@ from app.path.path_model import PaintRoute, GenerationParams
 from app.ui.ribbon import SmartRibbon
 from app.export.json_export import export_route_json
 from app.export.csv_export import export_route_csv
+from app.export.olp_export import export_robodk, export_vc, export_delmia_apt
 from app.ui.view_settings_dialog import ViewSettingsDialog, DEFAULTS as _COLOR_DEFAULTS
 
 
@@ -279,6 +280,7 @@ class MainWindow(QMainWindow):
         self._ribbon.sweep_changed.connect(self._on_sweep_changed)
         self._ribbon.export_json.connect(self._export_json)
         self._ribbon.export_csv.connect(self._export_csv)
+        self._ribbon.export_olp.connect(self._export_olp)
         self._ribbon.view_settings_req.connect(self._open_view_settings)
 
         # Defer heavy imports (trimesh, pyvista, pyvistaqt) to after first paint
@@ -354,6 +356,7 @@ class MainWindow(QMainWindow):
         export_menu = mb.addMenu('Export')
         export_menu.addAction('Export JSON...', self._export_json)
         export_menu.addAction('Export CSV...',  self._export_csv)
+        export_menu.addAction('Export OLP...',  self._export_olp)
 
     # ------------------------------------------------------------------
     # View helpers
@@ -956,3 +959,32 @@ class MainWindow(QMainWindow):
             except Exception as exc:
                 QMessageBox.critical(self, 'Export error', str(exc))
                 self.statusBar().showMessage('Export failed.')
+
+    _OLP_FORMATS = {
+        'RoboDK (6-col curve CSV)':  ('robodk', 'CSV (*.csv)'),
+        'Visual Components (CSV)':   ('vc',     'CSV (*.csv)'),
+        'DELMIA (APT text)':         ('delmia', 'APT (*.apt);;Text (*.txt)'),
+    }
+
+    def _export_olp(self) -> None:
+        if not self._current_routes:
+            QMessageBox.warning(self, 'Nothing to export', 'Generate a path first.')
+            return
+        fmt_label, ok = QInputDialog.getItem(
+            self, 'Export OLP', 'Select OLP format:',
+            list(self._OLP_FORMATS.keys()), 0, False,
+        )
+        if not ok:
+            return
+        fmt_key, file_filter = self._OLP_FORMATS[fmt_label]
+        path, _ = QFileDialog.getSaveFileName(self, f'Export {fmt_label}', '', file_filter)
+        if not path:
+            return
+        self.statusBar().showMessage('Exporting OLP...')
+        try:
+            fn = {'robodk': export_robodk, 'vc': export_vc, 'delmia': export_delmia_apt}[fmt_key]
+            fn(self._current_routes, path, params=self._last_params)
+            self.statusBar().showMessage(f'Exported: {path}')
+        except Exception as exc:
+            QMessageBox.critical(self, 'Export error', str(exc))
+            self.statusBar().showMessage('Export failed.')
