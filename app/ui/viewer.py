@@ -569,16 +569,24 @@ class MeshViewer(QWidget):
                         face_normal=face_normal,
                     )
 
-                if show_waypoints and len(paint_pass.points) >= 1:
-                    wpt_color  = self._colors.get('waypoint', '#FFD700')
-                    wpt_size   = float(self._colors.get('waypoint_size', '8.0'))
-                    wpt_cloud  = pv.PolyData(paint_pass.points)
-                    wpt_actor  = self.plotter.add_mesh(
-                        wpt_cloud,
-                        color=wpt_color,
-                        point_size=wpt_size,
-                        render_points_as_spheres=True,
-                        reset_camera=False,
+                # Endpoint dots — always shown (default waypoints)
+                wpt_color = self._colors.get('waypoint', '#FFD700')
+                wpt_size  = float(self._colors.get('waypoint_size', '8.0'))
+                end_pts   = paint_pass.points[[0, -1]]
+                end_actor = self.plotter.add_mesh(
+                    pv.PolyData(end_pts),
+                    color=wpt_color, point_size=wpt_size,
+                    render_points_as_spheres=True, reset_camera=False,
+                )
+                self._actors[f'wpt_ends_{ri}_{paint_pass.id}_{paint_pass.sub_index}'] = end_actor
+
+                # Custom interval — all intermediate waypoints
+                if show_waypoints and len(paint_pass.points) > 2:
+                    mid_pts   = paint_pass.points[1:-1]
+                    wpt_actor = self.plotter.add_mesh(
+                        pv.PolyData(mid_pts),
+                        color=wpt_color, point_size=wpt_size,
+                        render_points_as_spheres=True, reset_camera=False,
                     )
                     self._actors[f'wpt_{ri}_{paint_pass.id}_{paint_pass.sub_index}'] = wpt_actor
 
