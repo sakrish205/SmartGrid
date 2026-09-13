@@ -7,7 +7,6 @@ wild zigzags caused by noise fragments on complex mesh geometry.
 """
 from __future__ import annotations
 import numpy as np
-from app.mesh.preprocessor import MeshData
 from app.path.path_model import PaintPass, Connection
 from app.path.resampler import resample_arc
 
@@ -17,9 +16,6 @@ _MAX_CONNECTOR_ABS_MM = 400.0 # hard cap regardless of spray width
 
 def connect_passes(
     passes: list[PaintPass],
-    mesh_data: MeshData,
-    region_face_indices: np.ndarray,
-    simplify_epsilon: float = 1.0,
     spray_width_mm: float = 100.0,
     waypoint_spacing_mm: float = 0.0,
 ) -> list[Connection]:

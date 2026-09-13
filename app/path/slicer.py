@@ -78,9 +78,6 @@ def compute_slice_planes(
     return planes
 
 
-_REGION_OUTWARD: dict[str, tuple[int, int]] = {}   # populated by _outward_sign()
-
-
 def _outward_sign(region_id: str, up_axis: int) -> tuple[int, int] | None:
     """Return (axis_index, sign) for the outward-facing normal of a named region."""
     fwd_axis   = (up_axis + 1) % 3

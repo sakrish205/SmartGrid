@@ -1,6 +1,5 @@
 from __future__ import annotations
-from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import pyvista as pv
@@ -17,7 +16,6 @@ class MeshData:
     bbox_max: np.ndarray          # (3,)
     bbox_center: np.ndarray       # (3,)
     bbox_extents: np.ndarray      # (3,) per-axis lengths
-    adjacency: dict               # face_id -> list[face_id] (edge-neighbours)
     up_axis: int                  # 0=X, 1=Y, 2=Z set by user at load time
     pyvista_mesh: pv.PolyData     # pre-converted, stored once
 
@@ -35,12 +33,6 @@ def preprocess(mesh: trimesh.Trimesh, source_path: str, up_axis: int = 2) -> Mes
     bbox_center = (bbox_min + bbox_max) / 2.0
     bbox_extents = bbox_max - bbox_min
 
-    # Edge-based face adjacency: trimesh gives (N, 2) pairs of adjacent face IDs
-    adj: dict[int, list[int]] = defaultdict(list)
-    for a, b in mesh.face_adjacency:
-        adj[int(a)].append(int(b))
-        adj[int(b)].append(int(a))
-
     pv_mesh = _to_pyvista(mesh)
 
     return MeshData(
@@ -52,7 +44,6 @@ def preprocess(mesh: trimesh.Trimesh, source_path: str, up_axis: int = 2) -> Mes
         bbox_max=bbox_max,
         bbox_center=bbox_center,
         bbox_extents=bbox_extents,
-        adjacency=dict(adj),
         up_axis=up_axis,
         pyvista_mesh=pv_mesh,
     )

@@ -56,26 +56,22 @@ def resample_arc(points: np.ndarray, spacing: float) -> np.ndarray:
     if len(pts) < 2:
         return pts
 
-    diffs    = np.diff(pts, axis=0)            # (N-1, 3)
-    seg_lens = np.linalg.norm(diffs, axis=1)   # (N-1,)
+    seg_lens = np.linalg.norm(np.diff(pts, axis=0), axis=1)   # (N-1,)
     cum      = np.concatenate([[0.0], np.cumsum(seg_lens)])
     total    = cum[-1]
 
     if total < 1e-9:
         return pts[[0, -1]]
 
-    n_pts = max(2, int(np.round(total / spacing)) + 1)
+    n_pts    = max(2, int(np.round(total / spacing)) + 1)
     sample_s = np.linspace(0.0, total, n_pts)
 
-    result = np.empty((n_pts, 3), dtype=float)
-    for i, s in enumerate(sample_s):
-        j = int(np.searchsorted(cum, s, side='right')) - 1
-        j = max(0, min(j, len(diffs) - 1))   # clamp: searchsorted(-1) → 0
-        sl = seg_lens[j]
-        t  = (s - cum[j]) / sl if sl > 1e-12 else 0.0
-        result[i] = pts[j] + t * diffs[j]
+    # Vectorised: np.interp handles each axis independently
+    result = np.column_stack([
+        np.interp(sample_s, cum, pts[:, ax]) for ax in range(3)
+    ])
 
-    # Pin exact endpoints — avoids any floating-point drift at boundaries
+    # Pin exact endpoints — avoids floating-point drift at boundaries
     result[0]  = pts[0]
     result[-1] = pts[-1]
     return result

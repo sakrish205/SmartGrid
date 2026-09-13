@@ -16,7 +16,7 @@ from datetime import datetime
 from app.path.path_model import PaintRoute, GenerationParams
 
 
-def _meta_header(fmt: str, params: GenerationParams | None) -> list[str]:
+def _meta_header(fmt: str, params: GenerationParams | None) -> str:
     lines = [
         f'# SmartGrid OLP Export — {fmt}',
         f'# generated_at : {datetime.now().isoformat(timespec="seconds")}',
@@ -27,7 +27,7 @@ def _meta_header(fmt: str, params: GenerationParams | None) -> list[str]:
             f'# path_mode    : {params.path_mode}',
             f'# regions      : {", ".join(params.regions)}',
         ]
-    return lines
+    return '\n'.join(lines) + '\n'
 
 
 def export_robodk(
@@ -41,8 +41,7 @@ def export_robodk(
     NX/NY/NZ = outward surface normal; RoboDK uses it as the curve approach direction.
     """
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        for line in _meta_header('RoboDK', params):
-            f.write(line + '\n')
+        f.write(_meta_header('RoboDK', params))
         writer = csv.writer(f)
         for route in routes:
             sn = route.spray_normal
@@ -71,8 +70,7 @@ def export_vc(
     """
     _FIELDS = ['seq_id', 'X', 'Y', 'Z', 'NX', 'NY', 'NZ', 'Trigger']
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        for line in _meta_header('VisualComponents', params):
-            f.write(line + '\n')
+        f.write(_meta_header('VisualComponents', params))
         writer = csv.DictWriter(f, fieldnames=_FIELDS)
         writer.writeheader()
         seq = 0
@@ -118,8 +116,7 @@ def export_delmia_apt(
     RAPID/X,Y,Z        — connector travel moves (no orientation)
     """
     with open(filepath, 'w', encoding='utf-8') as f:
-        for line in _meta_header('DELMIA APT', params):
-            f.write(line + '\n')
+        f.write(_meta_header('DELMIA APT', params))
         f.write('$$\n')  # APT comment separator
         f.write('PARTNO/SmartGrid_Toolpath\n')
         f.write('MACHIN/ROBOT\n')

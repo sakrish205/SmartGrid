@@ -175,8 +175,7 @@ def generate_route(
 
     # Connect ALL passes in execution order (sub-index passes are real passes, not orphans)
     connections = _connector.connect_passes(
-        all_passes, mesh_data, region_face_indices,
-        simplify_epsilon=1.0,
+        all_passes,
         spray_width_mm=spray_width_mm,
         waypoint_spacing_mm=waypoint_spacing_mm,
     )

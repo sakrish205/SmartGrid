@@ -48,7 +48,9 @@ _FIELDS = [
 
 
 def _write_metadata(f, params: GenerationParams) -> None:
-    lines = [
+    wi = (f'{params.waypoint_spacing_mm} mm  (custom resampling active)'
+          if params.waypoint_spacing_mm else 'off  (raw mesh-slicer points)')
+    f.write('\n'.join([
         '# -- SmartGrid Toolpath Export ------------------------------------------',
         f'# software          : {params.software}',
         f'# generated_at      : {params.generated_at}',
@@ -58,11 +60,7 @@ def _write_metadata(f, params: GenerationParams) -> None:
         f'# up_axis           : {params.up_axis}',
         f'# spray_width_mm    : {params.spray_width_mm}',
         f'# standoff_mm       : {params.standoff_mm if params.standoff_mm else "off"}',
-        (
-            f'# waypoint_interval : {params.waypoint_spacing_mm} mm  (custom resampling active)'
-            if params.waypoint_spacing_mm
-            else '# waypoint_interval : off  (raw mesh-slicer points)'
-        ),
+        f'# waypoint_interval : {wi}',
         '#',
         '# OLP tool frame convention:',
         '#   NX/NY/NZ = outward surface normal  (gun approach direction = -NX/-NY/-NZ)',
@@ -75,9 +73,7 @@ def _write_metadata(f, params: GenerationParams) -> None:
         '#   VC / DELMIA      : seq_id + X Y Z NX NY NZ + Trigger',
         '# -----------------------------------------------------------------------',
         '',
-    ]
-    for line in lines:
-        f.write(line + '\n')
+    ]) + '\n')
 
 
 def export_route_csv(
