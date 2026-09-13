@@ -133,6 +133,7 @@ def export_delmia_apt(
             f.write(f'$$ Region: {route.region_id}\n')
             for p in route.passes:
                 f.write(f'$$ Pass {p.id}  Trigger=ON\n')
+                f.write('FEDRAT/1000.0,MMPM\n')  # ponytail: hardcoded placeholder; add paint_speed_mmpm to GenerationParams when needed
                 f.write('SPINDL/ON\n')
                 for pt in p.points:
                     x = round(float(pt[0]), 4)
