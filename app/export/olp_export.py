@@ -13,7 +13,6 @@ from __future__ import annotations
 import csv
 from datetime import datetime
 
-import numpy as np
 from app.path.path_model import PaintRoute, GenerationParams
 
 
