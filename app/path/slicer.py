@@ -146,30 +146,25 @@ def slice_region(
         axis, sign = outward
         face_normals_here = mesh.face_normals[filtered_face_ids]
 
-        # Stage 1 — Normal direction filter: drop faces not pointing outward.
-        # Catches the underside of the mesh and back-faces.
-        outward_mask = (face_normals_here[:, axis] * sign) > 0.05
+        # Stage 1 — Normal direction filter: drop only truly inward-facing faces.
+        # Threshold -0.25 lets corrugation wall faces (Nz≈0) through while still
+        # blocking underside faces (Nz < -0.25).
+        outward_mask = (face_normals_here[:, axis] * sign) > -0.25
         if outward_mask.sum() > 0:
             filtered = filtered[outward_mask]
 
-        # Stage 2 — Outermost-cluster filter: find the largest gap in the
-        # distribution of segment heights along the outward axis and keep
-        # only the top cluster.  This removes paths on internal ribs and
-        # supports that survived Stage 1 because their normals also face out.
-        #
-        # Example: outer surface at Z=100–110, inner ribs at Z=70–90.
-        # Sorted midpoints: [...70 72 75 80 85 90] [gap 15 mm] [100 102 108 110...]
-        # Largest gap = 10 mm → cutoff = 90+gap/2 = 95 → keep Z ≥ 95 only.
+        # Stage 2 — Outermost-cluster filter: keep only the outermost depth cluster.
+        # Threshold 80 mm: real internal ribs are ≥80 mm inside the outer shell;
+        # corrugations are rarely deeper than 70 mm, so this never fires on them.
         if len(filtered) > 1:
             mids = (filtered[:, 0, axis] + filtered[:, 1, axis]) / 2.0
-            sorted_m = np.sort(mids)                       # ascending
-            gaps     = np.diff(sorted_m)                   # gap between each pair
+            sorted_m = np.sort(mids)
+            gaps     = np.diff(sorted_m)
             best_gap_idx = int(np.argmax(gaps))
             best_gap     = gaps[best_gap_idx]
 
-            _MIN_CLUSTER_GAP_MM = 25.0  # ponytail: corrugations are <25mm deep; real ribs are >>25mm below outer surface
+            _MIN_CLUSTER_GAP_MM = 80.0  # ponytail: real ribs ≥80 mm inside shell; corrugations <70 mm
             if best_gap > _MIN_CLUSTER_GAP_MM:
-                # cutoff = midpoint of the largest gap
                 cutoff = (sorted_m[best_gap_idx] + sorted_m[best_gap_idx + 1]) / 2.0
                 keep   = mids >= cutoff if sign > 0 else mids <= cutoff
                 if keep.sum() > 0:
