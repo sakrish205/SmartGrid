@@ -659,11 +659,6 @@ class SmartRibbon(QWidget):
         vl.setSpacing(3)
         vl.setContentsMargins(0, 0, 0, 0)
 
-        self._waypoints_check = QCheckBox('Show')
-        self._waypoints_check.setStyleSheet(_CHK_CSS)
-        self._waypoints_check.setToolTip('Render individual waypoint dots along each pass')
-        vl.addWidget(self._waypoints_check)
-
         interval_hl = QHBoxLayout()
         interval_hl.setSpacing(4)
         interval_hl.addWidget(_row_label('Interval'))
@@ -779,7 +774,6 @@ class SmartRibbon(QWidget):
 
         self._grid_check.toggled.connect(lambda _: self.grid_changed.emit())
         self._arrows_check.toggled.connect(lambda _: self.arrows_changed.emit())
-        self._waypoints_check.toggled.connect(self._on_waypoints_toggled)
         self._wpt_interval_spin.valueChanged.connect(self._on_spacing_changed)
 
         for region, btn in self._region_btns.items():
@@ -807,19 +801,9 @@ class SmartRibbon(QWidget):
         self.grid_changed.emit()
         self.pitch_changed.emit()
 
-    def _on_waypoints_toggled(self, checked: bool) -> None:
-        """When user enables Waypoints and spacing is off, set a sensible default."""
-        if checked and self._wpt_interval_spin.value() == 0.0:
-            self._wpt_interval_spin.blockSignals(True)
-            self._wpt_interval_spin.setValue(20.0)
-            self._wpt_interval_spin.blockSignals(False)
-            self.spacing_changed.emit()   # needs regeneration with new spacing
-        self.waypoints_changed.emit()
-
     def _on_spacing_changed(self, _value: float) -> None:
-        """Pt Interval changed — regenerate if waypoints are visible."""
-        if self._waypoints_check.isChecked():
-            self.spacing_changed.emit()
+        """Pt Interval changed — regenerate to apply new resampling."""
+        self.spacing_changed.emit()
 
     def _select_all_regions(self) -> None:
         for region, btn in self._region_btns.items():
@@ -901,7 +885,7 @@ class SmartRibbon(QWidget):
         return self._arrows_check.isChecked()
 
     def is_show_waypoints(self) -> bool:
-        return self._waypoints_check.isChecked()
+        return self._wpt_interval_spin.value() > 0.0
 
     def get_waypoint_spacing_mm(self) -> float:
         """0.0 = disabled (no resampling)."""
@@ -920,7 +904,7 @@ class SmartRibbon(QWidget):
                   self._bbox_radio, self._face_grid_radio, self._mesh_radio,
                   self._fg_shadow_radio, self._fg_mesh_radio,
                   self._standoff_spin,
-                  self._waypoints_check, self._wpt_interval_spin,
+                  self._wpt_interval_spin,
                   self._gen_btn, self._grid_check, self._arrows_check):
             w.setEnabled(loaded)
         # Path-specific controls always start disabled on (re)load; set_path_exists enables them
