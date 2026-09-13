@@ -594,6 +594,19 @@ class MeshViewer(QWidget):
                     reset_camera=False,
                 )
                 self._actors[f'conn_{ri}_{conn.id}'] = actor
+                # Always show connector waypoint dots when resampled (> 2 pts)
+                # — no Show toggle needed; dots confirm the robot will hit each point
+                if len(conn.points) > 2:
+                    wpt_color = self._colors.get('waypoint', '#FFD700')
+                    wpt_size  = float(self._colors.get('waypoint_size', '8.0'))
+                    wpt_actor = self.plotter.add_mesh(
+                        pv.PolyData(conn.points),
+                        color=wpt_color,
+                        point_size=wpt_size,
+                        render_points_as_spheres=True,
+                        reset_camera=False,
+                    )
+                    self._actors[f'conn_wpt_{ri}_{conn.id}'] = wpt_actor
 
         self.plotter.render()
 
