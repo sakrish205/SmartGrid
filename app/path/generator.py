@@ -14,8 +14,8 @@ from app.path.resampler import rdp_simplify, resample_arc
 
 _RDP_EPSILON       = 0.3   # mm — remove micro-jaggies from triangle discretisation
 _MIN_PASS_FRACTION = 0.10  # drop passes shorter than 10% of spray_width_mm …
-_MIN_PASS_ABS_MM   = 5.0   # … but never drop passes longer than this absolute floor
-_MAX_ANGLE_DEV_DEG = 65.0  # drop passes whose direction deviates more than this from the primary
+_MIN_PASS_ABS_MM   = 1.0   # … absolute floor — was 5 mm, lowered so narrow tooth-tops and curved edges survive
+_MAX_ANGLE_DEV_DEG = 65.0  # angle limit only for SHORT passes; long passes kept at any angle
 _MAX_SUB_PER_LEVEL = 6     # max sub-index passes per slice level (prevents fragment explosion)
 
 
@@ -63,9 +63,13 @@ def _filter_polylines(
     for poly, arc_len in zip(polylines[1:], lengths[1:]):
         if arc_len < min_len:
             continue            # too short — corner clip
-        d = _dominant_dir(np.asarray(poly, dtype=float))
-        if abs(np.dot(d, primary_dir)) < cos_limit:
-            continue            # wrong angle — diagonal fragment
+        # Only apply direction check to SHORT passes.  Long passes (≥ 4× min_len)
+        # are legitimate at any angle: gear tooth tops, bumper curved edges, etc.
+        # Applying the angle check unconditionally drops all perpendicular passes.
+        if arc_len < min_len * 4:
+            d = _dominant_dir(np.asarray(poly, dtype=float))
+            if abs(np.dot(d, primary_dir)) < cos_limit:
+                continue        # short AND wrong angle — diagonal corner clip
         kept.append(poly)
 
     return kept
