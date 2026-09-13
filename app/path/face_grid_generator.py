@@ -116,15 +116,13 @@ def generate_face_grid_route(
     direction_offset: int = 0,
     waypoint_spacing_mm: float = 0.0,
     standoff_mm: float = 0.0,
-    flat_plane: bool = False,
 ) -> PaintRoute:
     """Return a PaintRoute of surface-tilted parallel passes.
 
-    flat_plane=False (default/Adaptive): per-row shadow projection — depth and
-    width follow the actual mesh surface per band.
-    flat_plane=True (On Plane): all passes at global outermost depth, full
-    region width — paths lie flat on the tilted red spray plane like
-    Boundary Box does on its axis-aligned plane.
+    Computes the mean face normal of face_indices, builds an orthonormal
+    spray-plane basis (mean_normal, pass_vec, step_vec), then for each row
+    shadow-projects the outermost vertex depth along mean_normal so paths sit
+    on the actual tilted surface.  Standoff lifts paths outward from there.
     """
     if region not in _resolve_face_map(up_axis):
         raise ValueError(f'Unknown region: {region!r}')
@@ -155,29 +153,25 @@ def generate_face_grid_route(
         step_positions = list(np.arange(first, step_max, spray_width_mm))
 
     band_half = spray_width_mm * 0.65
-    flat_face_pos = global_depth + standoff_mm   # constant depth for flat_plane mode
 
     all_passes: list[PaintPass] = []
     for local_idx, step_pos in enumerate(step_positions):
         pass_id    = local_idx
         is_forward = ((pass_id + direction_offset) % 2 == 0)
 
-        if flat_plane:
-            p_min        = global_pass_min
-            p_max        = global_pass_max
-            row_face_pos = flat_face_pos
+        in_band    = np.abs(step_proj - step_pos) <= band_half
+        band_verts = verts[in_band]
+
+        if len(band_verts) == 0:
+            p_min      = global_pass_min
+            p_max      = global_pass_max
+            row_depth  = global_depth
         else:
-            in_band    = np.abs(step_proj - step_pos) <= band_half
-            band_verts = verts[in_band]
-            if len(band_verts) == 0:
-                p_min     = global_pass_min
-                p_max     = global_pass_max
-                row_depth = global_depth
-            else:
-                p_min     = float((band_verts @ pass_vec).min())
-                p_max     = float((band_verts @ pass_vec).max())
-                row_depth = float((band_verts @ mean_n).max())
-            row_face_pos = row_depth + standoff_mm
+            p_min     = float((band_verts @ pass_vec).min())
+            p_max     = float((band_verts @ pass_vec).max())
+            row_depth = float((band_verts @ mean_n).max())
+
+        row_face_pos = row_depth + standoff_mm
 
         # Build world-space endpoints in the tilted plane
         pt_a = row_face_pos * mean_n + p_min * pass_vec + step_pos * step_vec
