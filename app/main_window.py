@@ -934,7 +934,6 @@ class MainWindow(QMainWindow):
             try:
                 export_route_json(
                     self._current_routes, path,
-                    show_waypoints=self._ribbon.is_show_waypoints(),
                     params=self._last_params,
                 )
                 self.statusBar().showMessage(f'Exported: {path}')
@@ -952,7 +951,6 @@ class MainWindow(QMainWindow):
             try:
                 export_route_csv(
                     self._current_routes, path,
-                    show_waypoints=self._ribbon.is_show_waypoints(),
                     params=self._last_params,
                 )
                 self.statusBar().showMessage(f'Exported: {path}')

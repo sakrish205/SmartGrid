@@ -1,17 +1,31 @@
-"""Export PaintRoute list to CSV for OLP software.
+"""Export PaintRoute list to a neutral CSV for OLP software.
 
-Rows are written in robot execution order:
-  pass points → connector points → next pass points → …
+Row order: pass points → connector points → next pass points → …
+Each row is one TCP waypoint.
 
-Each row is one TCP waypoint. Key columns for OLP import:
-  seq_id       – global sequence number (robot program line order)
-  segment_type – 'pass' (spray move) or 'connection' (air move)
-  is_spray     – True while gun is on, False for air travel
-  x, y, z     – TCP position in mm
+Neutral column layout (essential columns first):
+  seq_id       – global execution order (robot program line order)
+  Trigger      – ON = spray gun firing, OFF = air travel
+  segment_type – 'pass' | 'connection'
+  pass_id      – pass or connection number
+  pt_idx       – point index within the segment
+  X, Y, Z      – TCP position in mm
+  NX, NY, NZ   – outward surface normal (tool approach = -N; OLP computes W/P/R)
+  length_mm    – segment total length in mm (written on pt_idx=0 only)
+  region       – face region (TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT)
+  is_forward   – True = forward sweep, False = reversed (blank for connections)
 
-A generation metadata block is written as # comment lines before the CSV
-header so OLP tools that strip comments can still parse the data columns
-while the raw file remains self-documenting.
+OLP mapping guide (comment block in every export):
+  RoboDK  → drag-drop: use X Y Z NX NY NZ (6 cols) as a curve import
+  VC      → import script: seq_id + X Y Z + NX NY NZ + Trigger
+  DELMIA  → APT macro: seq_id + X Y Z + NX NY NZ + Trigger
+  Custom  → all columns available; length_mm useful for speed ramping
+
+Waypoints exported:
+  Custom interval OFF → raw slicer path points (mesh-density vertices)
+  Custom interval ON  → resampled points at the set interval
+  Endpoint dots (visual only) are not extra rows — they are the
+  existing first/last points of every pass already in the data.
 """
 from __future__ import annotations
 import csv
@@ -20,33 +34,20 @@ import numpy as np
 from app.path.path_model import PaintRoute, GenerationParams
 
 _FIELDS = [
-    'seq_id',           # global execution order (0, 1, 2, …)
-    'segment_type',     # 'pass' | 'connection'
-    'is_spray',         # True = spray gun ON, False = air travel
-    'route_index',      # which route (0 = first, etc.)
-    'region',           # TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT
-    'direction',        # 'horizontal' | 'vertical' | '' for connections
-    'pass_id',          # unique pass number within the route
-    'sub_index',        # 0 = main pass; >0 = extra fragment at same slice (holes)
-    'is_forward',       # True = forward sweep, False = reversed
-    'conn_id',          # connection id (blank for passes)
-    'is_air_move',      # True = gun off travel (blank for passes)
-    'sweep_direction',  # 'CW' or 'CCW'
-    'spray_nx',         # spray approach direction (unit normal, written once per route)
-    'spray_ny',
-    'spray_nz',
-    'pass_dx',          # pass travel direction unit vector (written on pt_idx=0 only)
-    'pass_dy',
-    'pass_dz',
-    'length_mm',        # segment total length (written on pt_idx=0 only)
-    'pt_idx',           # point index within the segment
-    'x', 'y', 'z',     # world coordinates in mm
-    'Trigger',          # ON = spray gun firing, OFF = air travel
+    'seq_id',        # global execution order (0, 1, 2, …)
+    'Trigger',       # ON = spray gun firing, OFF = air travel
+    'segment_type',  # 'pass' | 'connection'
+    'pass_id',       # pass or connection id
+    'pt_idx',        # point index within the segment
+    'X', 'Y', 'Z',  # TCP position in mm (4 decimal places)
+    'NX', 'NY', 'NZ',  # outward surface normal unit vector (6 dp)
+    'length_mm',     # segment total length — written on pt_idx=0 only
+    'region',        # face region label
+    'is_forward',    # True/False for passes; blank for connections
 ]
 
 
 def _write_metadata(f, params: GenerationParams) -> None:
-    """Write # comment lines documenting the generation run."""
     lines = [
         '# -- SmartGrid Toolpath Export ------------------------------------------',
         f'# software          : {params.software}',
@@ -58,17 +59,20 @@ def _write_metadata(f, params: GenerationParams) -> None:
         f'# spray_width_mm    : {params.spray_width_mm}',
         f'# standoff_mm       : {params.standoff_mm if params.standoff_mm else "off"}',
         (
-            f'# waypoint_interval : {params.waypoint_spacing_mm} mm'
+            f'# waypoint_interval : {params.waypoint_spacing_mm} mm  (custom resampling active)'
             if params.waypoint_spacing_mm
-            else '# waypoint_interval : off  (mesh vertices used as-is)'
+            else '# waypoint_interval : off  (raw mesh-slicer points)'
         ),
-        f'# direction         : {params.direction}',
-        f'# sweep             : {params.sweep}',
         '#',
         '# OLP tool frame convention:',
-        '#   spray_nx/ny/nz = outward surface normal (gun approach = -spray_n)',
-        '#   pass_dx/dy/dz  = travel direction (tool X-axis)',
-        '#   tool Y = cross(tool_Z, tool_X)  where tool_Z = -spray_n',
+        '#   NX/NY/NZ = outward surface normal  (gun approach direction = -NX/-NY/-NZ)',
+        '#   Tool Z   = -NX/-NY/-NZ             (points INTO surface)',
+        '#   Tool X   = pass travel direction   (derive from consecutive XYZ rows)',
+        '#   Tool Y   = cross(Tool_Z, Tool_X)   (right-hand rule)',
+        '#',
+        '# OLP mapping:',
+        '#   RoboDK drag-drop : X Y Z NX NY NZ  (6-col curve import)',
+        '#   VC / DELMIA      : seq_id + X Y Z NX NY NZ + Trigger',
         '# -----------------------------------------------------------------------',
         '',
     ]
@@ -79,14 +83,12 @@ def _write_metadata(f, params: GenerationParams) -> None:
 def export_route_csv(
     routes: list[PaintRoute],
     filepath: str,
-    show_waypoints: bool = True,
     params: GenerationParams | None = None,
 ) -> None:
-    """Export routes to CSV.
+    """Export routes to neutral CSV.
 
-    show_waypoints=True  → all TCP waypoints per pass (full resampled path).
-    show_waypoints=False → only start and end point per pass (minimal robot program).
-    params               → if provided, written as # comment block before the header.
+    Always writes all path points (raw slicer pts or custom-resampled pts —
+    whichever is stored in p.points at export time). No start/end-only mode.
     """
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         if params is not None:
@@ -97,64 +99,38 @@ def export_route_csv(
 
         seq_id = 0
 
-        for route_idx, route in enumerate(routes):
-            first_pass = next((p for p in route.passes if p.sub_index == 0), None)
-            sweep_dir = 'CW' if (first_pass is None or first_pass.is_forward) else 'CCW'
-
+        for route in routes:
             sn = route.spray_normal
-            sn_row = (round(float(sn[0]), 6), round(float(sn[1]), 6), round(float(sn[2]), 6))
+            nx = round(float(sn[0]), 6)
+            ny = round(float(sn[1]), 6)
+            nz = round(float(sn[2]), 6)
 
             conn_by_from = {c.from_pass_id: c for c in route.connections}
 
             for p in route.passes:
-                # --- pass rows ---
                 seg_len = (
                     round(float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1))), 3)
                     if len(p.points) >= 2 else 0.0
                 )
-                if len(p.points) >= 2:
-                    d = p.points[1] - p.points[0]
-                    dn = np.linalg.norm(d)
-                    d = d / dn if dn > 1e-9 else d
-                    pass_dir = (round(float(d[0]), 6), round(float(d[1]), 6), round(float(d[2]), 6))
-                else:
-                    pass_dir = ('', '', '')
-
-                pts_to_write = (
-                    p.points if show_waypoints
-                    else p.points[[0, -1]]
-                )
-                for i, pt in enumerate(pts_to_write):
-                    pt_label = i if show_waypoints else ([0, len(p.points) - 1][i])
+                for i, pt in enumerate(p.points):
                     writer.writerow({
-                        'seq_id':          seq_id,
-                        'segment_type':    'pass',
-                        'is_spray':        True,
-                        'route_index':     route_idx,
-                        'region':          route.region_id,
-                        'direction':       p.direction,
-                        'pass_id':         p.id,
-                        'sub_index':       p.sub_index,
-                        'is_forward':      p.is_forward,
-                        'conn_id':         '',
-                        'is_air_move':     '',
-                        'sweep_direction': sweep_dir,
-                        'spray_nx':        sn_row[0],
-                        'spray_ny':        sn_row[1],
-                        'spray_nz':        sn_row[2],
-                        'pass_dx':         pass_dir[0] if i == 0 else '',
-                        'pass_dy':         pass_dir[1] if i == 0 else '',
-                        'pass_dz':         pass_dir[2] if i == 0 else '',
-                        'length_mm':       seg_len if i == 0 else '',
-                        'pt_idx':          pt_label,
-                        'x': round(float(pt[0]), 4),
-                        'y': round(float(pt[1]), 4),
-                        'z': round(float(pt[2]), 4),
-                        'Trigger':         'ON',
+                        'seq_id':       seq_id,
+                        'Trigger':      'ON',
+                        'segment_type': 'pass',
+                        'pass_id':      p.id,
+                        'pt_idx':       i,
+                        'X': round(float(pt[0]), 4),
+                        'Y': round(float(pt[1]), 4),
+                        'Z': round(float(pt[2]), 4),
+                        'NX': nx,
+                        'NY': ny,
+                        'NZ': nz,
+                        'length_mm':  seg_len if i == 0 else '',
+                        'region':     route.region_id,
+                        'is_forward': p.is_forward,
                     })
                     seq_id += 1
 
-                # --- connector rows immediately after this pass ---
                 conn = conn_by_from.get(p.id)
                 if conn is not None:
                     c_len = (
@@ -163,25 +139,17 @@ def export_route_csv(
                     )
                     for i, pt in enumerate(conn.points):
                         writer.writerow({
-                            'seq_id':          seq_id,
-                            'segment_type':    'connection',
-                            'is_spray':        False,
-                            'route_index':     route_idx,
-                            'region':          route.region_id,
-                            'direction':       '',
-                            'pass_id':         '',
-                            'sub_index':       '',
-                            'is_forward':      '',
-                            'conn_id':         conn.id,
-                            'is_air_move':     conn.is_air_move,
-                            'sweep_direction': sweep_dir,
-                            'spray_nx': '', 'spray_ny': '', 'spray_nz': '',
-                            'pass_dx':  '', 'pass_dy':  '', 'pass_dz':  '',
-                            'length_mm':       c_len if i == 0 else '',
-                            'pt_idx':          i,
-                            'x': round(float(pt[0]), 4),
-                            'y': round(float(pt[1]), 4),
-                            'z': round(float(pt[2]), 4),
-                            'Trigger':         'OFF',
+                            'seq_id':       seq_id,
+                            'Trigger':      'OFF',
+                            'segment_type': 'connection',
+                            'pass_id':      conn.id,
+                            'pt_idx':       i,
+                            'X': round(float(pt[0]), 4),
+                            'Y': round(float(pt[1]), 4),
+                            'Z': round(float(pt[2]), 4),
+                            'NX': '', 'NY': '', 'NZ': '',
+                            'length_mm':  c_len if i == 0 else '',
+                            'region':     route.region_id,
+                            'is_forward': '',
                         })
                         seq_id += 1
