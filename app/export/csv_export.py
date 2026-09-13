@@ -41,6 +41,7 @@ _FIELDS = [
     'length_mm',        # segment total length (written on pt_idx=0 only)
     'pt_idx',           # point index within the segment
     'x', 'y', 'z',     # world coordinates in mm
+    'Trigger',          # ON = spray gun firing, OFF = air travel
 ]
 
 
@@ -138,9 +139,9 @@ def export_route_csv(
                         'conn_id':         '',
                         'is_air_move':     '',
                         'sweep_direction': sweep_dir,
-                        'spray_nx':        sn_row[0] if i == 0 else '',
-                        'spray_ny':        sn_row[1] if i == 0 else '',
-                        'spray_nz':        sn_row[2] if i == 0 else '',
+                        'spray_nx':        sn_row[0],
+                        'spray_ny':        sn_row[1],
+                        'spray_nz':        sn_row[2],
                         'pass_dx':         pass_dir[0] if i == 0 else '',
                         'pass_dy':         pass_dir[1] if i == 0 else '',
                         'pass_dz':         pass_dir[2] if i == 0 else '',
@@ -149,6 +150,7 @@ def export_route_csv(
                         'x': round(float(pt[0]), 4),
                         'y': round(float(pt[1]), 4),
                         'z': round(float(pt[2]), 4),
+                        'Trigger':         'ON',
                     })
                     seq_id += 1
 
@@ -180,5 +182,6 @@ def export_route_csv(
                             'x': round(float(pt[0]), 4),
                             'y': round(float(pt[1]), 4),
                             'z': round(float(pt[2]), 4),
+                            'Trigger':         'OFF',
                         })
                         seq_id += 1
