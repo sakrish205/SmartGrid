@@ -364,7 +364,6 @@ class SmartRibbon(QWidget):
     view_set            = Signal(str)   # direction string
     grid_changed        = Signal()
     arrows_changed      = Signal()
-    waypoints_changed   = Signal()
     spacing_changed     = Signal()      # Pt Interval changed (not auto-connected; apply on Generate)
     pitch_changed       = Signal()      # Spray pitch changed (not auto-connected; apply on Generate)
     region_toggled      = Signal(str, bool)

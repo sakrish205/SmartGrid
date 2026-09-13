@@ -311,7 +311,6 @@ class MainWindow(QMainWindow):
         self._ribbon.view_set.connect(self._on_view_set)
         self._ribbon.grid_changed.connect(self._update_grid)
         self._ribbon.arrows_changed.connect(self._refresh_route_display)
-        self._ribbon.waypoints_changed.connect(self._refresh_route_display)
 
         # Apply persisted view colours to the now-ready viewer
         self._on_colors_changed(self._current_colors)
