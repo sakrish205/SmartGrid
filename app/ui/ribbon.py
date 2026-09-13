@@ -203,6 +203,7 @@ _SPIN_CSS = (
     'QDoubleSpinBox{background:#fff;border:1px solid #c0c0c0;border-radius:0px;'
     '  padding:2px 4px;font-size:11px;font-family:"Segoe UI",Arial;'
     '  color:#1f1f1f;min-height:22px;}'
+    'QDoubleSpinBox:disabled{background:#f4f4f4;color:#a0a0a0;border-color:#d8d8d8;}'
     'QDoubleSpinBox:hover{border-color:#888;}'
     'QDoubleSpinBox:focus{border-color:#0078d4;}'
     'QDoubleSpinBox::up-button,QDoubleSpinBox::down-button'
