@@ -174,6 +174,21 @@ class _UpAxisDialog(QDialog):
 # Main window
 # ---------------------------------------------------------------------------
 
+class _ViewerImportWorker(QThread):
+    """Warm pyvista/VTK and trimesh in a background thread.
+
+    Imports are pure Python/VTK — no Qt objects created — so this is
+    safe off the main thread. Only QtInteractor instantiation (widget
+    creation) must remain on the main thread.
+    """
+    done = Signal()
+
+    def run(self) -> None:
+        import app.ui.viewer      # pyvista/VTK cold-load (~1-3 s)
+        import models.mesh_model  # trimesh cold-load (~0.5-1 s)
+        self.done.emit()
+
+
 class MainWindow(QMainWindow):
 
     _MENUBAR_STYLE = (
@@ -270,21 +285,17 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(150, self._init_viewer)
 
     def _init_viewer(self) -> None:
-        """Stage 1: import pyvista/VTK (~1-3 s), then yield to event loop."""
-        from app.ui.viewer import MeshViewer   # pyvista/VTK cold-load
-        self.__MeshViewer = MeshViewer
-        QTimer.singleShot(0, self._init_viewer_2)
+        """Kick off background import worker; main thread stays live throughout."""
+        self._import_worker = _ViewerImportWorker()
+        self._import_worker.done.connect(self._create_viewer)
+        self._import_worker.start()
 
-    def _init_viewer_2(self) -> None:
-        """Stage 2: import trimesh + build MeshModel (~0.5-1 s), then yield."""
-        from models.mesh_model import MeshModel  # trimesh cold-load
+    def _create_viewer(self) -> None:
+        """Main-thread only: imports already warm — only QtInteractor blocks (~1-2 s)."""
+        from app.ui.viewer import MeshViewer    # instant — already in sys.modules
+        from models.mesh_model import MeshModel # instant — already in sys.modules
         self._model = MeshModel()
-        QTimer.singleShot(0, self._init_viewer_3)
-
-    def _init_viewer_3(self) -> None:
-        """Stage 3: create QtInteractor/OpenGL (~1-2 s) and wire everything."""
-        self._viewer = self.__MeshViewer()
-        del self.__MeshViewer
+        self._viewer = MeshViewer()             # QtInteractor OpenGL init — main thread required
 
         # Replace placeholder with the real viewer
         idx = self._viewer_vl.indexOf(self._viewer_placeholder)
