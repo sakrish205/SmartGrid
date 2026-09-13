@@ -128,8 +128,9 @@ def generate_face_grid_route(
         raise ValueError(f'Unknown region: {region!r}')
 
     face_axis, face_sign = _resolve_face_map(up_axis)[region]
-    # Basis from forward-facing faces only — closed-mesh all-face normals cancel to zero
-    basis_faces = np.where(mesh.face_normals[:, face_axis] * face_sign > 0.0)[0].astype(np.int64)
+    # Restrict basis_faces to the selected region's forward-facing faces.
+    _fwd_mask = mesh.face_normals[face_indices, face_axis] * face_sign > 0.0
+    basis_faces = face_indices[_fwd_mask]
     if len(basis_faces) == 0:
         basis_faces = face_indices
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
@@ -325,7 +326,11 @@ def generate_conform_route(
         raise ValueError(f"Conform: region '{region}' has no faces.")
 
     face_axis, face_sign = _resolve_face_map(up_axis)[region]
-    basis_faces = np.where(mesh.face_normals[:, face_axis] * face_sign > 0.0)[0].astype(np.int64)
+    # Restrict basis_faces to the selected region's forward-facing faces only.
+    # Using the whole mesh contaminates mean_n on complex meshes (other regions'
+    # upward faces dilute the surface normal of the selected region).
+    _fwd_mask = mesh.face_normals[face_indices, face_axis] * face_sign > 0.0
+    basis_faces = face_indices[_fwd_mask]
     if len(basis_faces) == 0:
         basis_faces = face_indices
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
@@ -343,7 +348,6 @@ def generate_conform_route(
         first = step_min + spray_width_mm / 2.0
         step_positions = list(np.arange(first, step_max, spray_width_mm))
 
-    face_indices_set = set(face_indices.tolist())
     all_passes: list[PaintPass] = []
     pass_id = 0
 
@@ -362,8 +366,8 @@ def generate_conform_route(
         if segments is None or len(segments) == 0:
             continue
 
-        # Filter to classifier-assigned faces only
-        mask = np.array([fid in face_indices_set for fid in seg_face_ids])
+        # Filter to classifier-assigned faces only (np.isin — avoids Python loop)
+        mask = np.isin(seg_face_ids, face_indices)
         segments = segments[mask]
         if len(segments) == 0:
             continue
@@ -450,8 +454,8 @@ def get_face_grid_plane_corners(
     but ignored — extent comes from face_indices vertices.
     """
     face_axis, face_sign = _resolve_face_map(up_axis)[region]
-    # Basis from forward-facing faces — same rule as generate_face_grid_route
-    basis_faces = np.where(mesh.face_normals[:, face_axis] * face_sign > 0.0)[0].astype(np.int64)
+    _fwd_mask = mesh.face_normals[face_indices, face_axis] * face_sign > 0.0
+    basis_faces = face_indices[_fwd_mask]
     if len(basis_faces) == 0:
         basis_faces = face_indices
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
