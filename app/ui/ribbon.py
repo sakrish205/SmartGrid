@@ -579,21 +579,27 @@ class SmartRibbon(QWidget):
         fg_vl.setSpacing(2)
         fg_vl.setContentsMargins(2, 0, 0, 0)
 
-        # Sub-mode: Depth-Adaptive vs Surface Conform
+        # Sub-mode: On Plane / Depth-Adaptive / Surface Conform
+        self._fg_plane_radio  = QRadioButton('On Plane')
         self._fg_shadow_radio = QRadioButton('Adaptive')
         self._fg_mesh_radio   = QRadioButton('Conform')
-        self._fg_shadow_radio.setChecked(True)
+        self._fg_plane_radio.setChecked(True)
+        self._fg_plane_radio.setToolTip(
+            'Passes generated flat on the tilted spray plane — like Boundary Box\n'
+            'but the plane tilts to match the surface normal.')
         self._fg_shadow_radio.setToolTip(
             'Shadow projection — depth follows outermost surface vertex per band.\n'
             'Fast and accurate for most surfaces.')
         self._fg_mesh_radio.setToolTip(
             'Slices the actual 3D mesh surface.\n'
             'Use for highly curved surfaces with complex contours.')
-        for r in (self._fg_shadow_radio, self._fg_mesh_radio):
+        for r in (self._fg_plane_radio, self._fg_shadow_radio, self._fg_mesh_radio):
             r.setStyleSheet(_RADIO_CSS)
         self._fg_sub_grp = QButtonGroup(self)
-        self._fg_sub_grp.addButton(self._fg_shadow_radio, 0)
-        self._fg_sub_grp.addButton(self._fg_mesh_radio,   1)
+        self._fg_sub_grp.addButton(self._fg_plane_radio,  0)
+        self._fg_sub_grp.addButton(self._fg_shadow_radio, 1)
+        self._fg_sub_grp.addButton(self._fg_mesh_radio,   2)
+        fg_vl.addWidget(self._fg_plane_radio)
         fg_vl.addWidget(self._fg_shadow_radio)
         fg_vl.addWidget(self._fg_mesh_radio)
 
@@ -884,8 +890,12 @@ class SmartRibbon(QWidget):
         return self._standoff_spin.value() * UNIT_TO_MM.get(self._current_unit, 1.0)
 
     def get_face_grid_submode(self) -> str:
-        """'shadow' | 'mesh_standoff'"""
-        return 'mesh_standoff' if self._fg_mesh_radio.isChecked() else 'shadow'
+        """'flat_plane' | 'shadow' | 'mesh_standoff'"""
+        if self._fg_mesh_radio.isChecked():
+            return 'mesh_standoff'
+        if self._fg_shadow_radio.isChecked():
+            return 'shadow'
+        return 'flat_plane'
 
     def _on_target_changed(self) -> None:
         self._fg_subpanel.setVisible(self._face_grid_radio.isChecked())
@@ -918,7 +928,7 @@ class SmartRibbon(QWidget):
                   self._unit_combo, self._pitch_spin,
                   self._cw_radio, self._ccw_radio,
                   self._bbox_radio, self._face_grid_radio, self._mesh_radio,
-                  self._fg_shadow_radio, self._fg_mesh_radio,
+                  self._fg_plane_radio, self._fg_shadow_radio, self._fg_mesh_radio,
                   self._standoff_spin,
                   self._waypoints_check, self._wpt_interval_spin,
                   self._gen_btn, self._grid_check, self._arrows_check):

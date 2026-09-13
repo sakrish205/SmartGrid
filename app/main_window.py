@@ -697,6 +697,7 @@ class MainWindow(QMainWindow):
                     direction_offset=offset,
                     waypoint_spacing_mm=wpt_mm,
                     standoff_mm=standoff,
+                    flat_plane=(self._ribbon.get_face_grid_submode() == 'flat_plane'),
                 ))
                 spray_corners.append(_fg_gen.get_face_grid_plane_corners(
                     region, region_faces, mesh, up,
