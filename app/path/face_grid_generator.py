@@ -196,14 +196,17 @@ def generate_face_grid_route(
 
     connections: list[Connection] = []
     for i in range(len(all_passes) - 1):
+        conn_pts = np.array([
+            all_passes[i].points[-1].copy(),
+            all_passes[i + 1].points[0].copy(),
+        ], dtype=float)
+        if waypoint_spacing_mm > 0:
+            conn_pts = resample_arc(conn_pts, waypoint_spacing_mm)
         connections.append(Connection(
             id=i,
             from_pass_id=all_passes[i].id,
             to_pass_id=all_passes[i + 1].id,
-            points=np.array([
-                all_passes[i].points[-1].copy(),
-                all_passes[i + 1].points[0].copy(),
-            ], dtype=float),
+            points=conn_pts,
             is_air_move=False,
         ))
 
@@ -399,14 +402,17 @@ def generate_conform_route(
 
     connections: list[Connection] = []
     for i in range(len(all_passes) - 1):
+        conn_pts = np.array([
+            all_passes[i].points[-1].copy(),
+            all_passes[i + 1].points[0].copy(),
+        ], dtype=float)
+        if waypoint_spacing_mm > 0:
+            conn_pts = resample_arc(conn_pts, waypoint_spacing_mm)
         connections.append(Connection(
             id=i,
             from_pass_id=all_passes[i].id,
             to_pass_id=all_passes[i + 1].id,
-            points=np.array([
-                all_passes[i].points[-1].copy(),
-                all_passes[i + 1].points[0].copy(),
-            ], dtype=float),
+            points=conn_pts,
             is_air_move=False,
         ))
 

@@ -174,6 +174,7 @@ def generate_route(
         all_passes, mesh_data, region_face_indices,
         simplify_epsilon=1.0,
         spray_width_mm=spray_width_mm,
+        waypoint_spacing_mm=waypoint_spacing_mm,
     )
 
     total_length = sum(

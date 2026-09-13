@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 from app.mesh.preprocessor import MeshData
 from app.path.path_model import PaintPass, Connection
+from app.path.resampler import resample_arc
 
 _MAX_CONNECTOR_FACTOR = 3.0   # connector distance must be ≤ this × spray_width_mm
 _MAX_CONNECTOR_ABS_MM = 400.0 # hard cap regardless of spray width
@@ -20,6 +21,7 @@ def connect_passes(
     region_face_indices: np.ndarray,
     simplify_epsilon: float = 1.0,
     spray_width_mm: float = 100.0,
+    waypoint_spacing_mm: float = 0.0,
 ) -> list[Connection]:
     """Connect consecutive passes with straight-line air moves.
 
@@ -55,11 +57,14 @@ def connect_passes(
             nxt_points = nxt.points
 
         start_pt = nxt_points[0]
+        pts = np.array([end_pt, start_pt], dtype=float)
+        if waypoint_spacing_mm > 0.0:
+            pts = resample_arc(pts, waypoint_spacing_mm)
         connections.append(Connection(
             id=conn_id,
             from_pass_id=cur.id,
             to_pass_id=nxt.id,
-            points=np.array([end_pt, start_pt], dtype=float),
+            points=pts,
             is_air_move=True,
         ))
         conn_id += 1
