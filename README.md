@@ -58,9 +58,9 @@ SmartGrid addresses this by converting a **3D mesh of the manufactured component
    ↓
 Up-Axis Selection
    ↓
-Auto Region Detection
+Region Selection
    ↓
-Manual Region Refinement
+Spray Parameters
    ↓
 Spray Parameters
    ↓
@@ -83,7 +83,7 @@ JSON / CSV / OLP / G-code Export
 
 1. **Open mesh** — File › Open or drag an STL / OBJ / STEP file onto the window
 2. **Set up-axis** — select which world axis is vertical (X / Y / Z)
-3. **Region selection** — dominant regions are auto-detected on load (disable with the **Auto** checkbox); refine by toggling TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT or clicking the bounding box in the viewport
+3. **Region selection** — toggle TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT or click the bounding box in the viewport
 4. **Set parameters** — pitch, unit, standoff, spray speed, sweep direction
 5. **Preview** — enable Grid to verify pass spacing before generating
 6. **Generate Path** — runs in a background thread; collisions highlighted automatically
@@ -333,35 +333,6 @@ Path generation complete — 12 passes, 11 connections.  ⚠ 1 collision(s), 2 n
 
 ---
 
-## Auto Region Detection
-
-When a mesh is loaded, SmartGrid automatically selects the dominant paintable regions so the user can generate paths without manually checking every face.
-
-**Selection criteria:** a region is auto-selected if it has **≥ 20 faces** AND covers **> 1% of total mesh faces**. Both thresholds guard against false positives — a tiny mesh where 5 faces equal 3% of faces would not auto-select. Regions that fail either test remain unchecked.
-
-**Algorithm — dual-guard filter on load:**
-
-```python
-# core: main_window.py — _on_load_ready
-total_faces = len(trimesh_mesh.faces)
-for region, faces in model.regions.items():
-    if len(faces) >= 20 and len(faces) / total_faces > 0.01:
-        # Both guards must pass: absolute size AND relative coverage
-        self._selected_regions.add(region)
-        self._ribbon.set_region_checked(region, True)
-        self._viewer.highlight_bbox_region(region, True)
-self._update_grid()   # same codepath as a manual checkbox click
-```
-
-The **Auto** checkbox in the Select group controls this behaviour:
-
-| State | Behaviour |
-|---|---|
-| ✓ Checked (default) | Dominant regions checked automatically on every load |
-| ☐ Unchecked | No auto-selection; all regions start unchecked |
-
-After auto-detection the user can refine the selection manually using the region buttons, clicking the bounding box, or using **All / None**.
-
 ---
 
 ## STEP Import
@@ -402,7 +373,6 @@ Connector (air) moves are always written as rapid/travel — speed control appli
 | Control | Function |
 |---|---|
 | **TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT** | Toggle bounding-box faces as spray regions |
-| **Auto** | Auto-select dominant regions on mesh load (default: on) |
 | **All / None** | Select or deselect all regions at once |
 | **Select Faces** | 3D pick mode for selecting regions |
 | **Unit** | mm / cm / m / in / ft |
@@ -598,7 +568,6 @@ Multi-body OBJ files are merged at load via `trimesh.load(force='mesh')`. STEP f
 - **Multiple path strategies** — supports flat, curved, blended, and complex surfaces
 - **Controlled pitch, standoff, and spray speed**
 - **Collision detection** — hard collisions and near-misses flagged automatically after generation
-- **Auto region detection** — dominant regions selected on load with one click to refine
 - **STEP / CAD import** — direct CAD file support via gmsh tessellation
 - **G-code export** — paths usable on any CNC or open robot controller
 - **3D path visualization and validation**

@@ -416,16 +416,8 @@ class SmartRibbon(QWidget):
             'QPushButton:checked:hover{background:#106ebe;border-color:#004f87;}'
         )
 
-        self._auto_detect_chk = QCheckBox('Auto')
-        self._auto_detect_chk.setChecked(True)
-        self._auto_detect_chk.setToolTip(
-            'Auto-select dominant regions when a mesh is loaded.\n'
-            'Regions with >1% of total faces are checked automatically.')
-
         row2.addWidget(self._all_btn)
         row2.addWidget(self._none_btn)
-        row2.addSpacing(4)
-        row2.addWidget(self._auto_detect_chk)
         row2.addSpacing(4)
         row2.addWidget(self._select_btn)
 
@@ -845,9 +837,6 @@ class SmartRibbon(QWidget):
 
     def is_show_arrows(self) -> bool:
         return self._arrows_check.isChecked()
-
-    def is_auto_detect(self) -> bool:
-        return self._auto_detect_chk.isChecked()
 
     def is_show_waypoints(self) -> bool:
         """True when custom interval is active → show all intermediate dots."""

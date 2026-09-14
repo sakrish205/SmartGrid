@@ -519,15 +519,6 @@ class MainWindow(QMainWindow):
         self._viewer.set_select_mode(False)
         self._ribbon.update_mesh_stats(n_faces)
 
-        # Auto region detection — select dominant regions (>1% faces, ≥20 faces)
-        if self._ribbon.is_auto_detect() and model.regions:
-            total_faces = len(model.data.trimesh_mesh.faces)
-            for region, faces in model.regions.items():
-                if len(faces) >= 20 and len(faces) / total_faces > 0.01:
-                    self._selected_regions.add(region)
-                    self._ribbon.set_region_checked(region, True)
-                    self._viewer.highlight_bbox_region(region, True)
-            self._update_grid()
         self._ribbon.clear_stats()
         self._viewer.show_stats_text([
             'MESH',
