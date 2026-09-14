@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="app/ui/icons/logo.png" height="90">
+</p>
+
 # SmartGrid — 3D Spray Path Generator
 
 **Mechanical Engineering | Manufacturing Automation | Robotics**

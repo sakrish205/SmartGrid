@@ -40,10 +40,15 @@ _APP_STYLE = (
 def main() -> None:
     # QApplication must be created before any PyVista/VTK initialisation
     from PySide6.QtWidgets import QApplication
+    from PySide6.QtGui import QIcon
+    import pathlib
     app = QApplication(sys.argv)
     app.setApplicationName("SmartGrid")
     app.setApplicationVersion("1.3")
     app.setStyleSheet(_APP_STYLE)
+    _icon = pathlib.Path(__file__).parent / 'app' / 'ui' / 'icons' / 'icon.png'
+    if _icon.exists():
+        app.setWindowIcon(QIcon(str(_icon)))
 
     # Deferred import so Qt is ready before VTK registers its OpenGL context
     from app.main_window import MainWindow
