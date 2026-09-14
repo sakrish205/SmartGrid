@@ -21,13 +21,16 @@ def detect_collisions(
     routes: list[PaintRoute],
     mesh: trimesh.Trimesh,
     standoff_mm: float,
-) -> dict[int, str]:
-    """Return {pass_id: 'collision'|'near_miss'} for flagged passes.
+) -> tuple[dict[int, str], float]:
+    """Return ({pass_id: 'collision'|'near_miss'}, max_penetration_mm).
 
+    max_penetration_mm is the deepest inside-point distance to the surface —
+    used by the caller to suggest a minimum standoff correction.
     Near-miss check is skipped when standoff_mm == 0 (paths on surface by design).
     """
     flagged: dict[int, str] = {}
     near_threshold = standoff_mm * 0.5 if standoff_mm > 0 else 0.0
+    max_depth = 0.0
 
     for route in routes:
         for p in route.passes:
@@ -35,16 +38,16 @@ def detect_collisions(
             if len(pts) == 0:
                 continue
 
-            # Hard collision: any point inside the mesh
             inside = mesh.contains(pts)
             if inside.any():
                 flagged[p.id] = 'collision'
+                _, dists, _ = _prox.closest_point(mesh, pts[inside])
+                max_depth = max(max_depth, float(dists.max()))
                 continue
 
-            # Near miss: closest surface distance below threshold
             if near_threshold > 0:
                 _, dists, _ = _prox.closest_point(mesh, pts)
                 if (dists < near_threshold).any():
                     flagged[p.id] = 'near_miss'
 
-    return flagged
+    return flagged, max_depth
