@@ -352,16 +352,21 @@ The tessellation uses gmsh's OpenCASCADE kernel (`occ.importShapes`) and produce
 
 ## Spray Speed
 
-The robot TCP speed during spray passes is configurable via the **Speed** spinbox in the Parameters group (range: 1–100 000 mm/min, default: 1 000 mm/min).
+Speed is configured in the **Export OLP** dialog, not in the Parameters panel, with two modes:
 
-This value is written into every OLP export format:
+| Mode | Behaviour |
+|---|---|
+| **Auto** | Per-waypoint speed derived from local path curvature — straight segments run at `max_mmpm` (2 000 mm/min), tight turns slow to `min_mmpm` (300 mm/min); values tuned via `_SPEED_CURVE` in `main_window.py` |
+| **Custom** | Fixed speed for every waypoint; user-entered value |
+
+Speed is written into every OLP export format:
 
 | Format | Usage |
 |---|---|
-| DELMIA APT | `FEDRAT/value,MMPM` before each pass block |
-| G-code | `G1 F{value}` before the first pass point |
-| RoboDK CSV | Stored in export metadata header (`# paint_speed_mmpm`) |
-| Visual Components CSV | Stored in export metadata header |
+| DELMIA APT | `FEDRAT/value,MMPM` written only when speed changes (auto), or once per pass block (custom) |
+| G-code | `G1 F{speed} X Y Z` on the first or any changed-speed waypoint; bare `G1 X Y Z` otherwise |
+| RoboDK CSV | 7th column `speed_mmpm` on every spray pass row |
+| Visual Components CSV | `speed_mmpm` column on every spray pass row; blank on connectors |
 | JSON / neutral CSV | Stored in `GenerationParams.paint_speed_mmpm` |
 
 Connector (air) moves are always written as rapid/travel — speed control applies to spray passes only.
@@ -377,7 +382,6 @@ Connector (air) moves are always written as rapid/travel — speed control appli
 | **Select Faces** | 3D pick mode for selecting regions |
 | **Unit** | mm / cm / m / in / ft |
 | **Spray Width (Pitch)** | Centre-to-centre distance between adjacent passes |
-| **Speed** | Robot TCP speed during spray passes (mm/min); written to all OLP exports |
 | **Standoff** | Spray-gun offset from the mesh surface (mm) |
 | **Sweep** | CW / CCW starting direction |
 | **Waypoints** | Enable uniform resampling |
@@ -460,13 +464,13 @@ One row per trajectory point:
 Four robot-OLP formats are exported via **Export OLP**:
 
 #### RoboDK
-6-column CSV (no header row): `X,Y,Z,NX,NY,NZ` — spray passes only. Drag-drop into RoboDK via *Utilities › Import Curve*. `NX/NY/NZ` = outward surface normal (RoboDK uses it as the curve approach direction).
+7-column CSV (no header row): `X,Y,Z,NX,NY,NZ,speed_mmpm` — spray passes only. Drag-drop into RoboDK via *Utilities › Import Curve*. `NX/NY/NZ` = outward surface normal (RoboDK uses it as the curve approach direction).
 
 #### Visual Components
-CSV with header `seq_id,X,Y,Z,NX,NY,NZ,Trigger`. Spray passes have `Trigger=ON` with normals; connector moves have `Trigger=OFF` with blank normals.
+CSV with header `seq_id,X,Y,Z,NX,NY,NZ,Trigger,speed_mmpm`. Spray passes have `Trigger=ON` with normals and speed; connector moves have `Trigger=OFF` with blank normals and blank speed.
 
 #### DELMIA APT
-APT text file. Spray passes use `GOTO/X,Y,Z,I,J,K` where `I,J,K` = tool Z axis = `-spray_normal` (points into the surface). Connector moves use `RAPID/X,Y,Z`. Feed rate written as `FEDRAT/value,MMPM` before each pass block; spray gun written as `SPINDL/ON` and `SPINDL/OFF`.
+APT text file. Spray passes use `GOTO/X,Y,Z,I,J,K` where `I,J,K` = tool Z axis = `-spray_normal` (points into the surface). Connector moves use `RAPID/X,Y,Z`. `FEDRAT/value,MMPM` is written only when speed changes (auto mode) or once per pass (custom mode); spray gun written as `SPINDL/ON` and `SPINDL/OFF`.
 
 #### G-code (CNC / Robot)
 Standard G-code `.nc` file compatible with CNC and open robot controllers:

@@ -11,6 +11,7 @@ DELMIA  — APT text: GOTO/X,Y,Z,I,J,K  (I,J,K = tool-Z = -spray_normal)
 """
 from __future__ import annotations
 import csv
+import numpy as np
 from datetime import datetime
 
 from app.path.path_model import PaintRoute, GenerationParams
@@ -30,16 +31,25 @@ def _meta_header(fmt: str, params: GenerationParams | None) -> str:
     return '\n'.join(lines) + '\n'
 
 
+def _pass_speeds(p, speeds_map: dict[int, np.ndarray] | None, fixed: float) -> np.ndarray:
+    """Return per-waypoint speeds for pass p — array of len(p.points)."""
+    if speeds_map is not None and p.id in speeds_map:
+        return speeds_map[p.id]
+    return np.full(len(p.points), fixed)
+
+
 def export_robodk(
     routes: list[PaintRoute],
     filepath: str,
     params: GenerationParams | None = None,
+    speeds_map: dict[int, np.ndarray] | None = None,
 ) -> None:
-    """6-col CSV — drag-drop into RoboDK via Utilities > Import Curve.
+    """6-col (auto) or 7-col (speed) CSV — drag-drop into RoboDK via Utilities > Import Curve.
 
     Passes only (Trigger ON).  No header row — RoboDK rejects files with one.
     NX/NY/NZ = outward surface normal; RoboDK uses it as the curve approach direction.
     """
+    fixed = params.paint_speed_mmpm if params else 1000.0
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         f.write(_meta_header('RoboDK', params))
         writer = csv.writer(f)
@@ -49,12 +59,14 @@ def export_robodk(
             ny = round(float(sn[1]), 6)
             nz = round(float(sn[2]), 6)
             for p in route.passes:
-                for pt in p.points:
+                speeds = _pass_speeds(p, speeds_map, fixed)
+                for i, pt in enumerate(p.points):
                     writer.writerow([
                         round(float(pt[0]), 4),
                         round(float(pt[1]), 4),
                         round(float(pt[2]), 4),
                         nx, ny, nz,
+                        round(float(speeds[i]), 1),
                     ])
 
 
@@ -62,13 +74,15 @@ def export_vc(
     routes: list[PaintRoute],
     filepath: str,
     params: GenerationParams | None = None,
+    speeds_map: dict[int, np.ndarray] | None = None,
 ) -> None:
     """CSV for Visual Components import script.
 
-    Header: seq_id,X,Y,Z,NX,NY,NZ,Trigger
+    Header: seq_id,X,Y,Z,NX,NY,NZ,Trigger,speed_mmpm
     Passes = Trigger ON; connectors = Trigger OFF (no NX/NY/NZ on connectors).
     """
-    _FIELDS = ['seq_id', 'X', 'Y', 'Z', 'NX', 'NY', 'NZ', 'Trigger']
+    _FIELDS = ['seq_id', 'X', 'Y', 'Z', 'NX', 'NY', 'NZ', 'Trigger', 'speed_mmpm']
+    fixed = params.paint_speed_mmpm if params else 1000.0
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         f.write(_meta_header('VisualComponents', params))
         writer = csv.DictWriter(f, fieldnames=_FIELDS)
@@ -81,7 +95,8 @@ def export_vc(
             nz = round(float(sn[2]), 6)
             conn_by_from = {c.from_pass_id: c for c in route.connections}
             for p in route.passes:
-                for pt in p.points:
+                speeds = _pass_speeds(p, speeds_map, fixed)
+                for i, pt in enumerate(p.points):
                     writer.writerow({
                         'seq_id': seq,
                         'X': round(float(pt[0]), 4),
@@ -89,6 +104,7 @@ def export_vc(
                         'Z': round(float(pt[2]), 4),
                         'NX': nx, 'NY': ny, 'NZ': nz,
                         'Trigger': 'ON',
+                        'speed_mmpm': round(float(speeds[i]), 1),
                     })
                     seq += 1
                 conn = conn_by_from.get(p.id)
@@ -101,6 +117,7 @@ def export_vc(
                             'Z': round(float(pt[2]), 4),
                             'NX': '', 'NY': '', 'NZ': '',
                             'Trigger': 'OFF',
+                            'speed_mmpm': '',
                         })
                         seq += 1
 
@@ -109,22 +126,24 @@ def export_delmia_apt(
     routes: list[PaintRoute],
     filepath: str,
     params: GenerationParams | None = None,
+    speeds_map: dict[int, np.ndarray] | None = None,
 ) -> None:
     """APT file for DELMIA.
 
     GOTO/X,Y,Z,I,J,K  — spray passes (I,J,K = tool Z = -spray_normal)
     RAPID/X,Y,Z        — connector travel moves (no orientation)
+    FEDRAT written only on speed change (dynamic) or once per pass (fixed).
     """
+    fixed = params.paint_speed_mmpm if params else 1000.0
     with open(filepath, 'w', encoding='utf-8') as f:
         f.write(_meta_header('DELMIA APT', params))
-        f.write('$$\n')  # APT comment separator
+        f.write('$$\n')
         f.write('PARTNO/SmartGrid_Toolpath\n')
         f.write('MACHIN/ROBOT\n')
         f.write('$$\n')
 
         for route in routes:
             sn = route.spray_normal
-            # tool Z points INTO surface = -spray_normal
             ix = round(-float(sn[0]), 6)
             iy = round(-float(sn[1]), 6)
             iz = round(-float(sn[2]), 6)
@@ -133,10 +152,14 @@ def export_delmia_apt(
             f.write(f'$$ Region: {route.region_id}\n')
             for p in route.passes:
                 f.write(f'$$ Pass {p.id}  Trigger=ON\n')
-                speed = params.paint_speed_mmpm if params else 1000.0
-                f.write(f'FEDRAT/{speed:.1f},MMPM\n')
+                speeds = _pass_speeds(p, speeds_map, fixed)
                 f.write('SPINDL/ON\n')
-                for pt in p.points:
+                prev_sp: float | None = None
+                for i, pt in enumerate(p.points):
+                    sp = round(float(speeds[i]), 1)
+                    if sp != prev_sp:
+                        f.write(f'FEDRAT/{sp:.1f},MMPM\n')
+                        prev_sp = sp
                     x = round(float(pt[0]), 4)
                     y = round(float(pt[1]), 4)
                     z = round(float(pt[2]), 4)
@@ -159,16 +182,17 @@ def export_gcode(
     routes: list[PaintRoute],
     filepath: str,
     params: GenerationParams | None = None,
+    speeds_map: dict[int, np.ndarray] | None = None,
 ) -> None:
     """G-code for CNC/open robot controllers.
 
     G21 G90 G94  — mm, absolute, feed/min
-    M8/M9        — spray gun on/off (coolant codes, standard repurpose)
-    G1 F{speed}  — spray passes
-    G0           — rapid connectors (no feedrate written; controller uses rapid override)
+    M8/M9        — spray gun on/off
+    G1 F{sp} X Y Z on speed change; G1 X Y Z when speed unchanged (keeps file small).
+    G0           — rapid connectors
     # ponytail: tool orientation (A,B,C) skipped — controller-specific, add post-processor when needed
     """
-    speed = params.paint_speed_mmpm if params else 1000.0
+    fixed = params.paint_speed_mmpm if params else 1000.0
 
     with open(filepath, 'w', encoding='utf-8') as f:
         f.write('%\n')
@@ -186,12 +210,18 @@ def export_gcode(
             for p in route.passes:
                 f.write(f'( Pass {p.id} )\n')
                 f.write('M8\n')
-                f.write(f'G1 F{speed:.1f}\n')
-                for pt in p.points:
+                speeds = _pass_speeds(p, speeds_map, fixed)
+                prev_sp: float | None = None
+                for i, pt in enumerate(p.points):
+                    sp = round(float(speeds[i]), 1)
                     x = round(float(pt[0]), 4)
                     y = round(float(pt[1]), 4)
                     z = round(float(pt[2]), 4)
-                    f.write(f'G1 X{x} Y{y} Z{z}\n')
+                    if sp != prev_sp:
+                        f.write(f'G1 F{sp} X{x} Y{y} Z{z}\n')
+                        prev_sp = sp
+                    else:
+                        f.write(f'G1 X{x} Y{y} Z{z}\n')
                 f.write('M9\n')
                 conn = conn_by_from.get(p.id)
                 if conn is not None:

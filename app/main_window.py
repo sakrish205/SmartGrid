@@ -7,10 +7,11 @@ from typing import Optional
 import numpy as np
 
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFileDialog, QMessageBox, QDialog, QInputDialog,
     QDialogButtonBox, QRadioButton, QButtonGroup,
     QLabel, QVBoxLayout as QVBox, QScrollArea, QFrame,
+    QComboBox, QDoubleSpinBox,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QEvent, QSettings, QTimer
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
@@ -31,6 +32,114 @@ def _detect_unit(max_extent: float) -> str:
     if max_extent > 1:
         return 'cm'
     return 'm'
+
+
+# ---------------------------------------------------------------------------
+# Dynamic speed — one place to tune all auto-speed behaviour
+# ---------------------------------------------------------------------------
+
+_SPEED_CURVE = {
+    'max_mmpm':        2000.0,   # speed on perfectly straight segments
+    'min_mmpm':         300.0,   # floor at maximum curvature
+    'angle_threshold':   30.0,   # degrees — at or above this angle → min speed
+}
+
+
+def _compute_dynamic_speeds(points: np.ndarray) -> np.ndarray:
+    """Per-waypoint speed derived from local turning angle. Straight=fast, curved=slow."""
+    n = len(points)
+    max_s = _SPEED_CURVE['max_mmpm']
+    min_s = _SPEED_CURVE['min_mmpm']
+    if n < 3:
+        return np.full(n, max_s)
+
+    threshold_rad = np.radians(_SPEED_CURVE['angle_threshold'])
+
+    v1 = points[1:-1] - points[:-2]     # (n-2, 3) — incoming vectors
+    v2 = points[2:]   - points[1:-1]    # (n-2, 3) — outgoing vectors
+
+    n1 = np.linalg.norm(v1, axis=1, keepdims=True)
+    n2 = np.linalg.norm(v2, axis=1, keepdims=True)
+
+    valid = (n1.ravel() > 1e-9) & (n2.ravel() > 1e-9)
+    cos_a = np.ones(n - 2)
+    cos_a[valid] = np.clip(
+        np.sum((v1[valid] / n1[valid]) * (v2[valid] / n2[valid]), axis=1),
+        -1.0, 1.0,
+    )
+    angles = np.arccos(cos_a)
+    t = np.minimum(angles / threshold_rad, 1.0)
+    mid_speeds = max_s - t * (max_s - min_s)
+
+    speeds = np.empty(n)
+    speeds[0]    = max_s
+    speeds[-1]   = max_s
+    speeds[1:-1] = mid_speeds
+    return speeds
+
+
+# ---------------------------------------------------------------------------
+# Export OLP dialog
+# ---------------------------------------------------------------------------
+
+class _OlpExportDialog(QDialog):
+    def __init__(self, formats: dict, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle('Export OLP')
+        self.setFixedWidth(360)
+
+        vl = QVBoxLayout(self)
+        vl.setSpacing(8)
+
+        vl.addWidget(QLabel('Select OLP format:'))
+        self._fmt_combo = QComboBox()
+        self._fmt_combo.addItems(list(formats.keys()))
+        vl.addWidget(self._fmt_combo)
+
+        vl.addWidget(QLabel('Spray Speed:'))
+
+        max_s = int(_SPEED_CURVE['max_mmpm'])
+        min_s = int(_SPEED_CURVE['min_mmpm'])
+        self._auto_radio   = QRadioButton(
+            f'Auto  ({min_s}–{max_s} mm/min)  — varies with path curvature')
+        self._custom_radio = QRadioButton('Custom')
+        self._auto_radio.setChecked(True)
+
+        self._speed_spin = QDoubleSpinBox()
+        self._speed_spin.setRange(1.0, 100_000.0)
+        self._speed_spin.setDecimals(0)
+        self._speed_spin.setSingleStep(100.0)
+        self._speed_spin.setValue(1000.0)
+        self._speed_spin.setSuffix('  mm/min')
+        self._speed_spin.setMinimumWidth(120)
+        self._speed_spin.setEnabled(False)
+
+        custom_row = QHBoxLayout()
+        custom_row.addWidget(self._custom_radio)
+        custom_row.addWidget(self._speed_spin)
+        custom_row.addStretch()
+
+        self._custom_radio.toggled.connect(self._speed_spin.setEnabled)
+
+        vl.addWidget(self._auto_radio)
+        vl.addLayout(custom_row)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        vl.addSpacing(4)
+        vl.addWidget(btns)
+
+    def values(self):
+        """Returns (fmt_label: str, speed_mode: str, custom_speed: float | None)."""
+        mode = 'custom' if self._custom_radio.isChecked() else 'auto'
+        return (
+            self._fmt_combo.currentText(),
+            mode,
+            self._speed_spin.value() if mode == 'custom' else None,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -614,7 +723,7 @@ class MainWindow(QMainWindow):
             waypoint_spacing_mm = round(self._ribbon.get_waypoint_spacing_mm(), 4),
             direction           = self._ribbon.get_direction(),
             sweep               = 'CCW' if self._ribbon.is_direction_flipped() else 'CW',
-            paint_speed_mmpm    = round(self._ribbon.get_paint_speed_mmpm(), 1),
+            paint_speed_mmpm    = _SPEED_CURVE['max_mmpm'],   # overridden at OLP export time
         )
 
     def _on_generate(self) -> None:
@@ -997,23 +1106,42 @@ class MainWindow(QMainWindow):
         if not self._current_routes:
             QMessageBox.warning(self, 'Nothing to export', 'Generate a path first.')
             return
-        fmt_label, ok = QInputDialog.getItem(
-            self, 'Export OLP', 'Select OLP format:',
-            list(self._OLP_FORMATS.keys()), 0, False,
-        )
-        if not ok:
+
+        dlg = _OlpExportDialog(self._OLP_FORMATS, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
+
+        fmt_label, speed_mode, custom_speed = dlg.values()
         fmt_key, file_filter, ext = self._OLP_FORMATS[fmt_label]
+
         path, _ = QFileDialog.getSaveFileName(self, f'Export {fmt_label}', '', file_filter)
         if not path:
             return
         if not path.lower().endswith(ext):
             path += ext
+
+        # Build per-pass speeds map (auto) or None (custom → fixed)
+        if speed_mode == 'auto':
+            speeds_map: dict[int, np.ndarray] = {
+                p.id: _compute_dynamic_speeds(p.points)
+                for route in self._current_routes
+                for p in route.passes
+            }
+        else:
+            speeds_map = None
+
+        # Params with correct fixed speed for metadata / custom mode
+        from dataclasses import replace as _dc_replace
+        params = self._last_params
+        if params is not None:
+            fixed = custom_speed if speed_mode == 'custom' else _SPEED_CURVE['max_mmpm']
+            params = _dc_replace(params, paint_speed_mmpm=fixed)
+
         self.statusBar().showMessage('Exporting OLP...')
         try:
             fn = {'robodk': export_robodk, 'vc': export_vc, 'delmia': export_delmia_apt,
                   'gcode': export_gcode}[fmt_key]
-            fn(self._current_routes, path, params=self._last_params)
+            fn(self._current_routes, path, params=params, speeds_map=speeds_map)
             self.statusBar().showMessage(f'Exported: {path}')
         except Exception as exc:
             QMessageBox.critical(self, 'Export error', str(exc))
