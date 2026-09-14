@@ -62,8 +62,6 @@ Region Selection
    ↓
 Spray Parameters
    ↓
-Spray Parameters
-   ↓
 Surface-Based Path Generation
    ↓
 Boustrophedon Coverage
@@ -326,12 +324,10 @@ for route in routes:
 Flagged passes are highlighted in the 3D viewer immediately after generation. The status bar reports the count:
 
 ```
-Path generation complete — 12 passes, 11 connections.  ⚠ 1 collision(s), 2 near-miss(es) — shown red/orange
+Path generation complete — 12 passes, 11 connections.  ⚠ 1 collision(s), 2 near-miss(es) — shown red/orange  |  Suggested standoff: 25 mm
 ```
 
 **Implementation:** uses `trimesh.proximity.closest_point` and `mesh.contains` — no additional dependency.
-
----
 
 ---
 
