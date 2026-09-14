@@ -991,6 +991,21 @@ class MainWindow(QMainWindow):
             coll_suffix = f'  ⚠ {n_coll} collision(s), {n_near} near-miss(es) — shown red/orange'
         self.statusBar().showMessage(
             f'Path generation complete  —  {total_passes} passes, {total_conns} connections.{coll_suffix}')
+        if n_coll or n_near:
+            cur = self._ribbon.get_standoff_mm()
+            suggested = max(10.0, round((cur + 10.0) / 5.0) * 5.0)
+            lines = []
+            if n_coll:
+                lines.append(f'{n_coll} hard collision(s)  — shown red')
+            if n_near:
+                lines.append(f'{n_near} near-miss(es)  — shown orange')
+            lines.append(f'\nSuggested standoff:  {suggested:.0f} mm')
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.setWindowTitle('Collision Detected')
+            msg.setText('\n'.join(lines))
+            msg.setStandardButtons(QMessageBox.StandardButton.NoButton)
+            msg.show()
         self._update_grid()
 
     def _refresh_route_display(self) -> None:
