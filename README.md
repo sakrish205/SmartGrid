@@ -298,6 +298,27 @@ After every path generation SmartGrid automatically checks all spray passes agai
 
 The near-miss check is skipped when standoff is 0 (paths on the surface by design).
 
+**Algorithm — two-tier check per pass:**
+
+```python
+# core: collision.py — detect_collisions
+for route in routes:
+    for p in route.passes:
+        pts = p.points                          # all waypoints in this pass
+
+        # Tier 1 — hard collision: any point inside the mesh volume
+        inside = mesh.contains(pts)             # ray-cast per point
+        if inside.any():
+            flagged[p.id] = 'collision'
+            continue                            # no need to check tier 2
+
+        # Tier 2 — near miss: closest surface distance below danger threshold
+        if standoff_mm > 0:
+            _, dists, _ = closest_point(mesh, pts)
+            if (dists < standoff_mm * 0.5).any():
+                flagged[p.id] = 'near_miss'
+```
+
 Flagged passes are highlighted in the 3D viewer immediately after generation. The status bar reports the count:
 
 ```
@@ -313,6 +334,20 @@ Path generation complete — 12 passes, 11 connections.  ⚠ 1 collision(s), 2 n
 When a mesh is loaded, SmartGrid automatically selects the dominant paintable regions so the user can generate paths without manually checking every face.
 
 **Selection criteria:** a region is auto-selected if it has **≥ 20 faces** AND covers **> 1% of total mesh faces**. Both thresholds guard against false positives — a tiny mesh where 5 faces equal 3% of faces would not auto-select. Regions that fail either test remain unchecked.
+
+**Algorithm — dual-guard filter on load:**
+
+```python
+# core: main_window.py — _on_load_ready
+total_faces = len(trimesh_mesh.faces)
+for region, faces in model.regions.items():
+    if len(faces) >= 20 and len(faces) / total_faces > 0.01:
+        # Both guards must pass: absolute size AND relative coverage
+        self._selected_regions.add(region)
+        self._ribbon.set_region_checked(region, True)
+        self._viewer.highlight_bbox_region(region, True)
+self._update_grid()   # same codepath as a manual checkbox click
+```
 
 The **Auto** checkbox in the Select group controls this behaviour:
 
