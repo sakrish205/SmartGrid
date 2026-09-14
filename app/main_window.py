@@ -309,8 +309,6 @@ class MainWindow(QMainWindow):
         self._viewer.installEventFilter(self)
 
         # Wire the remaining viewer-dependent signals
-        self._ribbon.view_fit.connect(self._viewer.fit_all)
-        self._ribbon.view_set.connect(self._on_view_set)
         self._ribbon.grid_changed.connect(self._update_grid)
         self._ribbon.arrows_changed.connect(self._refresh_route_display)
 
@@ -323,7 +321,7 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
 
         file_menu = mb.addMenu('File')
-        open_act = QAction('Open STL / OBJ...', self)
+        open_act = QAction('Open STL / OBJ / STEP...', self)
         open_act.setShortcut('Ctrl+O')
         open_act.triggered.connect(self._open_file)
         file_menu.addAction(open_act)
@@ -459,20 +457,22 @@ class MainWindow(QMainWindow):
     def _open_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, 'Open Mesh File', '',
-            'Mesh Files (*.stl *.obj);;All Files (*)')
+            'Mesh Files (*.stl *.obj *.step *.stp);;All Files (*)')
         if path:
             self._load(path)
 
+    _MESH_EXTS = ('.stl', '.obj', '.step', '.stp')
+
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
-            if any(u.toLocalFile().lower().endswith(('.stl', '.obj'))
+            if any(u.toLocalFile().lower().endswith(self._MESH_EXTS)
                    for u in event.mimeData().urls()):
                 event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
         for url in event.mimeData().urls():
             path = url.toLocalFile()
-            if path.lower().endswith(('.stl', '.obj')):
+            if path.lower().endswith(self._MESH_EXTS):
                 self._load(path)
                 break
 
@@ -931,15 +931,18 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Nothing to export', 'Generate a path first.')
             return
         path, _ = QFileDialog.getSaveFileName(self, 'Export JSON', '', 'JSON (*.json)')
-        if path:
-            self.statusBar().showMessage('Exporting toolpath...')
-            try:
-                export_route_json(
-                    self._current_routes, path,
-                    params=self._last_params,
-                )
-                self.statusBar().showMessage(f'Exported: {path}')
-            except Exception as exc:
+        if not path:
+            return
+        if not path.lower().endswith('.json'):
+            path += '.json'
+        self.statusBar().showMessage('Exporting toolpath...')
+        try:
+            export_route_json(
+                self._current_routes, path,
+                params=self._last_params,
+            )
+            self.statusBar().showMessage(f'Exported: {path}')
+        except Exception as exc:
                 QMessageBox.critical(self, 'Export error', str(exc))
                 self.statusBar().showMessage('Export failed.')
 
@@ -948,22 +951,25 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Nothing to export', 'Generate a path first.')
             return
         path, _ = QFileDialog.getSaveFileName(self, 'Export CSV', '', 'CSV (*.csv)')
-        if path:
-            self.statusBar().showMessage('Exporting toolpath...')
-            try:
-                export_route_csv(
-                    self._current_routes, path,
-                    params=self._last_params,
-                )
-                self.statusBar().showMessage(f'Exported: {path}')
-            except Exception as exc:
-                QMessageBox.critical(self, 'Export error', str(exc))
-                self.statusBar().showMessage('Export failed.')
+        if not path:
+            return
+        if not path.lower().endswith('.csv'):
+            path += '.csv'
+        self.statusBar().showMessage('Exporting toolpath...')
+        try:
+            export_route_csv(
+                self._current_routes, path,
+                params=self._last_params,
+            )
+            self.statusBar().showMessage(f'Exported: {path}')
+        except Exception as exc:
+            QMessageBox.critical(self, 'Export error', str(exc))
+            self.statusBar().showMessage('Export failed.')
 
     _OLP_FORMATS = {
-        'RoboDK (6-col curve CSV)':  ('robodk', 'CSV (*.csv)'),
-        'Visual Components (CSV)':   ('vc',     'CSV (*.csv)'),
-        'DELMIA (APT text)':         ('delmia', 'APT (*.apt);;Text (*.txt)'),
+        'RoboDK (6-col curve CSV)':  ('robodk', 'CSV (*.csv)',        '.csv'),
+        'Visual Components (CSV)':   ('vc',     'CSV (*.csv)',        '.csv'),
+        'DELMIA (APT text)':         ('delmia', 'APT (*.apt)',        '.apt'),
     }
 
     def _export_olp(self) -> None:
@@ -976,10 +982,12 @@ class MainWindow(QMainWindow):
         )
         if not ok:
             return
-        fmt_key, file_filter = self._OLP_FORMATS[fmt_label]
+        fmt_key, file_filter, ext = self._OLP_FORMATS[fmt_label]
         path, _ = QFileDialog.getSaveFileName(self, f'Export {fmt_label}', '', file_filter)
         if not path:
             return
+        if not path.lower().endswith(ext):
+            path += ext
         self.statusBar().showMessage('Exporting OLP...')
         try:
             fn = {'robodk': export_robodk, 'vc': export_vc, 'delmia': export_delmia_apt}[fmt_key]

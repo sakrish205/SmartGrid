@@ -29,12 +29,6 @@ _SVG: dict[str, bytes] = {
         b'<path d="M3 4h5v1.5H3V4z" fill="#3c3c3c"/>'
         b'</svg>'
     ),
-    'fit': (
-        b'<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">'
-        b'<path d="M2 2h5v2H4v3H2V2zm11 0h5v5h-2V4h-3V2z'
-        b'M2 13h2v3h3v2H2v-5zm13 3h-3v2h5v-5h-2v3z" fill="#3c3c3c"/>'
-        b'</svg>'
-    ),
     'generate': (
         b'<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">'
         b'<path d="M4 2h12v16H4V2zm1 1.5v13h10v-13H5z" fill="#3c3c3c"/>'
@@ -51,50 +45,6 @@ _SVG: dict[str, bytes] = {
         b'<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">'
         b'<path d="M10 2v11l-3-3-1 1 4 4 4-4-1-1-3 3V2h-2z" fill="#3c3c3c"/>'
         b'<path d="M3 16h14v1.5H3V16z" fill="#3c3c3c"/>'
-        b'</svg>'
-    ),
-    'top': (
-        b'<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">'
-        b'<path d="M10 4L3 8l7 3.5L17 8 10 4zm0 1.8L14.2 8 10 10.1 5.8 8 10 5.8z"'
-        b' fill="#3c3c3c"/>'
-        b'<path d="M4.5 11.5l-1.5 1L10 16l7-3.5-1.5-1L10 14.5 4.5 11.5z"'
-        b' fill="#aaa"/>'
-        b'</svg>'
-    ),
-    'bottom': (
-        b'<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">'
-        b'<path d="M10 16L3 12l7-3.5 7 3.5L10 16zm0-1.8L5.8 12 10 9.9l4.2 2.1L10 14.2z"'
-        b' fill="#3c3c3c"/>'
-        b'<path d="M4.5 8.5l-1.5 1L10 13l7-3.5-1.5-1L10 11.5 4.5 8.5z"'
-        b' fill="#aaa"/>'
-        b'</svg>'
-    ),
-    'front': (
-        b'<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">'
-        b'<rect x="3" y="3" width="14" height="14" fill="none"'
-        b' stroke="#3c3c3c" stroke-width="1.5"/>'
-        b'<line x1="10" y1="3" x2="10" y2="17" stroke="#aaa" stroke-width="1"/>'
-        b'<line x1="3" y1="10" x2="17" y2="10" stroke="#aaa" stroke-width="1"/>'
-        b'</svg>'
-    ),
-    'rear': (
-        b'<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">'
-        b'<rect x="3" y="3" width="14" height="14" fill="none"'
-        b' stroke="#3c3c3c" stroke-width="1.5" stroke-dasharray="3 2"/>'
-        b'<line x1="10" y1="3" x2="10" y2="17" stroke="#aaa" stroke-width="1"/>'
-        b'<line x1="3" y1="10" x2="17" y2="10" stroke="#aaa" stroke-width="1"/>'
-        b'</svg>'
-    ),
-    'left': (
-        b'<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">'
-        b'<path d="M13 3H7v14h6V3zm-5 1h4v12H8V4z" fill="#3c3c3c"/>'
-        b'<path d="M7 3L4 5v10l3 2V3z" fill="#3c3c3c" opacity="0.5"/>'
-        b'</svg>'
-    ),
-    'right': (
-        b'<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">'
-        b'<path d="M7 3h6v14H7V3zm1 1v12h4V4H8z" fill="#3c3c3c"/>'
-        b'<path d="M13 3l3 2v10l-3 2V3z" fill="#3c3c3c" opacity="0.5"/>'
         b'</svg>'
     ),
     'settings': (
@@ -360,8 +310,6 @@ def _row_label(text: str) -> QLabel:
 class SmartRibbon(QWidget):
     # ── signals ──────────────────────────────────────────────────────────
     open_requested      = Signal()
-    view_fit            = Signal()
-    view_set            = Signal(str)   # direction string
     grid_changed        = Signal()
     arrows_changed      = Signal()
     spacing_changed     = Signal()      # Pt Interval changed (not auto-connected; apply on Generate)
@@ -397,9 +345,8 @@ class SmartRibbon(QWidget):
         hl.setSpacing(4)
 
         # Keep alive on self so GC never destroys child widgets referenced elsewhere.
-        self._stats_group        = self._build_stats()
-        self._waypoints_group   = self._build_waypoints()
-        self._view_group_hidden = self._build_view()   # attrs kept; not in ribbon strip
+        self._stats_group      = self._build_stats()
+        self._waypoints_group  = self._build_waypoints()
 
         groups = [
             self._build_file(),
@@ -426,24 +373,6 @@ class SmartRibbon(QWidget):
         g = _Group('File')
         self._open_btn = _large_btn('Open', _make_icon('open', 20))
         g.add(self._open_btn)
-        return g
-
-    # ── View ─────────────────────────────────────────────────────────────
-    def _build_view(self) -> _Group:
-        g = _Group('View')
-
-        self._fit_btn   = _small_btn('Fit All', _make_icon('fit', 16))
-        self._top_btn   = _small_btn('Top',     _make_icon('top', 16))
-        self._bot_btn   = _small_btn('Bottom',  _make_icon('bottom', 16))
-        self._front_btn = _small_btn('Front',   _make_icon('front', 16))
-        self._rear_btn  = _small_btn('Rear',    _make_icon('rear', 16))
-        self._left_btn  = _small_btn('Left',    _make_icon('left', 16))
-        self._right_btn = _small_btn('Right',   _make_icon('right', 16))
-
-        for b in (self._fit_btn, self._top_btn, self._bot_btn,
-                  self._front_btn, self._rear_btn, self._left_btn, self._right_btn):
-            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            g.add(b)
         return g
 
     # ── Select ────────────────────────────────────────────────────────────
@@ -770,15 +699,6 @@ class SmartRibbon(QWidget):
 
     def _connect_internal(self) -> None:
         self._open_btn.clicked.connect(self.open_requested)
-        self._fit_btn.clicked.connect(self.view_fit)
-
-        for name, btn in [
-            ('top', self._top_btn), ('bottom', self._bot_btn),
-            ('front', self._front_btn), ('rear', self._rear_btn),
-            ('left', self._left_btn), ('right', self._right_btn),
-        ]:
-            btn.clicked.connect(lambda _=False, n=name: self.view_set.emit(n))
-
         self._grid_check.toggled.connect(lambda _: self.grid_changed.emit())
         self._arrows_check.toggled.connect(lambda _: self.arrows_changed.emit())
         self._custom_check.toggled.connect(self._on_custom_toggled)

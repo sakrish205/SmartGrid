@@ -73,7 +73,7 @@ JSON / CSV Export
 4. **Set parameters** — pitch, unit, standoff, sweep direction
 5. **Preview** — enable Grid to verify pass spacing before generating
 6. **Generate Path**
-7. **Export JSON or CSV**
+7. **Export** — JSON, CSV, or OLP (RoboDK / Visual Components / DELMIA APT)
 
 ---
 
@@ -291,7 +291,7 @@ Default standoff is `0`.
 | **Generate Path** | Generate the selected toolpath |
 | **Clear Path** | Remove generated paths |
 | **View Settings** | Configure 3D display and mesh rendering |
-| **Export JSON / CSV** | Export the generated trajectory |
+| **Export JSON / CSV / OLP** | Export the generated trajectory (JSON, neutral CSV, or robot OLP) |
 
 ---
 
@@ -346,19 +346,37 @@ Structured toolpath containing:
 
 ### CSV
 
-One row per trajectory point containing:
+One row per trajectory point:
 
-- Segment type
-- Region
-- Pass ID
-- Direction
-- Segment length
-- Point index
-- X, Y, Z coordinates
+| Column | Content |
+|---|---|
+| `seq_id` | Global execution order |
+| `Trigger` | `ON` = spray gun firing, `OFF` = air travel |
+| `segment_type` | `pass` or `connection` |
+| `pass_id` | Pass or connection number |
+| `pt_idx` | Point index within segment |
+| `X`, `Y`, `Z` | TCP position in mm |
+| `NX`, `NY`, `NZ` | Outward surface normal unit vector |
+| `length_mm` | Segment total length (first point only) |
+| `region` | Face region label |
+| `is_forward` | `True` / `False` for passes; blank for connections |
+
+### OLP Formats
+
+Three robot-OLP formats are exported via **Export OLP**:
+
+#### RoboDK
+6-column CSV (no header row): `X,Y,Z,NX,NY,NZ` — spray passes only. Drag-drop into RoboDK via *Utilities › Import Curve*. `NX/NY/NZ` = outward surface normal (RoboDK uses it as the curve approach direction).
+
+#### Visual Components
+CSV with header `seq_id,X,Y,Z,NX,NY,NZ,Trigger`. Spray passes have `Trigger=ON` with normals; connector moves have `Trigger=OFF` with blank normals.
+
+#### DELMIA APT
+APT text file. Spray passes use `GOTO/X,Y,Z,I,J,K` where `I,J,K` = tool Z axis = `-spray_normal` (points into the surface). Connector moves use `RAPID/X,Y,Z`. Feed rate is written as `FEDRAT/value,MMPM` before each pass block.
 
 All internal distances are maintained in millimetres; display/input unit conversion does not change the physical distance.
 
-> **Integration note:** SmartGrid is a **toolpath planning system**, not a complete robot controller. JSON/CSV output provides an intermediate trajectory representation for downstream robot-controller integration.
+> **Integration note:** SmartGrid is a **toolpath planning system**, not a complete robot controller. JSON/CSV/OLP output provides an intermediate trajectory representation for downstream robot-controller integration.
 
 ---
 
@@ -369,7 +387,10 @@ All internal distances are maintained in millimetres; display/input unit convers
 | STL (binary or ASCII) | ✓ | — |
 | OBJ (single- or multi-body) | ✓ | — |
 | JSON (toolpath) | — | ✓ |
-| CSV (toolpath) | — | ✓ |
+| CSV (toolpath, neutral) | — | ✓ |
+| CSV (RoboDK curve import) | — | ✓ |
+| CSV (Visual Components) | — | ✓ |
+| APT (DELMIA) | — | ✓ |
 
 Multi-body OBJ files are merged at load via `trimesh.load(force='mesh')`.
 
@@ -455,6 +476,7 @@ The Adaptive Face Grid method can float on surfaces with significant curvature a
 
 ```text
 SmartGrid/
+├── main.py
 ├── app/
 │   ├── main_window.py
 │   ├── ui/
@@ -472,13 +494,14 @@ SmartGrid/
 │   │   ├── slicer.py
 │   │   ├── stitcher.py
 │   │   ├── connector.py
+│   │   ├── resampler.py
 │   │   └── path_model.py
 │   └── export/
 │       ├── json_export.py
-│       └── csv_export.py
-├── models/
-│   └── mesh_model.py
-└── tests/
+│       ├── csv_export.py
+│       └── olp_export.py
+└── models/
+    └── mesh_model.py
 ```
 
 ---
