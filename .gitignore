@@ -13,3 +13,4 @@ venv/
 AGENTS.md
 build_installer.py
 SmartGrid_Setup.exe
+settings.json

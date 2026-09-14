@@ -13,7 +13,9 @@ from PySide6.QtWidgets import (
     QLabel, QVBoxLayout as QVBox, QScrollArea, QFrame,
     QComboBox, QDoubleSpinBox,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QEvent, QSettings, QTimer
+import json
+import pathlib
+from PySide6.QtCore import Qt, QThread, Signal, QEvent, QTimer
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 
 # Heavy imports (trimesh, pyvista, pyvistaqt) are deferred to first use
@@ -251,6 +253,20 @@ class _PathWorker(QThread):
             self.error.emit(f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
 
 
+class _CollisionWorker(QThread):
+    finished = Signal(object)  # dict[int, str]
+
+    def __init__(self, routes, mesh, standoff_mm: float) -> None:
+        super().__init__()
+        self._routes     = routes
+        self._mesh       = mesh
+        self._standoff   = standoff_mm
+
+    def run(self) -> None:
+        from app.path.collision import detect_collisions
+        self.finished.emit(detect_collisions(self._routes, self._mesh, self._standoff))
+
+
 # ---------------------------------------------------------------------------
 # Up-axis dialog
 # ---------------------------------------------------------------------------
@@ -336,6 +352,7 @@ class MainWindow(QMainWindow):
         self._last_params:       GenerationParams | None = None
         self._worker:        Optional[QThread] = None
         self._load_worker:   Optional[QThread] = None
+        self._coll_worker:   Optional[QThread] = None
         self._current_colors: dict[str, str]  = self._load_view_settings()
         self._face_grid_planes_cache: tuple | None = None
 
@@ -496,29 +513,25 @@ class MainWindow(QMainWindow):
     # Settings persistence
     # ------------------------------------------------------------------
 
-    _SETTINGS_ORG = 'SmartGrid'
-    _SETTINGS_APP = 'SmartGrid'
+    _SETTINGS_FILE = pathlib.Path(__file__).parent.parent / 'settings.json'
 
     def _load_view_settings(self) -> dict[str, str]:
-        """Return view-settings dict: saved values merged over defaults."""
-        s = QSettings(self._SETTINGS_ORG, self._SETTINGS_APP)
         colors = dict(_COLOR_DEFAULTS)
-        s.beginGroup('view')
-        for key in colors:
-            val = s.value(key)
-            if val is not None:
-                colors[key] = str(val)
-        s.endGroup()
+        try:
+            saved = json.loads(self._SETTINGS_FILE.read_text(encoding='utf-8'))
+            for key in colors:
+                if key in saved:
+                    colors[key] = str(saved[key])
+        except Exception:
+            pass
         return colors
 
     def _save_view_settings(self) -> None:
-        """Persist current view settings to QSettings (Windows registry)."""
-        s = QSettings(self._SETTINGS_ORG, self._SETTINGS_APP)
-        s.beginGroup('view')
-        for key, val in self._current_colors.items():
-            s.setValue(key, val)
-        s.endGroup()
-        s.sync()
+        try:
+            self._SETTINGS_FILE.write_text(
+                json.dumps(self._current_colors, indent=2), encoding='utf-8')
+        except Exception:
+            pass
 
     def closeEvent(self, event) -> None:
         self._save_view_settings()
@@ -941,27 +954,21 @@ class MainWindow(QMainWindow):
         if self._worker:
             self._worker.deleteLater()
             self._worker = None
-        self._current_routes = routes
+        self._current_routes  = routes
+        self._collision_ids   = {}
 
-        # Collision detection — uses trimesh already loaded, no extra dep
-        self._collision_ids: dict[int, str] = {}
-        if self._model and self._model.data:
-            from app.path.collision import detect_collisions
-            standoff = self._ribbon.get_standoff_mm()
-            self._collision_ids = detect_collisions(
-                routes, self._model.data.trimesh_mesh, standoff)
-
+        # Show paths immediately — collision highlights added after background check
         self._viewer.show_route(
             routes,
             show_arrows=self._ribbon.is_show_arrows(),
             show_waypoints=self._ribbon.is_show_waypoints(),
-            collision_ids=self._collision_ids,
+            collision_ids={},
         )
         self._ribbon.update_route_stats(routes, self._ribbon.current_unit)
         self._ribbon.set_path_exists(bool(routes))
         from app.path.path_model import UNIT_TO_MM
-        unit = self._ribbon.current_unit
-        factor = UNIT_TO_MM.get(unit, 1.0)
+        unit    = self._ribbon.current_unit
+        factor  = UNIT_TO_MM.get(unit, 1.0)
         total_passes = sum(r.total_passes for r in routes)
         total_conns  = sum(len(r.connections) for r in routes)
         total_mm     = sum(r.total_length_mm for r in routes)
@@ -984,8 +991,36 @@ class MainWindow(QMainWindow):
                 f"The following regions produced 0 passes:\n  {', '.join(empty_regions)}\n\n"
                 "Try reducing the spray width or check that the correct up-axis was selected.",
             )
-        n_coll      = sum(1 for v in self._collision_ids.values() if v == 'collision')
-        n_near      = sum(1 for v in self._collision_ids.values() if v == 'near_miss')
+        self.statusBar().showMessage(
+            f'Path generation complete  —  {total_passes} passes, {total_conns} connections.'
+            f'  Checking collisions…')
+        self._update_grid()
+
+        # Spawn background collision check so the UI stays responsive
+        if self._model and self._model.data:
+            if self._coll_worker:
+                self._coll_worker.deleteLater()
+            self._coll_worker = _CollisionWorker(
+                routes, self._model.data.trimesh_mesh, self._ribbon.get_standoff_mm())
+            self._coll_worker.finished.connect(self._on_collision_ready)
+            self._coll_worker.start()
+
+    def _on_collision_ready(self, collision_ids: dict) -> None:
+        if self._coll_worker:
+            self._coll_worker.deleteLater()
+            self._coll_worker = None
+        self._collision_ids = collision_ids
+        if self._current_routes:
+            self._viewer.show_route(
+                self._current_routes,
+                show_arrows=self._ribbon.is_show_arrows(),
+                show_waypoints=self._ribbon.is_show_waypoints(),
+                collision_ids=collision_ids,
+            )
+        total_passes = sum(r.total_passes for r in self._current_routes)
+        total_conns  = sum(len(r.connections) for r in self._current_routes)
+        n_coll = sum(1 for v in collision_ids.values() if v == 'collision')
+        n_near = sum(1 for v in collision_ids.values() if v == 'near_miss')
         coll_suffix = ''
         if n_coll or n_near:
             coll_suffix = f'  ⚠ {n_coll} collision(s), {n_near} near-miss(es) — shown red/orange'
@@ -1006,7 +1041,6 @@ class MainWindow(QMainWindow):
             msg.setText('\n'.join(lines))
             msg.setStandardButtons(QMessageBox.StandardButton.NoButton)
             msg.show()
-        self._update_grid()
 
     def _refresh_route_display(self) -> None:
         if self._viewer is None or not self._current_routes:
