@@ -2,7 +2,7 @@
 
 **Mechanical Engineering | Manufacturing Automation | Robotics**
 
-Offline toolpath planning for robotic spray operations over 3D mesh surfaces. Loads STL/OBJ models, selects spray regions, generates a boustrophedon lawnmower toolpath, maintains spray-gun standoff, and exports robot-ready paths to JSON or CSV.
+Offline toolpath planning for robotic spray operations over 3D mesh surfaces. Loads STL / OBJ / STEP models, selects spray regions, generates a boustrophedon lawnmower toolpath, maintains spray-gun standoff, checks for collisions, and exports robot-ready paths to JSON, CSV, or robot OLP (RoboDK / Visual Components / DELMIA APT / G-code).
 
 SmartGrid focuses on the **manufacturing process-planning problem** of generating systematic spray-paint trajectories for flat, curved, blended, and complex 3D component surfaces.
 
@@ -22,7 +22,13 @@ SmartGrid focuses on the **manufacturing process-planning problem** of generatin
 Install dependencies:
 
 ```bash
-pip install PySide6 pyvista pyvistaqt "trimesh[easy]" numpy scipy
+pip install -r requirements.txt
+```
+
+Or individually:
+
+```bash
+pip install PySide6 pyvista pyvistaqt "trimesh[easy]" numpy scipy "gmsh>=4.11.0"
 ```
 
 Launch:
@@ -44,9 +50,13 @@ SmartGrid addresses this by converting a **3D mesh of the manufactured component
 ### Our Approach
 
 ```text
-3D Mesh
+3D Mesh (STL / OBJ / STEP)
    ↓
-Workpiece / Region Selection
+Up-Axis Selection
+   ↓
+Auto Region Detection
+   ↓
+Manual Region Refinement
    ↓
 Spray Parameters
    ↓
@@ -56,24 +66,24 @@ Boustrophedon Coverage
    ↓
 Standoff Control
    ↓
-Path Processing
+Collision Detection
    ↓
 3D Validation
    ↓
-JSON / CSV Export
+JSON / CSV / OLP / G-code Export
 ```
 
 ---
 
 ## Workflow
 
-1. **Open mesh** — File › Open or drag an STL / OBJ onto the window
+1. **Open mesh** — File › Open or drag an STL / OBJ / STEP file onto the window
 2. **Set up-axis** — select which world axis is vertical (X / Y / Z)
-3. **Select regions** — toggle TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT or click the bounding box in the viewport
-4. **Set parameters** — pitch, unit, standoff, sweep direction
+3. **Region selection** — dominant regions are auto-detected on load (disable with the **Auto** checkbox); refine by toggling TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT or clicking the bounding box in the viewport
+4. **Set parameters** — pitch, unit, standoff, spray speed, sweep direction
 5. **Preview** — enable Grid to verify pass spacing before generating
-6. **Generate Path**
-7. **Export** — JSON, CSV, or OLP (RoboDK / Visual Components / DELMIA APT)
+6. **Generate Path** — runs in a background thread; collisions highlighted automatically
+7. **Export** — JSON, CSV, OLP (RoboDK / Visual Components / DELMIA APT), or G-code
 
 ---
 
@@ -275,23 +285,100 @@ Default standoff is `0`.
 
 ---
 
+## Collision Detection
+
+After every path generation SmartGrid automatically checks all spray passes against the loaded mesh and flags any passes that would cause interference.
+
+**Two severity levels:**
+
+| Level | Condition | Viewer colour |
+|---|---|---|
+| **Hard collision** | Pass waypoint is inside the mesh volume | Red `#FF1744` |
+| **Near miss** | Closest surface distance < standoff × 0.5 | Orange `#FF9100` |
+
+The near-miss check is skipped when standoff is 0 (paths on the surface by design).
+
+Flagged passes are highlighted in the 3D viewer immediately after generation. The status bar reports the count:
+
+```
+Path generation complete — 12 passes, 11 connections.  ⚠ 1 collision(s), 2 near-miss(es) — shown red/orange
+```
+
+**Implementation:** uses `trimesh.proximity.closest_point` and `mesh.contains` — no additional dependency.
+
+---
+
+## Auto Region Detection
+
+When a mesh is loaded, SmartGrid automatically selects the dominant paintable regions so the user can generate paths without manually checking every face.
+
+**Selection criteria:** a region is auto-selected if it has **≥ 20 faces** AND covers **> 1% of total mesh faces**. Both thresholds guard against false positives — a tiny mesh where 5 faces equal 3% of faces would not auto-select. Regions that fail either test remain unchecked.
+
+The **Auto** checkbox in the Select group controls this behaviour:
+
+| State | Behaviour |
+|---|---|
+| ✓ Checked (default) | Dominant regions checked automatically on every load |
+| ☐ Unchecked | No auto-selection; all regions start unchecked |
+
+After auto-detection the user can refine the selection manually using the region buttons, clicking the bounding box, or using **All / None**.
+
+---
+
+## STEP Import
+
+SmartGrid supports CAD files in STEP (`.step`, `.stp`) format in addition to STL and OBJ. STEP files are tessellated using the [gmsh](https://gmsh.info/) CAD kernel at load time.
+
+```bash
+# gmsh is included in requirements.txt
+pip install "gmsh>=4.11.0"
+```
+
+The tessellation uses gmsh's OpenCASCADE kernel (`occ.importShapes`) and produces a watertight triangle mesh that is then processed identically to an imported STL. No CAD geometry is retained after load — all downstream path generation works on the tessellated mesh.
+
+**Supported:** STEP AP203 / AP214 (single-body and multi-body assemblies). IGES files can also be tessellated using the same code path by changing the extension.
+
+---
+
+## Spray Speed
+
+The robot TCP speed during spray passes is configurable via the **Speed** spinbox in the Parameters group (range: 1–100 000 mm/min, default: 1 000 mm/min).
+
+This value is written into every OLP export format:
+
+| Format | Usage |
+|---|---|
+| DELMIA APT | `FEDRAT/value,MMPM` before each pass block |
+| G-code | `G1 F{value}` before the first pass point |
+| RoboDK CSV | Stored in export metadata header (`# paint_speed_mmpm`) |
+| Visual Components CSV | Stored in export metadata header |
+| JSON / neutral CSV | Stored in `GenerationParams.paint_speed_mmpm` |
+
+Connector (air) moves are always written as rapid/travel — speed control applies to spray passes only.
+
+---
+
 ## Controls
 
 | Control | Function |
 |---|---|
 | **TOP / BOTTOM / FRONT / REAR / LEFT / RIGHT** | Toggle bounding-box faces as spray regions |
+| **Auto** | Auto-select dominant regions on mesh load (default: on) |
+| **All / None** | Select or deselect all regions at once |
 | **Select Faces** | 3D pick mode for selecting regions |
 | **Unit** | mm / cm / m / in / ft |
 | **Spray Width (Pitch)** | Centre-to-centre distance between adjacent passes |
+| **Speed** | Robot TCP speed during spray passes (mm/min); written to all OLP exports |
+| **Standoff** | Spray-gun offset from the mesh surface (mm) |
 | **Sweep** | CW / CCW starting direction |
 | **Waypoints** | Enable uniform resampling |
 | **Interval** | Waypoint resampling spacing |
 | **Grid** | Display pitch-division lines |
-| **Arrows** | Show travel direction |
+| **Arrows** | Show travel direction as chevron tick marks |
 | **Generate Path** | Generate the selected toolpath |
 | **Clear Path** | Remove generated paths |
-| **View Settings** | Configure 3D display and mesh rendering |
-| **Export JSON / CSV / OLP** | Export the generated trajectory (JSON, neutral CSV, or robot OLP) |
+| **View Settings** | Configure 3D display and mesh rendering colours |
+| **Export JSON / CSV / OLP** | Export the generated trajectory |
 
 ---
 
@@ -306,7 +393,7 @@ Generated geometry is processed into an ordered trajectory using:
 - Pass-to-pass connectors
 - Optional uniform waypoint resampling
 
-The **Generate Path** operation runs in a background thread so the UI remains responsive.
+The **Generate Path** operation runs in a background thread so the UI remains responsive during computation.
 
 ---
 
@@ -314,13 +401,14 @@ The **Generate Path** operation runs in a background thread so the UI remains re
 
 The integrated PyVista/VTK viewer provides visual validation of:
 
-- Workpiece mesh
-- Selected spray regions
+- Workpiece mesh (light theme, Office-style UI)
+- Selected spray regions (highlighted bounding-box faces)
 - Pitch grid
-- Spray passes
-- Travel direction
-- Connectors
-- Waypoints
+- Spray passes — forward (blue) / reverse (orange)
+- Hard collisions (red) / near-misses (orange)
+- Travel direction (chevron tick marks)
+- Connectors (pink)
+- Waypoints (gold dots)
 - Mesh rendering and display settings
 
 This allows the generated trajectory to be inspected before export.
@@ -329,16 +417,13 @@ This allows the generated trajectory to be inspected before export.
 
 ## Robot Path Export
 
-SmartGrid exports the generated trajectory in two formats:
-
 ### JSON
 
 Structured toolpath containing:
 
-- Metadata and summary
+- Metadata and summary (source file, mode, regions, speed, standoff, generated-at timestamp)
 - Routes and regions
-- Spray passes
-- Pass direction
+- Spray passes with direction flag
 - Pass lengths
 - 3D waypoints
 - Connections / transit moves
@@ -363,7 +448,7 @@ One row per trajectory point:
 
 ### OLP Formats
 
-Three robot-OLP formats are exported via **Export OLP**:
+Four robot-OLP formats are exported via **Export OLP**:
 
 #### RoboDK
 6-column CSV (no header row): `X,Y,Z,NX,NY,NZ` — spray passes only. Drag-drop into RoboDK via *Utilities › Import Curve*. `NX/NY/NZ` = outward surface normal (RoboDK uses it as the curve approach direction).
@@ -372,11 +457,43 @@ Three robot-OLP formats are exported via **Export OLP**:
 CSV with header `seq_id,X,Y,Z,NX,NY,NZ,Trigger`. Spray passes have `Trigger=ON` with normals; connector moves have `Trigger=OFF` with blank normals.
 
 #### DELMIA APT
-APT text file. Spray passes use `GOTO/X,Y,Z,I,J,K` where `I,J,K` = tool Z axis = `-spray_normal` (points into the surface). Connector moves use `RAPID/X,Y,Z`. Feed rate is written as `FEDRAT/value,MMPM` before each pass block.
+APT text file. Spray passes use `GOTO/X,Y,Z,I,J,K` where `I,J,K` = tool Z axis = `-spray_normal` (points into the surface). Connector moves use `RAPID/X,Y,Z`. Feed rate written as `FEDRAT/value,MMPM` before each pass block; spray gun written as `SPINDL/ON` and `SPINDL/OFF`.
+
+#### G-code (CNC / Robot)
+Standard G-code `.nc` file compatible with CNC and open robot controllers:
+
+```gcode
+%
+O0001 (SMARTGRID TOOLPATH)
+G21 G90 G94
+( Region: TOP )
+( Pass 0 )
+M8                         ; spray gun ON
+G1 F1000.0
+G1 X10.2340 Y20.4560 Z5.6780
+...
+M9                         ; spray gun OFF
+( Connection: ... )
+G0 X12.0000 Y25.0000 Z6.0000
+M30
+%
+```
+
+| Statement | Meaning |
+|---|---|
+| `G21` | mm mode |
+| `G90` | absolute positioning |
+| `G94` | feed per minute |
+| `M8` / `M9` | spray gun on / off (standard coolant codes, repurposed) |
+| `G1 F{speed}` | spray pass at configured speed |
+| `G0` | rapid connector move |
+| `M30` | end of program |
+
+Tool orientation (A, B, C axes) is not written — these are controller-specific and require a post-processor for each robot platform.
 
 All internal distances are maintained in millimetres; display/input unit conversion does not change the physical distance.
 
-> **Integration note:** SmartGrid is a **toolpath planning system**, not a complete robot controller. JSON/CSV/OLP output provides an intermediate trajectory representation for downstream robot-controller integration.
+> **Integration note:** SmartGrid is a **toolpath planning system**, not a complete robot controller. JSON/CSV/OLP/G-code output provides an intermediate trajectory representation for downstream robot-controller integration.
 
 ---
 
@@ -386,13 +503,15 @@ All internal distances are maintained in millimetres; display/input unit convers
 |---|---:|---:|
 | STL (binary or ASCII) | ✓ | — |
 | OBJ (single- or multi-body) | ✓ | — |
+| STEP (AP203 / AP214) | ✓ | — |
 | JSON (toolpath) | — | ✓ |
 | CSV (toolpath, neutral) | — | ✓ |
 | CSV (RoboDK curve import) | — | ✓ |
 | CSV (Visual Components) | — | ✓ |
 | APT (DELMIA) | — | ✓ |
+| G-code `.nc` (CNC / Robot) | — | ✓ |
 
-Multi-body OBJ files are merged at load via `trimesh.load(force='mesh')`.
+Multi-body OBJ files are merged at load via `trimesh.load(force='mesh')`. STEP files are tessellated via gmsh at load time.
 
 ---
 
@@ -406,16 +525,18 @@ Multi-body OBJ files are merged at load via `trimesh.load(force='mesh')`.
 - Spray-path planning
 - Surface coverage planning
 - Standoff control
+- Collision detection
 - Manufacturing automation
 
 ### Software
 
 - Python 3.12
-- PySide6
+- PySide6 (Qt6)
 - PyVista / VTK
 - Trimesh
 - NumPy
 - SciPy
+- gmsh (STEP/IGES CAD tessellation)
 
 ---
 
@@ -436,9 +557,13 @@ Multi-body OBJ files are merged at load via `trimesh.load(force='mesh')`.
 - **Offline operation** — no cloud or paid API dependency
 - **Geometry-driven planning** — paths are generated from 3D workpiece geometry
 - **Multiple path strategies** — supports flat, curved, blended, and complex surfaces
-- **Controlled pitch and standoff**
+- **Controlled pitch, standoff, and spray speed**
+- **Collision detection** — hard collisions and near-misses flagged automatically after generation
+- **Auto region detection** — dominant regions selected on load with one click to refine
+- **STEP / CAD import** — direct CAD file support via gmsh tessellation
+- **G-code export** — paths usable on any CNC or open robot controller
 - **3D path visualization and validation**
-- **JSON/CSV robot-path export**
+- **JSON / CSV / OLP / G-code robot-path export**
 - **Modular architecture**
 
 ---
@@ -448,8 +573,7 @@ Multi-body OBJ files are merged at load via `trimesh.load(force='mesh')`.
 SmartGrid currently focuses on **geometric toolpath generation**. It does not itself provide:
 
 - Robot-specific inverse kinematics
-- Robot-controller post-processing
-- Collision detection and avoidance
+- Robot-controller post-processing (post-processors for specific platforms)
 - Dynamic robot reachability analysis
 - Spray deposition physics
 - Paint-thickness prediction
@@ -458,17 +582,21 @@ SmartGrid currently focuses on **geometric toolpath generation**. It does not it
 
 The Adaptive Face Grid method can float on surfaces with significant curvature along the sweep direction because individual passes are straight.
 
+Collision detection uses per-point ray casting (`mesh.contains`) — on very dense meshes with many flagged passes this can be slow. A signed-distance field approach would improve throughput for high-polygon models.
+
+G-code tool orientation (A, B, C rotary axes) is not written — a platform-specific post-processor is required to map spray-normal vectors to robot joint angles.
+
 ---
 
 ## Future Scope
 
-- Robot-specific post-processors for industrial robot platforms
+- Robot-specific post-processors for industrial robot platforms (KUKA KRL, ABB RAPID, Fanuc TP)
 - TCP orientation and inverse-kinematics integration
-- Collision and reachability checking
 - Adaptive spray pitch and speed optimisation
 - Spray deposition / coating-thickness modelling
 - Robot simulation and digital-twin integration
 - CAD/CAM and manufacturing-cell integration
+- Geodesic connectors (shortest path along mesh surface instead of straight air moves)
 
 ---
 
@@ -477,6 +605,7 @@ The Adaptive Face Grid method can float on surfaces with significant curvature a
 ```text
 SmartGrid/
 ├── main.py
+├── requirements.txt
 ├── app/
 │   ├── main_window.py
 │   ├── ui/
@@ -484,22 +613,23 @@ SmartGrid/
 │   │   ├── viewer.py
 │   │   └── view_settings_dialog.py
 │   ├── mesh/
-│   │   ├── loader.py
-│   │   ├── preprocessor.py
-│   │   └── regions.py
+│   │   ├── loader.py          — STL / OBJ / STEP load + repair
+│   │   ├── preprocessor.py    — normals, centroids, bbox cache
+│   │   └── regions.py         — face classifier (TOP/BOTTOM/etc.)
 │   ├── path/
+│   │   ├── path_model.py      — PaintPass, Connection, PaintRoute, GenerationParams
 │   │   ├── bbox_generator.py
 │   │   ├── face_grid_generator.py
-│   │   ├── generator.py
+│   │   ├── generator.py       — Mesh Surface orchestration
 │   │   ├── slicer.py
 │   │   ├── stitcher.py
 │   │   ├── connector.py
 │   │   ├── resampler.py
-│   │   └── path_model.py
+│   │   └── collision.py       — detect_collisions() — hard collision + near-miss
 │   └── export/
 │       ├── json_export.py
 │       ├── csv_export.py
-│       └── olp_export.py
+│       └── olp_export.py      — RoboDK, Visual Components, DELMIA APT, G-code
 └── models/
     └── mesh_model.py
 ```
@@ -518,6 +648,8 @@ SURFACE GEOMETRY
 SPRAY PARAMETERS
      ↓
 TOOLPATH PLANNING
+     ↓
+COLLISION CHECKING
      ↓
 ROBOT TRAJECTORY
      ↓
