@@ -1,20 +1,22 @@
 """Top-level window — ribbon layout, no sidebar."""
 from __future__ import annotations
+import json
+import math
 import os
+import pathlib
 import traceback
+from dataclasses import replace as _dc_replace
 from typing import Optional
 
 import numpy as np
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QFileDialog, QMessageBox, QDialog, QInputDialog,
+    QFileDialog, QMessageBox, QDialog,
     QDialogButtonBox, QRadioButton, QButtonGroup,
     QLabel, QVBoxLayout as QVBox, QScrollArea, QFrame,
     QComboBox, QDoubleSpinBox,
 )
-import json
-import pathlib
 from PySide6.QtCore import Qt, QThread, Signal, QEvent, QTimer
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 
@@ -263,7 +265,6 @@ class _CollisionWorker(QThread):
         self._standoff = standoff_mm
 
     def run(self) -> None:
-        import math
         from app.path.collision import detect_collisions
 
         collision_ids, max_depth = detect_collisions(self._routes, self._mesh, self._standoff)
@@ -1028,10 +1029,10 @@ class MainWindow(QMainWindow):
                 show_waypoints=self._ribbon.is_show_waypoints(),
                 collision_ids=collision_ids,
             )
-        total_passes = sum(r.total_passes for r in self._current_routes)
-        total_conns  = sum(len(r.connections) for r in self._current_routes)
         n_coll = sum(1 for v in collision_ids.values() if v == 'collision')
         n_near = sum(1 for v in collision_ids.values() if v == 'near_miss')
+        total_passes = sum(r.total_passes for r in self._current_routes)
+        total_conns  = sum(len(r.connections) for r in self._current_routes)
         coll_suffix = ''
         if n_coll or n_near:
             coll_suffix = (f'  ⚠ {n_coll} collision(s), {n_near} near-miss(es)'
@@ -1177,7 +1178,6 @@ class MainWindow(QMainWindow):
             speeds_map = None
 
         # Params with correct fixed speed for metadata / custom mode
-        from dataclasses import replace as _dc_replace
         params = self._last_params
         if params is not None:
             fixed = custom_speed if speed_mode == 'custom' else _SPEED_CURVE['max_mmpm']

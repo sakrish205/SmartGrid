@@ -11,15 +11,15 @@ Near miss       — closest surface point < standoff * 0.5
 """
 from __future__ import annotations
 import numpy as np
-import trimesh
 import trimesh.proximity as _prox
+from trimesh import Trimesh
 
 from app.path.path_model import PaintRoute
 
 
 def detect_collisions(
     routes: list[PaintRoute],
-    mesh: trimesh.Trimesh,
+    mesh: Trimesh,
     standoff_mm: float,
 ) -> tuple[dict[int, str], float]:
     """Return ({pass_id: 'collision'|'near_miss'}, max_penetration_mm).
