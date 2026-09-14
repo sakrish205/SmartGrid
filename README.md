@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="app/ui/icons/logo.png" height="90">
+  <img src="app/ui/icons/logo.png" height="140">
 </p>
 
-# SmartGrid — 3D Spray Path Generator
+# SmartGrid — Robotic Spray Toolpath Planner
 
-**Mechanical Engineering | Manufacturing Automation | Robotics**
+**Computational Manufacturing · Robotic Process Planning · 3D Geometry**
 
-Offline toolpath planning for robotic spray operations over 3D mesh surfaces. Loads STL / OBJ / STEP models, selects spray regions, generates a boustrophedon lawnmower toolpath, maintains spray-gun standoff, checks for collisions, and exports robot-ready paths to JSON, CSV, or robot OLP (RoboDK / Visual Components / DELMIA APT / G-code).
+A desktop application that converts any 3D mesh (STL / OBJ / STEP) into a robot-ready spray-paint toolpath — entirely offline, no cloud dependency. Built to demonstrate the full engineering stack: geometric algorithms, real-time 3D visualization, collision detection, and multi-format robot OLP export.
 
-SmartGrid focuses on the **manufacturing process-planning problem** of generating systematic spray-paint trajectories for flat, curved, blended, and complex 3D component surfaces.
+SmartGrid solves the **manufacturing process-planning problem** of generating systematic, coverage-guaranteed spray trajectories over arbitrary 3D surfaces — from flat sheet metal to complex compound curves — with four path strategies, per-waypoint dynamic speed control, and automatic standoff-aware collision detection.
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green)](https://pypi.org/project/PySide6/)
