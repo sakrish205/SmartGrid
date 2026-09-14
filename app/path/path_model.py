@@ -27,6 +27,7 @@ class GenerationParams:
     waypoint_spacing_mm: float      # 0.0 = disabled (uniform mesh vertices used as-is)
     direction:           str        # 'horizontal' | 'vertical' | 'both'
     sweep:               str        # 'CW' | 'CCW'
+    paint_speed_mmpm:    float      = 1000.0   # robot TCP speed during spray passes (mm/min)
     generated_at:        str = field(default_factory=lambda: datetime.now().isoformat(timespec='seconds'))
     software:            str = field(default=_SOFTWARE)
 

@@ -133,7 +133,8 @@ def export_delmia_apt(
             f.write(f'$$ Region: {route.region_id}\n')
             for p in route.passes:
                 f.write(f'$$ Pass {p.id}  Trigger=ON\n')
-                f.write('FEDRAT/1000.0,MMPM\n')  # ponytail: hardcoded placeholder; add paint_speed_mmpm to GenerationParams when needed
+                speed = params.paint_speed_mmpm if params else 1000.0
+                f.write(f'FEDRAT/{speed:.1f},MMPM\n')
                 f.write('SPINDL/ON\n')
                 for pt in p.points:
                     x = round(float(pt[0]), 4)
@@ -152,3 +153,53 @@ def export_delmia_apt(
                         f.write(f'RAPID/{x},{y},{z}\n')
 
         f.write('FINI\n')
+
+
+def export_gcode(
+    routes: list[PaintRoute],
+    filepath: str,
+    params: GenerationParams | None = None,
+) -> None:
+    """G-code for CNC/open robot controllers.
+
+    G21 G90 G94  — mm, absolute, feed/min
+    M8/M9        — spray gun on/off (coolant codes, standard repurpose)
+    G1 F{speed}  — spray passes
+    G0           — rapid connectors (no feedrate written; controller uses rapid override)
+    # ponytail: tool orientation (A,B,C) skipped — controller-specific, add post-processor when needed
+    """
+    speed = params.paint_speed_mmpm if params else 1000.0
+
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write('%\n')
+        f.write('O0001 (SMARTGRID TOOLPATH)\n')
+        f.write('G21 G90 G94\n')
+        if params:
+            f.write(f'( source    : {params.source_file} )\n')
+            f.write(f'( path_mode : {params.path_mode} )\n')
+            f.write(f'( regions   : {", ".join(params.regions)} )\n')
+            f.write(f'( generated : {params.generated_at} )\n')
+
+        for route in routes:
+            conn_by_from = {c.from_pass_id: c for c in route.connections}
+            f.write(f'( Region: {route.region_id} )\n')
+            for p in route.passes:
+                f.write(f'( Pass {p.id} )\n')
+                f.write('M8\n')
+                f.write(f'G1 F{speed:.1f}\n')
+                for pt in p.points:
+                    x = round(float(pt[0]), 4)
+                    y = round(float(pt[1]), 4)
+                    z = round(float(pt[2]), 4)
+                    f.write(f'G1 X{x} Y{y} Z{z}\n')
+                f.write('M9\n')
+                conn = conn_by_from.get(p.id)
+                if conn is not None:
+                    for pt in conn.points:
+                        x = round(float(pt[0]), 4)
+                        y = round(float(pt[1]), 4)
+                        z = round(float(pt[2]), 4)
+                        f.write(f'G0 X{x} Y{y} Z{z}\n')
+
+        f.write('M30\n')
+        f.write('%\n')

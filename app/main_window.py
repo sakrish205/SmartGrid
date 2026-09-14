@@ -21,7 +21,7 @@ from app.path.path_model import PaintRoute, GenerationParams
 from app.ui.ribbon import SmartRibbon
 from app.export.json_export import export_route_json
 from app.export.csv_export import export_route_csv
-from app.export.olp_export import export_robodk, export_vc, export_delmia_apt
+from app.export.olp_export import export_robodk, export_vc, export_delmia_apt, export_gcode
 from app.ui.view_settings_dialog import ViewSettingsDialog, DEFAULTS as _COLOR_DEFAULTS
 
 
@@ -223,6 +223,7 @@ class MainWindow(QMainWindow):
         self._viewer             = None          # set after viewer deferred init
         self._selected_regions:  set[str]        = set()
         self._current_routes:    list[PaintRoute] = []
+        self._collision_ids:     dict[int, str]   = {}
         self._last_params:       GenerationParams | None = None
         self._worker:        Optional[QThread] = None
         self._load_worker:   Optional[QThread] = None
@@ -436,6 +437,7 @@ class MainWindow(QMainWindow):
                 self._current_routes,
                 show_arrows=self._ribbon.is_show_arrows(),
                 show_waypoints=self._ribbon.is_show_waypoints(),
+                collision_ids=self._collision_ids,
             )
 
     # ------------------------------------------------------------------
@@ -516,6 +518,16 @@ class MainWindow(QMainWindow):
         self._ribbon.set_select_mode(False)
         self._viewer.set_select_mode(False)
         self._ribbon.update_mesh_stats(n_faces)
+
+        # Auto region detection — select dominant regions (>1% faces, ≥20 faces)
+        if self._ribbon.is_auto_detect() and model.regions:
+            total_faces = len(model.data.trimesh_mesh.faces)
+            for region, faces in model.regions.items():
+                if len(faces) >= 20 and len(faces) / total_faces > 0.01:
+                    self._selected_regions.add(region)
+                    self._ribbon.set_region_checked(region, True)
+                    self._viewer.highlight_bbox_region(region, True)
+            self._update_grid()
         self._ribbon.clear_stats()
         self._viewer.show_stats_text([
             'MESH',
@@ -611,6 +623,7 @@ class MainWindow(QMainWindow):
             waypoint_spacing_mm = round(self._ribbon.get_waypoint_spacing_mm(), 4),
             direction           = self._ribbon.get_direction(),
             sweep               = 'CCW' if self._ribbon.is_direction_flipped() else 'CW',
+            paint_speed_mmpm    = round(self._ribbon.get_paint_speed_mmpm(), 1),
         )
 
     def _on_generate(self) -> None:
@@ -829,10 +842,20 @@ class MainWindow(QMainWindow):
             self._worker.deleteLater()
             self._worker = None
         self._current_routes = routes
+
+        # Collision detection — uses trimesh already loaded, no extra dep
+        self._collision_ids: dict[int, str] = {}
+        if self._model and self._model.data:
+            from app.path.collision import detect_collisions
+            standoff = self._ribbon.get_standoff_mm()
+            self._collision_ids = detect_collisions(
+                routes, self._model.data.trimesh_mesh, standoff)
+
         self._viewer.show_route(
             routes,
             show_arrows=self._ribbon.is_show_arrows(),
             show_waypoints=self._ribbon.is_show_waypoints(),
+            collision_ids=self._collision_ids,
         )
         self._ribbon.update_route_stats(routes, self._ribbon.current_unit)
         self._ribbon.set_path_exists(bool(routes))
@@ -861,8 +884,13 @@ class MainWindow(QMainWindow):
                 f"The following regions produced 0 passes:\n  {', '.join(empty_regions)}\n\n"
                 "Try reducing the spray width or check that the correct up-axis was selected.",
             )
+        n_coll      = sum(1 for v in self._collision_ids.values() if v == 'collision')
+        n_near      = sum(1 for v in self._collision_ids.values() if v == 'near_miss')
+        coll_suffix = ''
+        if n_coll or n_near:
+            coll_suffix = f'  ⚠ {n_coll} collision(s), {n_near} near-miss(es) — shown red/orange'
         self.statusBar().showMessage(
-            f'Path generation complete  —  {total_passes} passes, {total_conns} connections.')
+            f'Path generation complete  —  {total_passes} passes, {total_conns} connections.{coll_suffix}')
         self._update_grid()
 
     def _refresh_route_display(self) -> None:
@@ -872,6 +900,7 @@ class MainWindow(QMainWindow):
             self._current_routes,
             show_arrows=self._ribbon.is_show_arrows(),
             show_waypoints=self._ribbon.is_show_waypoints(),
+            collision_ids=self._collision_ids,
         )
 
     def _on_route_error(self, message: str) -> None:
@@ -970,6 +999,7 @@ class MainWindow(QMainWindow):
         'RoboDK (6-col curve CSV)':  ('robodk', 'CSV (*.csv)',        '.csv'),
         'Visual Components (CSV)':   ('vc',     'CSV (*.csv)',        '.csv'),
         'DELMIA (APT text)':         ('delmia', 'APT (*.apt)',        '.apt'),
+        'G-code (CNC / Robot)':      ('gcode',  'G-code (*.nc)',      '.nc'),
     }
 
     def _export_olp(self) -> None:
@@ -990,7 +1020,8 @@ class MainWindow(QMainWindow):
             path += ext
         self.statusBar().showMessage('Exporting OLP...')
         try:
-            fn = {'robodk': export_robodk, 'vc': export_vc, 'delmia': export_delmia_apt}[fmt_key]
+            fn = {'robodk': export_robodk, 'vc': export_vc, 'delmia': export_delmia_apt,
+                  'gcode': export_gcode}[fmt_key]
             fn(self._current_routes, path, params=self._last_params)
             self.statusBar().showMessage(f'Exported: {path}')
         except Exception as exc:

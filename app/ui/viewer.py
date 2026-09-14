@@ -529,6 +529,7 @@ class MeshViewer(QWidget):
         routes: list[PaintRoute],
         show_arrows: bool = False,
         show_waypoints: bool = False,
+        collision_ids: dict[int, str] | None = None,
     ) -> None:
         self.clear_route()
 
@@ -546,8 +547,14 @@ class MeshViewer(QWidget):
                 if len(paint_pass.points) < 2:
                     continue
                 line = pv.lines_from_points(paint_pass.points)
-                color = (self._colors['pass_forward'] if paint_pass.is_forward
-                         else self._colors['pass_reverse'])
+                _cid = (collision_ids or {}).get(paint_pass.id)
+                if _cid == 'collision':
+                    color = '#FF1744'
+                elif _cid == 'near_miss':
+                    color = '#FF9100'
+                else:
+                    color = (self._colors['pass_forward'] if paint_pass.is_forward
+                             else self._colors['pass_reverse'])
                 actor = self.plotter.add_mesh(
                     line, color=color,
                     line_width=float(self._colors.get('pass_line_width', '5.0')),

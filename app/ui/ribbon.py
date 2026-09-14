@@ -416,8 +416,16 @@ class SmartRibbon(QWidget):
             'QPushButton:checked:hover{background:#106ebe;border-color:#004f87;}'
         )
 
+        self._auto_detect_chk = QCheckBox('Auto')
+        self._auto_detect_chk.setChecked(True)
+        self._auto_detect_chk.setToolTip(
+            'Auto-select dominant regions when a mesh is loaded.\n'
+            'Regions with >1% of total faces are checked automatically.')
+
         row2.addWidget(self._all_btn)
         row2.addWidget(self._none_btn)
+        row2.addSpacing(4)
+        row2.addWidget(self._auto_detect_chk)
         row2.addSpacing(4)
         row2.addWidget(self._select_btn)
 
@@ -461,8 +469,26 @@ class SmartRibbon(QWidget):
             'Typical values: 80–150 mm for automotive surfaces.')
         pitch_hl.addWidget(self._pitch_spin)
 
+        speed_hl = QHBoxLayout()
+        speed_hl.setSpacing(4)
+        speed_hl.addWidget(_row_label('Speed'))
+        self._speed_spin = QDoubleSpinBox()
+        self._speed_spin.setRange(1.0, 100_000.0)
+        self._speed_spin.setDecimals(0)
+        self._speed_spin.setSingleStep(100.0)
+        self._speed_spin.setValue(1000.0)
+        self._speed_spin.setSuffix('  mm/min')
+        self._speed_spin.setMinimumWidth(110)
+        self._speed_spin.setMaximumWidth(130)
+        self._speed_spin.setStyleSheet(_SPIN_CSS)
+        self._speed_spin.setToolTip(
+            'Robot TCP speed during spray passes (FEDRAT in APT).\n'
+            'Typical values: 500–3000 mm/min.')
+        speed_hl.addWidget(self._speed_spin)
+
         vl.addLayout(unit_hl)
         vl.addLayout(pitch_hl)
+        vl.addLayout(speed_hl)
         g.add_layout(vl)
         return g
 
@@ -784,6 +810,9 @@ class SmartRibbon(QWidget):
     def get_spray_width_mm(self) -> float:
         return self._pitch_spin.value() * UNIT_TO_MM.get(self._current_unit, 1.0)
 
+    def get_paint_speed_mmpm(self) -> float:
+        return self._speed_spin.value()
+
     def get_v_width_mm(self) -> Optional[float]:
         return None   # vertical direction not exposed
 
@@ -817,6 +846,9 @@ class SmartRibbon(QWidget):
     def is_show_arrows(self) -> bool:
         return self._arrows_check.isChecked()
 
+    def is_auto_detect(self) -> bool:
+        return self._auto_detect_chk.isChecked()
+
     def is_show_waypoints(self) -> bool:
         """True when custom interval is active → show all intermediate dots."""
         return self._custom_check.isChecked()
@@ -837,7 +869,7 @@ class SmartRibbon(QWidget):
                   self._cw_radio, self._ccw_radio,
                   self._bbox_radio, self._face_grid_radio, self._mesh_radio,
                   self._fg_shadow_radio, self._fg_mesh_radio,
-                  self._standoff_spin,
+                  self._standoff_spin, self._speed_spin,
                   self._custom_check, self._wpt_interval_spin,
                   self._gen_btn, self._grid_check, self._arrows_check):
             w.setEnabled(loaded)
