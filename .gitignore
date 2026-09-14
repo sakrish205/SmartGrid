@@ -11,3 +11,5 @@ venv/
 *.obj
 3d-mesh-paint-path-crystalline-falcon.md
 AGENTS.md
+build_installer.py
+SmartGrid_Setup.exe
