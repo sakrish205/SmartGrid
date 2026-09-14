@@ -254,17 +254,41 @@ class _PathWorker(QThread):
 
 
 class _CollisionWorker(QThread):
-    finished = Signal(object)  # dict[int, str]
+    finished = Signal(object)  # tuple[dict[int, str], float]  (collision_ids, suggested_standoff)
 
     def __init__(self, routes, mesh, standoff_mm: float) -> None:
         super().__init__()
-        self._routes     = routes
-        self._mesh       = mesh
-        self._standoff   = standoff_mm
+        self._routes   = routes
+        self._mesh     = mesh
+        self._standoff = standoff_mm
 
     def run(self) -> None:
+        import math
         from app.path.collision import detect_collisions
-        self.finished.emit(detect_collisions(self._routes, self._mesh, self._standoff))
+        import trimesh.proximity as _prox
+
+        collision_ids = detect_collisions(self._routes, self._mesh, self._standoff)
+
+        suggested = 0.0
+        if collision_ids:
+            max_depth = 0.0
+            has_hard = any(v == 'collision' for v in collision_ids.values())
+            if has_hard:
+                for route in self._routes:
+                    for p in route.passes:
+                        if collision_ids.get(p.id) == 'collision':
+                            inside_mask = self._mesh.contains(p.points)
+                            if inside_mask.any():
+                                _, dists, _ = _prox.closest_point(
+                                    self._mesh, p.points[inside_mask])
+                                max_depth = max(max_depth, float(dists.max()))
+                raw = self._standoff + max_depth + 2.0
+            else:
+                # near-miss only — double standoff clears the 0.5x threshold
+                raw = self._standoff * 2.0 + 2.0
+            suggested = math.ceil(raw / 5.0) * 5.0
+
+        self.finished.emit((collision_ids, suggested))
 
 
 # ---------------------------------------------------------------------------
@@ -1005,7 +1029,8 @@ class MainWindow(QMainWindow):
             self._coll_worker.finished.connect(self._on_collision_ready)
             self._coll_worker.start()
 
-    def _on_collision_ready(self, collision_ids: dict) -> None:
+    def _on_collision_ready(self, result) -> None:
+        collision_ids, suggested = result
         if self._coll_worker:
             self._coll_worker.deleteLater()
             self._coll_worker = None
@@ -1023,8 +1048,6 @@ class MainWindow(QMainWindow):
         n_near = sum(1 for v in collision_ids.values() if v == 'near_miss')
         coll_suffix = ''
         if n_coll or n_near:
-            cur = self._ribbon.get_standoff_mm()
-            suggested = max(10.0, round((cur + 10.0) / 5.0) * 5.0)
             coll_suffix = (f'  ⚠ {n_coll} collision(s), {n_near} near-miss(es)'
                            f' — shown red/orange  |  Suggested standoff: {suggested:.0f} mm')
         self.statusBar().showMessage(
