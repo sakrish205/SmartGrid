@@ -138,14 +138,8 @@ def generate_face_grid_route(
         in_band    = np.abs(step_proj - step_pos) <= band_half
         band_verts = verts[in_band]
 
-        if len(band_verts) == 0:
-            p_min      = global_pass_min
-            p_max      = global_pass_max
-            row_depth  = global_depth
-        else:
-            p_min     = float((band_verts @ pass_vec).min())
-            p_max     = float((band_verts @ pass_vec).max())
-            row_depth = float((band_verts @ mean_n).max())
+        row_depth = float((band_verts @ mean_n).max()) if len(band_verts) else global_depth
+        p_min, p_max = global_pass_min, global_pass_max
 
         row_face_pos = row_depth + standoff_mm
 
