@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 
 from app.path.path_model import PaintPass, Connection, PaintRoute
-from app.path.resampler import resample_arc, rdp_simplify, lead_inout, prune_collinear
+from app.path.resampler import resample_arc, rdp_simplify, prune_collinear
 from app.path.stitcher import stitch_segments as _stitch_segs
 
 
@@ -151,7 +151,6 @@ def generate_face_grid_route(
         pts = np.array([pt_a, pt_b], dtype=float)
         if not is_forward:
             pts = pts[::-1].copy()
-        pts = lead_inout(pts)
 
         if waypoint_spacing_mm > 0:
             pts = resample_arc(pts, waypoint_spacing_mm)
@@ -325,7 +324,6 @@ def generate_conform_route(
             # Uniform standoff along mean surface normal — no per-point snap
             if standoff_mm > 0.0:
                 pts = pts + standoff_mm * mean_n
-            pts = lead_inout(pts)
             if waypoint_spacing_mm > 0 and len(pts) >= 2:
                 pts = resample_arc(pts, waypoint_spacing_mm)
             pts = prune_collinear(pts)

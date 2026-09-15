@@ -10,7 +10,7 @@ from app.path.path_model import PaintPass, PaintRoute
 from app.path import slicer as _slicer
 from app.path import stitcher as _stitcher
 from app.path import connector as _connector
-from app.path.resampler import rdp_simplify, resample_arc, lead_inout, prune_collinear
+from app.path.resampler import rdp_simplify, resample_arc, prune_collinear
 
 _RDP_EPSILON       = 0.3   # mm — remove micro-jaggies from triangle discretisation
 _MIN_PASS_FRACTION = 0.10  # drop passes shorter than 10% of spray_width_mm …
@@ -130,7 +130,6 @@ def generate_route(
             pts = polyline if is_forward else polyline[::-1].copy()
             # Smooth micro-jaggies from mesh triangulation, then resample uniformly
             pts = rdp_simplify(pts, _RDP_EPSILON)
-            pts = lead_inout(pts)
             if waypoint_spacing_mm > 0 and len(pts) >= 2:
                 pts = resample_arc(pts, waypoint_spacing_mm)
             pts = prune_collinear(pts)
