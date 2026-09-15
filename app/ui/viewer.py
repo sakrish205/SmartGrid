@@ -536,26 +536,33 @@ class MeshViewer(QWidget):
         else:
             arrow_len = 50.0
 
+        wpt_color = self._colors.get('waypoint', '#FFD700')
+        wpt_size  = float(self._colors.get('waypoint_size', '8.0'))
+        lw        = float(self._colors.get('pass_line_width', '5.0'))
+        coll_ids  = collision_ids or {}
+
         for ri, route in enumerate(routes):
+            # ── batch pass lines by colour (one GPU upload per colour) ──────
+            fwd_color  = self._colors['pass_forward']
+            rev_color  = self._colors['pass_reverse']
+            buckets: dict[str, list[np.ndarray]] = {}
+            end_pts_list: list[np.ndarray] = []
+            mid_pts_list: list[np.ndarray] = []
+
             for paint_pass in route.passes:
                 if len(paint_pass.points) < 2:
                     continue
-                line = pv.lines_from_points(paint_pass.points)
-                _cid = (collision_ids or {}).get(paint_pass.id)
+                _cid = coll_ids.get(paint_pass.id)
                 if _cid == 'collision':
                     color = '#FF1744'
                 elif _cid == 'near_miss':
                     color = '#FF9100'
                 else:
-                    color = (self._colors['pass_forward'] if paint_pass.is_forward
-                             else self._colors['pass_reverse'])
-                actor = self.plotter.add_mesh(
-                    line, color=color,
-                    line_width=float(self._colors.get('pass_line_width', '5.0')),
-                    render_lines_as_tubes=True, reset_camera=False,
-                )
-                key = f'pass_{ri}_{paint_pass.id}_{paint_pass.sub_index}'
-                self._actors[key] = actor
+                    color = fwd_color if paint_pass.is_forward else rev_color
+                buckets.setdefault(color, []).append(paint_pass.points)
+                end_pts_list.append(paint_pass.points[[0, -1]])
+                if show_waypoints and len(paint_pass.points) > 2:
+                    mid_pts_list.append(paint_pass.points[1:-1])
 
                 if show_arrows:
                     face_normal = _region_face_normal(
@@ -570,52 +577,48 @@ class MeshViewer(QWidget):
                         face_normal=face_normal,
                     )
 
-                # Endpoint dots — always shown (default waypoints)
-                wpt_color = self._colors.get('waypoint', '#FFD700')
-                wpt_size  = float(self._colors.get('waypoint_size', '8.0'))
-                end_pts   = paint_pass.points[[0, -1]]
-                end_actor = self.plotter.add_mesh(
-                    pv.PolyData(end_pts),
+            for color, pt_list in buckets.items():
+                actor = self.plotter.add_mesh(
+                    _make_multiline(pt_list), color=color,
+                    line_width=lw, render_lines_as_tubes=True, reset_camera=False,
+                )
+                self._actors[f'pass_{ri}_{color}'] = actor
+
+            if end_pts_list:
+                actor = self.plotter.add_mesh(
+                    pv.PolyData(np.vstack(end_pts_list)),
                     color=wpt_color, point_size=wpt_size,
                     render_points_as_spheres=True, reset_camera=False,
                 )
-                self._actors[f'wpt_ends_{ri}_{paint_pass.id}_{paint_pass.sub_index}'] = end_actor
+                self._actors[f'wpt_ends_{ri}'] = actor
 
-                # Custom interval — all intermediate waypoints
-                if show_waypoints and len(paint_pass.points) > 2:
-                    mid_pts   = paint_pass.points[1:-1]
-                    wpt_actor = self.plotter.add_mesh(
-                        pv.PolyData(mid_pts),
-                        color=wpt_color, point_size=wpt_size,
-                        render_points_as_spheres=True, reset_camera=False,
-                    )
-                    self._actors[f'wpt_{ri}_{paint_pass.id}_{paint_pass.sub_index}'] = wpt_actor
-
-            for conn in route.connections:
-                if len(conn.points) < 2:
-                    continue
-                line = pv.lines_from_points(conn.points)
+            if mid_pts_list:
                 actor = self.plotter.add_mesh(
-                    line,
-                    color=self._colors['connector'],
-                    line_width=3,
-                    render_lines_as_tubes=True,
-                    reset_camera=False,
+                    pv.PolyData(np.vstack(mid_pts_list)),
+                    color=wpt_color, point_size=wpt_size,
+                    render_points_as_spheres=True, reset_camera=False,
                 )
-                self._actors[f'conn_{ri}_{conn.id}'] = actor
-                # Always show connector waypoint dots when resampled (> 2 pts)
-                # — no Show toggle needed; dots confirm the robot will hit each point
-                if len(conn.points) > 2:
-                    wpt_color = self._colors.get('waypoint', '#FFD700')
-                    wpt_size  = float(self._colors.get('waypoint_size', '8.0'))
-                    wpt_actor = self.plotter.add_mesh(
-                        pv.PolyData(conn.points),
-                        color=wpt_color,
-                        point_size=wpt_size,
-                        render_points_as_spheres=True,
-                        reset_camera=False,
-                    )
-                    self._actors[f'conn_wpt_{ri}_{conn.id}'] = wpt_actor
+                self._actors[f'wpt_{ri}'] = actor
+
+            # ── batch connections ────────────────────────────────────────────
+            conn_segs = [c.points for c in route.connections if len(c.points) >= 2]
+            if conn_segs:
+                actor = self.plotter.add_mesh(
+                    _make_multiline(conn_segs),
+                    color=self._colors['connector'],
+                    line_width=3, render_lines_as_tubes=True, reset_camera=False,
+                )
+                self._actors[f'conn_{ri}'] = actor
+
+            conn_wpt_segs = [c.points for c in route.connections
+                             if len(c.points) > 2]
+            if conn_wpt_segs:
+                actor = self.plotter.add_mesh(
+                    pv.PolyData(np.vstack(conn_wpt_segs)),
+                    color=wpt_color, point_size=wpt_size,
+                    render_points_as_spheres=True, reset_camera=False,
+                )
+                self._actors[f'wpt_conn_{ri}'] = actor
 
         self.plotter.render()
 
@@ -882,6 +885,22 @@ def _make_plane_grid(
     mesh.points = np.array(all_pts, dtype=float)
     mesh.lines  = np.array(cells,   dtype=np.int_)
     return mesh
+
+
+def _make_multiline(pt_arrays: list[np.ndarray]) -> pv.PolyData:
+    """Pack multiple disconnected polylines into one PolyData (one GPU upload)."""
+    all_pts = np.vstack(pt_arrays)
+    cells: list[int] = []
+    offset = 0
+    for pts in pt_arrays:
+        n = len(pts)
+        cells.append(n)
+        cells.extend(range(offset, offset + n))
+        offset += n
+    pd = pv.PolyData()
+    pd.points = all_pts
+    pd.lines = np.array(cells, dtype=np.int_)
+    return pd
 
 
 def _region_face_normal(region_id: str, up_axis: int) -> np.ndarray:
