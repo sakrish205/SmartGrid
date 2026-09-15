@@ -860,7 +860,7 @@ class MainWindow(QMainWindow):
             for i, sc in enumerate(spray_corners):
                 rc = ref_corners_first if i == 0 else None
                 ref_list.append((rc, sc))
-            self._face_grid_planes_cache = (ref_list, spray_mm)
+            self._face_grid_planes_cache = (ref_list, spray_mm * 0.85)
             show_grid = self._ribbon.is_show_grid()
             for i, (rc, sc) in enumerate(ref_list):
                 self._viewer.show_face_grid_planes(
@@ -904,7 +904,7 @@ class MainWindow(QMainWindow):
             )
             plane_pairs.append((rc, sc))
 
-        self._face_grid_planes_cache = (plane_pairs, spray_mm)
+        self._face_grid_planes_cache = (plane_pairs, spray_mm * 0.85)
         show_grid = self._ribbon.is_show_grid()
         for i, (rc, sc) in enumerate(plane_pairs):
             self._viewer.show_face_grid_planes(
