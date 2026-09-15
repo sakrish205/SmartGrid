@@ -1025,6 +1025,10 @@ class MainWindow(QMainWindow):
         # Spawn background collision check (skip for face grid — standoff is built-in)
         if self._model and self._model.data and not is_face_grid:
             if self._coll_worker:
+                try:
+                    self._coll_worker.finished.disconnect()
+                except RuntimeError:
+                    pass
                 self._coll_worker.deleteLater()
             self._coll_worker = _CollisionWorker(
                 routes, self._model.data.trimesh_mesh, self._ribbon.get_standoff_mm())
