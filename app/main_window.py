@@ -1046,7 +1046,7 @@ class MainWindow(QMainWindow):
             self._coll_worker.deleteLater()
             self._coll_worker = None
         self._collision_ids = collision_ids
-        if self._current_routes:
+        if self._current_routes and collision_ids:
             self._viewer.show_route(
                 self._current_routes,
                 show_arrows=self._ribbon.is_show_arrows(),

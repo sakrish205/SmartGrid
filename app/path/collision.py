@@ -46,8 +46,11 @@ def detect_collisions(
                 inside[_start:_start + _CHUNK] = mesh.contains(pts[_start:_start + _CHUNK])
 
             if inside.any():
-                _, dists, _ = _prox.closest_point(mesh, pts[inside])
-                depth = float(dists.max())
+                in_pts = pts[inside]
+                _d_arr = np.empty(len(in_pts))
+                for _s in range(0, len(in_pts), _CHUNK):
+                    _, _d_arr[_s:_s + _CHUNK], _ = _prox.closest_point(mesh, in_pts[_s:_s + _CHUNK])
+                depth = float(_d_arr.max())
                 if depth > 0.5:   # ignore surface-grazing false positives on open meshes
                     flagged[p.id] = 'collision'
                     max_depth = max(max_depth, depth)
