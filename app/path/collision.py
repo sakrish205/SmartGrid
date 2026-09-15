@@ -32,13 +32,19 @@ def detect_collisions(
     near_threshold = standoff_mm * 0.5 if standoff_mm > 0 else 0.0
     max_depth = 0.0
 
+    _CHUNK = 500   # ponytail: VTK ray-cast overflows C++ stack on large arrays; 500 pts is safe
+
     for route in routes:
         for p in route.passes:
             pts = p.points
             if len(pts) == 0:
                 continue
 
-            inside = mesh.contains(pts)
+            # Chunk to avoid VTK stack overflow on large point arrays
+            inside = np.zeros(len(pts), dtype=bool)
+            for _start in range(0, len(pts), _CHUNK):
+                inside[_start:_start + _CHUNK] = mesh.contains(pts[_start:_start + _CHUNK])
+
             if inside.any():
                 _, dists, _ = _prox.closest_point(mesh, pts[inside])
                 depth = float(dists.max())

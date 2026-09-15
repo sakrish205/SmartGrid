@@ -265,17 +265,18 @@ class _CollisionWorker(QThread):
         self._standoff = standoff_mm
 
     def run(self) -> None:
-        from app.path.collision import detect_collisions
-
-        collision_ids, max_depth = detect_collisions(self._routes, self._mesh, self._standoff)
-
-        suggested = 0.0
-        if collision_ids:
-            has_hard = max_depth > 0
-            raw = (self._standoff + max_depth + 2.0) if has_hard else (self._standoff * 2.0 + 2.0)
-            suggested = math.ceil(raw / 5.0) * 5.0
-
-        self.finished.emit((collision_ids, suggested))
+        try:
+            from app.path.collision import detect_collisions
+            collision_ids, max_depth = detect_collisions(self._routes, self._mesh, self._standoff)
+            suggested = 0.0
+            if collision_ids:
+                has_hard = max_depth > 0
+                raw = (self._standoff + max_depth + 2.0) if has_hard else (self._standoff * 2.0 + 2.0)
+                suggested = math.ceil(raw / 5.0) * 5.0
+            self.finished.emit((collision_ids, suggested))
+        except Exception:
+            # Swallow — collision check is advisory; a crash here must not kill the app
+            self.finished.emit(({}, 0.0))
 
 
 # ---------------------------------------------------------------------------
