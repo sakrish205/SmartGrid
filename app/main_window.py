@@ -1034,7 +1034,8 @@ class MainWindow(QMainWindow):
                     self._coll_worker.finished.disconnect()
                 except RuntimeError:
                     pass
-                self._coll_worker.deleteLater()
+                # Don't deleteLater — thread may still be running; drop ref and let Qt clean up
+                self._coll_worker = None
             self._coll_worker = _CollisionWorker(
                 routes, self._model.data.trimesh_mesh, self._ribbon.get_standoff_mm())
             self._coll_worker.finished.connect(self._on_collision_ready)
@@ -1089,8 +1090,7 @@ class MainWindow(QMainWindow):
                 self._coll_worker.finished.disconnect()
             except RuntimeError:
                 pass
-            self._coll_worker.deleteLater()
-            self._coll_worker = None
+            self._coll_worker = None  # don't deleteLater — may still be running
         QMessageBox.critical(self, 'Generation error', message)
         self.statusBar().showMessage('Generation failed.')
 
@@ -1101,8 +1101,7 @@ class MainWindow(QMainWindow):
                 self._coll_worker.finished.disconnect()
             except RuntimeError:
                 pass
-            self._coll_worker.deleteLater()
-            self._coll_worker = None
+            self._coll_worker = None  # don't deleteLater — may still be running
         if self._viewer is None:
             return
         self._viewer.clear_route()
