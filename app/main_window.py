@@ -857,12 +857,20 @@ class MainWindow(QMainWindow):
             return
         self._on_route_ready(routes)
         if spray_corners:
-            self._face_grid_planes_cache = (ref_corners_first, spray_corners[0], spray_mm)
-            self._viewer.show_face_grid_planes(
-                ref_corners_first, spray_corners[0],
-                step_spacing=spray_mm,
-                show_grid=self._ribbon.is_show_grid(),
-            )
+            ref_list = []
+            for i, sc in enumerate(spray_corners):
+                rc = ref_corners_first if i == 0 else None
+                ref_list.append((rc, sc))
+            self._face_grid_planes_cache = (ref_list, spray_mm)
+            show_grid = self._ribbon.is_show_grid()
+            for i, (rc, sc) in enumerate(ref_list):
+                self._viewer.show_face_grid_planes(
+                    rc, sc,
+                    step_spacing=spray_mm,
+                    show_grid=show_grid,
+                    clear=(i == 0),
+                    suffix=f'_{i}' if i > 0 else '',
+                )
 
     def _generate_face_grid_mesh(self, spray_mm: float) -> None:
         """Conform: tilted-basis cutting planes + trimesh intersection + uniform standoff."""
@@ -885,22 +893,29 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
 
-        # Reference planes use classifier-assigned faces for correct tilt
-        first_region, first_faces = pairs[0]
-        ref_corners = _fg_gen.get_face_grid_plane_corners(
-            first_region, first_faces, mesh, up,
-            standoff_mm=0.0, mesh_bounds=bounds,
-        )
-        spray_corners = _fg_gen.get_face_grid_plane_corners(
-            first_region, first_faces, mesh, up,
-            standoff_mm=standoff, mesh_bounds=bounds,
-        )
-        self._face_grid_planes_cache = (ref_corners, spray_corners, spray_mm)
-        self._viewer.show_face_grid_planes(
-            ref_corners, spray_corners,
-            step_spacing=spray_mm,
-            show_grid=self._ribbon.is_show_grid(),
-        )
+        # Build ref/spray plane corners for each selected region
+        plane_pairs = []
+        for i, (region, faces) in enumerate(pairs):
+            rc = _fg_gen.get_face_grid_plane_corners(
+                region, faces, mesh, up,
+                standoff_mm=0.0, mesh_bounds=bounds,
+            ) if i == 0 else None
+            sc = _fg_gen.get_face_grid_plane_corners(
+                region, faces, mesh, up,
+                standoff_mm=standoff, mesh_bounds=bounds,
+            )
+            plane_pairs.append((rc, sc))
+
+        self._face_grid_planes_cache = (plane_pairs, spray_mm)
+        show_grid = self._ribbon.is_show_grid()
+        for i, (rc, sc) in enumerate(plane_pairs):
+            self._viewer.show_face_grid_planes(
+                rc, sc,
+                step_spacing=spray_mm,
+                show_grid=show_grid,
+                clear=(i == 0),
+                suffix=f'_{i}' if i > 0 else '',
+            )
         self._viewer.show_bbox(False)
 
         self._ribbon.set_generating(True)
@@ -1002,13 +1017,15 @@ class MainWindow(QMainWindow):
                 f"The following regions produced 0 passes:\n  {', '.join(empty_regions)}\n\n"
                 "Try reducing the spray width or check that the correct up-axis was selected.",
             )
+        is_face_grid = (self._last_params is not None and
+                        'Face Grid' in self._last_params.path_mode)
         self.statusBar().showMessage(
             f'Path generation complete  —  {total_passes} passes, {total_conns} connections.'
-            f'  Checking collisions…')
+            + ('' if is_face_grid else '  Checking collisions…'))
         self._update_grid()
 
-        # Spawn background collision check so the UI stays responsive
-        if self._model and self._model.data:
+        # Spawn background collision check (skip for face grid — standoff is built-in)
+        if self._model and self._model.data and not is_face_grid:
             if self._coll_worker:
                 self._coll_worker.deleteLater()
             self._coll_worker = _CollisionWorker(
@@ -1077,12 +1094,16 @@ class MainWindow(QMainWindow):
             return
         # Face grid mode: redraw planes/grid from cache
         if self._face_grid_planes_cache is not None:
-            ref_c, std_c, spc = self._face_grid_planes_cache
-            self._viewer.show_face_grid_planes(
-                ref_c, std_c,
-                step_spacing=spc,
-                show_grid=self._ribbon.is_show_grid(),
-            )
+            plane_pairs, spc = self._face_grid_planes_cache
+            show_grid = self._ribbon.is_show_grid()
+            for i, (rc, sc) in enumerate(plane_pairs):
+                self._viewer.show_face_grid_planes(
+                    rc, sc,
+                    step_spacing=spc,
+                    show_grid=show_grid,
+                    clear=(i == 0),
+                    suffix=f'_{i}' if i > 0 else '',
+                )
             return
 
         # Bbox / mesh mode: draw grid on the bounding-box face

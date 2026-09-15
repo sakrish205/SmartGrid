@@ -252,29 +252,28 @@ class MeshViewer(QWidget):
         standoff_corners: np.ndarray | None,
         step_spacing: float = 0.0,
         show_grid: bool = False,
+        clear: bool = True,
+        suffix: str = '',
     ) -> None:
-        """Show the two Face Grid reference planes with a named colour legend.
+        """Show Face Grid reference planes.
 
-        ref_corners      — Face Plane  (blue): bbox face at zero standoff.
-        standoff_corners — Spray Plane (red):  robot path at actual standoff.
-        Pass None for either to remove it.
+        clear=False + unique suffix lets callers stack planes (one per region).
         """
-        for key in list(k for k in self._actors if k.startswith('face_grid_')):
-            old = self._actors.pop(key, None)
-            if old is not None:
-                self.plotter.remove_actor(old)
+        if clear:
+            for key in list(k for k in self._actors if k.startswith('face_grid_')):
+                old = self._actors.pop(key, None)
+                if old is not None:
+                    self.plotter.remove_actor(old)
 
         def _add_plane(corners, color, fill_opacity, line_width):
             if corners is None or len(corners) != 4:
                 return None
             faces = np.array([[4, 0, 1, 2, 3]], dtype=np.int_)
             quad  = pv.PolyData(corners.astype(float), faces)
-            # Semi-transparent fill so both planes stay visible when stacked
             act_fill = self.plotter.add_mesh(
                 quad, color=color, opacity=fill_opacity,
                 show_edges=False, lighting=False, reset_camera=False,
             )
-            # Solid border lines drawn on top of the fill
             edges = quad.extract_feature_edges(
                 boundary_edges=True, non_manifold_edges=False,
                 feature_edges=False, manifold_edges=False,
@@ -288,20 +287,15 @@ class MeshViewer(QWidget):
         pair_ref = _add_plane(ref_corners,      self._FACE_PLANE_COLOR,  0.12, 2.5)
         pair_std = _add_plane(standoff_corners, self._SPRAY_PLANE_COLOR, 0.22, 2.5)
 
-        # Store each fill + edge actor pair under its key
-        act_ref = act_std = None
         if pair_ref:
-            self._actors['face_grid_ref_fill'] = pair_ref[0]
-            self._actors['face_grid_ref_edge'] = pair_ref[1]
-            act_ref = pair_ref[0]
+            self._actors[f'face_grid_ref_fill{suffix}'] = pair_ref[0]
+            self._actors[f'face_grid_ref_edge{suffix}'] = pair_ref[1]
         if pair_std:
-            self._actors['face_grid_fill'] = pair_std[0]
-            self._actors['face_grid_edge'] = pair_std[1]
-            act_std = pair_std[0]
+            self._actors[f'face_grid_fill{suffix}'] = pair_std[0]
+            self._actors[f'face_grid_edge{suffix}'] = pair_std[1]
 
-        # Optional grid lines on both planes at spray-width spacing
         if show_grid and step_spacing > 0:
-            for corners, color, actor_key in (
+            for corners, color, base_key in (
                 (ref_corners,      self._FACE_PLANE_COLOR,  'face_grid_ref_grid'),
                 (standoff_corners, self._SPRAY_PLANE_COLOR, 'face_grid_spray_grid'),
             ):
@@ -313,7 +307,7 @@ class MeshViewer(QWidget):
                         gm, color=color, opacity=0.85, line_width=1.5,
                         lighting=False, reset_camera=False,
                     )
-                    self._actors[actor_key] = act
+                    self._actors[f'{base_key}{suffix}'] = act
 
         self.plotter.render()
 
