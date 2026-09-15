@@ -54,7 +54,10 @@ def detect_collisions(
                 continue
 
             if near_threshold > 0:
-                _, dists, _ = _prox.closest_point(mesh, pts)
+                dists = np.empty(len(pts))
+                for _start in range(0, len(pts), _CHUNK):
+                    _, dists[_start:_start + _CHUNK], _ = _prox.closest_point(
+                        mesh, pts[_start:_start + _CHUNK])
                 if (dists < near_threshold).any():
                     flagged[p.id] = 'near_miss'
 

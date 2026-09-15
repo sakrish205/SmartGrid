@@ -976,6 +976,11 @@ class MainWindow(QMainWindow):
     def _on_route_ready(self, routes: list[PaintRoute]) -> None:
         self._ribbon.set_generating(False)
         if self._worker:
+            try:
+                self._worker.finished.disconnect()
+                self._worker.error.disconnect()
+            except RuntimeError:
+                pass
             self._worker.deleteLater()
             self._worker = None
         self._current_routes  = routes
@@ -1072,13 +1077,32 @@ class MainWindow(QMainWindow):
     def _on_route_error(self, message: str) -> None:
         self._ribbon.set_generating(False)
         if self._worker:
+            try:
+                self._worker.finished.disconnect()
+                self._worker.error.disconnect()
+            except RuntimeError:
+                pass
             self._worker.deleteLater()
             self._worker = None
+        if self._coll_worker:
+            try:
+                self._coll_worker.finished.disconnect()
+            except RuntimeError:
+                pass
+            self._coll_worker.deleteLater()
+            self._coll_worker = None
         QMessageBox.critical(self, 'Generation error', message)
         self.statusBar().showMessage('Generation failed.')
 
     def _clear_paths(self) -> None:
         self._face_grid_planes_cache = None
+        if self._coll_worker:
+            try:
+                self._coll_worker.finished.disconnect()
+            except RuntimeError:
+                pass
+            self._coll_worker.deleteLater()
+            self._coll_worker = None
         if self._viewer is None:
             return
         self._viewer.clear_route()
