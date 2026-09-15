@@ -613,7 +613,7 @@ class MainWindow(QMainWindow):
                 break
 
     def _load(self, filepath: str) -> None:
-        if self._load_worker and self._load_worker.isRunning():
+        if self._load_worker:
             return
         dlg = _UpAxisDialog(filepath, self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -753,7 +753,7 @@ class MainWindow(QMainWindow):
     def _on_generate(self) -> None:
         if self._model is None or not self._model.is_loaded:
             return
-        if self._worker and self._worker.isRunning():
+        if self._worker:  # non-None = in flight (running OR results pending delivery)
             return
         spray_mm    = self._ribbon.get_spray_width_mm()
         path_target = self._ribbon.get_path_target()
