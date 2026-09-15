@@ -126,9 +126,9 @@ def generate_face_grid_route(
         step_positions = [(step_min + step_max) / 2.0]
     else:
         first = step_min + spray_width_mm / 2.0
-        step_positions = list(np.arange(first, step_max, spray_width_mm))
+        step_positions = list(np.arange(first, step_max + spray_width_mm * 0.5, spray_width_mm))
 
-    band_half = spray_width_mm * 0.65
+    band_half = spray_width_mm * 1.0
 
     all_passes: list[PaintPass] = []
     for local_idx, step_pos in enumerate(step_positions):

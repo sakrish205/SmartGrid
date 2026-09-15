@@ -40,9 +40,11 @@ def detect_collisions(
 
             inside = mesh.contains(pts)
             if inside.any():
-                flagged[p.id] = 'collision'
                 _, dists, _ = _prox.closest_point(mesh, pts[inside])
-                max_depth = max(max_depth, float(dists.max()))
+                depth = float(dists.max())
+                if depth > 0.5:   # ignore surface-grazing false positives on open meshes
+                    flagged[p.id] = 'collision'
+                    max_depth = max(max_depth, depth)
                 continue
 
             if near_threshold > 0:
