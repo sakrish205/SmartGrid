@@ -580,7 +580,7 @@ class MeshViewer(QWidget):
             for color, pt_list in buckets.items():
                 actor = self.plotter.add_mesh(
                     _make_multiline(pt_list), color=color,
-                    line_width=lw, render_lines_as_tubes=True, reset_camera=False,
+                    line_width=lw, render_lines_as_tubes=False, reset_camera=False,
                 )
                 self._actors[f'pass_{ri}_{color}'] = actor
 
@@ -606,7 +606,7 @@ class MeshViewer(QWidget):
                 actor = self.plotter.add_mesh(
                     _make_multiline(conn_segs),
                     color=self._colors['connector'],
-                    line_width=3, render_lines_as_tubes=True, reset_camera=False,
+                    line_width=3, render_lines_as_tubes=False, reset_camera=False,
                 )
                 self._actors[f'conn_{ri}'] = actor
 
