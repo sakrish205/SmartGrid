@@ -10,7 +10,7 @@ from app.path.path_model import PaintPass, PaintRoute
 from app.path import slicer as _slicer
 from app.path import stitcher as _stitcher
 from app.path import connector as _connector
-from app.path.resampler import rdp_simplify, resample_arc
+from app.path.resampler import rdp_simplify, resample_arc, lead_inout, prune_collinear
 
 _RDP_EPSILON       = 0.3   # mm — remove micro-jaggies from triangle discretisation
 _MIN_PASS_FRACTION = 0.10  # drop passes shorter than 10% of spray_width_mm …
@@ -130,8 +130,10 @@ def generate_route(
             pts = polyline if is_forward else polyline[::-1].copy()
             # Smooth micro-jaggies from mesh triangulation, then resample uniformly
             pts = rdp_simplify(pts, _RDP_EPSILON)
+            pts = lead_inout(pts)
             if waypoint_spacing_mm > 0 and len(pts) >= 2:
                 pts = resample_arc(pts, waypoint_spacing_mm)
+            pts = prune_collinear(pts)
             all_passes.append(PaintPass(
                 id=pass_id,
                 region_id=region_id,
@@ -143,25 +145,32 @@ def generate_route(
             ))
             pass_id += 1
 
-    # Boustrophedon sort: group passes by slice level, sort sub-passes within each
-    # level by centroid along the sweep axis (the axis with the most spread).
-    # Alternate row traversal direction on odd rows so the path snakes back and
-    # forth, minimising connector length between consecutive rows and between the
-    # left/right halves at grille levels.
+    # TSP-lite: group passes by slice level; within each level pick the sub-pass
+    # whose nearest endpoint is closest to the current tool position (greedy).
     _level_map: dict[float, list[PaintPass]] = defaultdict(list)
     for _p in all_passes:
         _level_map[round(_p.slice_position, 4)].append(_p)
 
     _sorted_passes: list[PaintPass] = []
-    for _row_idx, _pos in enumerate(sorted(_level_map.keys())):
+    for _pos in sorted(_level_map.keys()):
         _group = _level_map[_pos]
         if len(_group) > 1:
-            _cents = np.array([_p.points.mean(axis=0) for _p in _group])
-            _spread = _cents.max(axis=0) - _cents.min(axis=0)
-            _ax = int(np.argmax(_spread))
-            _group = sorted(_group, key=lambda _p, _a=_ax: _p.points.mean(axis=0)[_a])
-            if _row_idx % 2 == 1:
-                _group = list(reversed(_group))
+            _cur = _sorted_passes[-1].points[-1] if _sorted_passes else _group[0].points[0]
+            _rem = list(_group)
+            _ordered: list[PaintPass] = []
+            while _rem:
+                _i = min(range(len(_rem)), key=lambda i: min(
+                    np.linalg.norm(_rem[i].points[0] - _cur),
+                    np.linalg.norm(_rem[i].points[-1] - _cur),
+                ))
+                _p = _rem.pop(_i)
+                if np.linalg.norm(_p.points[-1] - _cur) < np.linalg.norm(_p.points[0] - _cur):
+                    _p = PaintPass(id=_p.id, region_id=_p.region_id, direction=_p.direction,
+                                   points=_p.points[::-1].copy(), is_forward=not _p.is_forward,
+                                   sub_index=_p.sub_index, slice_position=_p.slice_position)
+                _ordered.append(_p)
+                _cur = _p.points[-1]
+            _group = _ordered
         _sorted_passes.extend(_group)
     all_passes = _sorted_passes
 

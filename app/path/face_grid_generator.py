@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 
 from app.path.path_model import PaintPass, Connection, PaintRoute
-from app.path.resampler import resample_arc, rdp_simplify
+from app.path.resampler import resample_arc, rdp_simplify, lead_inout, prune_collinear
 from app.path.stitcher import stitch_segments as _stitch_segs
 
 
@@ -121,12 +121,13 @@ def generate_face_grid_route(
     global_pass_max = float(pass_proj.max())
     global_depth = float(depth_proj.max())   # outermost surface
 
+    _step = spray_width_mm * 0.85
     span = step_max - step_min
-    if span <= spray_width_mm:
+    if span <= _step:
         step_positions = [(step_min + step_max) / 2.0]
     else:
-        first = step_min + spray_width_mm / 2.0
-        step_positions = list(np.arange(first, step_max + spray_width_mm * 0.5, spray_width_mm))
+        first = step_min + _step / 2.0
+        step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
 
     band_half = spray_width_mm * 1.0
 
@@ -150,9 +151,11 @@ def generate_face_grid_route(
         pts = np.array([pt_a, pt_b], dtype=float)
         if not is_forward:
             pts = pts[::-1].copy()
+        pts = lead_inout(pts)
 
         if waypoint_spacing_mm > 0:
             pts = resample_arc(pts, waypoint_spacing_mm)
+        pts = prune_collinear(pts)
 
         all_passes.append(PaintPass(
             id=pass_id,
@@ -271,12 +274,13 @@ def generate_conform_route(
     step_min = float(step_proj.min()) - 0.001
     step_max = float(step_proj.max()) + 0.001
 
+    _step = spray_width_mm * 0.85
     span = step_max - step_min
-    if span <= spray_width_mm:
+    if span <= _step:
         step_positions = [(step_min + step_max) / 2.0]
     else:
-        first = step_min + spray_width_mm / 2.0
-        step_positions = list(np.arange(first, step_max, spray_width_mm))
+        first = step_min + _step / 2.0
+        step_positions = list(np.arange(first, step_max, _step))
 
     all_passes: list[PaintPass] = []
     pass_id = 0
@@ -321,8 +325,10 @@ def generate_conform_route(
             # Uniform standoff along mean surface normal — no per-point snap
             if standoff_mm > 0.0:
                 pts = pts + standoff_mm * mean_n
+            pts = lead_inout(pts)
             if waypoint_spacing_mm > 0 and len(pts) >= 2:
                 pts = resample_arc(pts, waypoint_spacing_mm)
+            pts = prune_collinear(pts)
             all_passes.append(PaintPass(
                 id=pass_id,
                 region_id=region,

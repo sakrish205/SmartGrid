@@ -75,3 +75,33 @@ def resample_arc(points: np.ndarray, spacing: float) -> np.ndarray:
     result[0]  = pts[0]
     result[-1] = pts[-1]
     return result
+
+
+_LEAD_MM = 75.0   # ponytail: fixed lead; make a param if per-region tuning is needed
+
+
+def lead_inout(points: np.ndarray, lead_mm: float = _LEAD_MM) -> np.ndarray:
+    """Prepend / append a lead-in / lead-out segment along the pass direction."""
+    pts = np.asarray(points, dtype=float)
+    if lead_mm <= 0 or len(pts) < 2:
+        return pts
+    d_in = pts[0] - pts[1]; n = np.linalg.norm(d_in)
+    if n > 1e-9: d_in /= n
+    d_out = pts[-1] - pts[-2]; n = np.linalg.norm(d_out)
+    if n > 1e-9: d_out /= n
+    return np.vstack([pts[0] + d_in * lead_mm, pts, pts[-1] + d_out * lead_mm])
+
+
+def prune_collinear(points: np.ndarray, angle_tol_deg: float = 0.5) -> np.ndarray:
+    """Drop intermediate waypoints where direction change is below angle_tol_deg."""
+    pts = np.asarray(points, dtype=float)
+    if len(pts) <= 2:
+        return pts
+    cos_tol = np.cos(np.radians(angle_tol_deg))
+    keep = np.ones(len(pts), dtype=bool)
+    for i in range(1, len(pts) - 1):
+        d1 = pts[i] - pts[i - 1]; n1 = np.linalg.norm(d1)
+        d2 = pts[i + 1] - pts[i]; n2 = np.linalg.norm(d2)
+        if n1 > 1e-9 and n2 > 1e-9 and np.dot(d1 / n1, d2 / n2) > cos_tol:
+            keep[i] = False
+    return pts[keep]
