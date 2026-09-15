@@ -113,6 +113,9 @@ def generate_bbox_route(
         if len(p.points) >= 2
     )
 
+    spray_normal = np.zeros(3)
+    spray_normal[face_axis] = float(face_sign)
+
     return PaintRoute(
         region_id=region,
         passes=all_passes,
@@ -121,6 +124,7 @@ def generate_bbox_route(
         spacing_mm=spray_width_mm,
         total_passes=len(all_passes),
         total_length_mm=total_length,
+        spray_normal=spray_normal,
     )
 
 

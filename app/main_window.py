@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFileDialog, QMessageBox, QDialog,
     QDialogButtonBox, QRadioButton, QButtonGroup,
-    QLabel, QVBoxLayout as QVBox, QScrollArea, QFrame,
+    QLabel, QScrollArea, QFrame,
     QComboBox, QDoubleSpinBox,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QEvent, QTimer
@@ -286,7 +286,7 @@ class _UpAxisDialog(QDialog):
     def __init__(self, filename: str, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle('Open Mesh')
-        layout = QVBox(self)
+        layout = QVBoxLayout(self)
         layout.setSpacing(10)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.addWidget(QLabel(f'<b>{os.path.basename(filename)}</b>'))
@@ -721,7 +721,6 @@ class MainWindow(QMainWindow):
 
     def _build_params(self, path_target: str, spray_mm: float) -> GenerationParams:
         """Snapshot all UI settings into a GenerationParams for export metadata."""
-        import os as _os
         submode = self._ribbon.get_face_grid_submode()
         if path_target == 'bbox':
             mode = 'Boundary Box'
@@ -819,7 +818,6 @@ class MainWindow(QMainWindow):
         offset   = 1 if self._ribbon.is_direction_flipped() else 0
         wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
         standoff = self._ribbon.get_standoff_mm()
-        bounds   = tuple(data.pyvista_mesh.bounds)
 
         routes: list[PaintRoute] = []
         spray_corners: list[np.ndarray] = []
@@ -839,12 +837,12 @@ class MainWindow(QMainWindow):
                 ))
                 spray_corners.append(_fg_gen.get_face_grid_plane_corners(
                     region, region_faces, mesh, up,
-                    standoff_mm=standoff, mesh_bounds=bounds,
+                    standoff_mm=standoff,
                 ))
                 if ref_corners_first is None:
                     ref_corners_first = _fg_gen.get_face_grid_plane_corners(
                         region, region_faces, mesh, up,
-                        standoff_mm=0.0, mesh_bounds=bounds,
+                        standoff_mm=0.0,
                     )
             except Exception as exc:
                 QMessageBox.critical(self, 'Generation error',
@@ -879,7 +877,6 @@ class MainWindow(QMainWindow):
         mesh     = data.trimesh_mesh
         up       = data.up_axis
         standoff = self._ribbon.get_standoff_mm()
-        bounds   = tuple(data.pyvista_mesh.bounds)
         offset   = 1 if self._ribbon.is_direction_flipped() else 0
         wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
 
@@ -898,11 +895,11 @@ class MainWindow(QMainWindow):
         for i, (region, faces) in enumerate(pairs):
             rc = _fg_gen.get_face_grid_plane_corners(
                 region, faces, mesh, up,
-                standoff_mm=0.0, mesh_bounds=bounds,
+                standoff_mm=0.0,
             ) if i == 0 else None
             sc = _fg_gen.get_face_grid_plane_corners(
                 region, faces, mesh, up,
-                standoff_mm=standoff, mesh_bounds=bounds,
+                standoff_mm=standoff,
             )
             plane_pairs.append((rc, sc))
 

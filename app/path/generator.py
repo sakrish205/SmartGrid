@@ -186,6 +186,11 @@ def generate_route(
         if len(p.points) >= 2
     )
 
+    normals = mesh_data.face_normals[region_face_indices]
+    mean_n = normals.mean(axis=0)
+    norm = np.linalg.norm(mean_n)
+    spray_normal = mean_n / norm if norm > 1e-9 else mean_n
+
     return PaintRoute(
         region_id=region_id,
         passes=all_passes,
@@ -194,4 +199,5 @@ def generate_route(
         spacing_mm=spray_width_mm,
         total_passes=len(all_passes),
         total_length_mm=total_length,
+        spray_normal=spray_normal,
     )
