@@ -1138,11 +1138,11 @@ class MainWindow(QMainWindow):
         if self._model is None or self._model.data is None:
             return
         bounds = tuple(self._model.data.pyvista_mesh.bounds)
-        h_mm = self._ribbon.get_spray_width_mm()
-        v_mm = self._ribbon.get_v_width_mm()
+        h_mm = self._ribbon.get_spray_width_mm() * 0.85  # match bbox_generator step_spacing
+        v_mm = (self._ribbon.get_v_width_mm() or self._ribbon.get_spray_width_mm()) * 0.85
         up   = self._model.data.up_axis
         for region in self._selected_regions:
-            self._viewer.show_bbox_grid(region, bounds, up, h_mm, v_mm or h_mm)
+            self._viewer.show_bbox_grid(region, bounds, up, h_mm, v_mm)
 
     # ------------------------------------------------------------------
     # Export

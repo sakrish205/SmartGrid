@@ -807,8 +807,9 @@ def _make_grid_lines(
         cells.extend([2, idx, idx + 1])
         idx += 2
 
-    # Lines parallel to pass_axis — one every step_spacing
-    for s in np.arange(s_min, s_max + step_spacing * 0.01, step_spacing):
+    # Lines at pass centerlines: first at s_min + step_spacing/2, then every step_spacing
+    # This matches bbox_generator._make_passes which starts at step_min + spacing/2
+    for s in np.arange(s_min + step_spacing / 2, s_max, step_spacing):
         _add_line(p_min, p_max, step_axis, float(s), pass_axis)
 
     # Lines parallel to step_axis — one every pass_spacing
