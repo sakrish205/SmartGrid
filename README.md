@@ -89,9 +89,87 @@ JSON / CSV / OLP / G-code Export
 
 ---
 
+## Region Selection & Multi-Face
+
+### How region selection works
+
+When a mesh is loaded SmartGrid's face classifier (`app/mesh/regions.py`) assigns every triangle to the region whose axis-aligned face normal it most closely matches — TOP, BOTTOM, FRONT, REAR, LEFT, or RIGHT — based on the user-selected up-axis. This classification happens once at load time and is cached in `MeshData`.
+
+Selecting a region adds its label to `_selected_regions` (a `set[str]`). Deselecting removes it. **Multiple regions can be active at the same time.**
+
+There are two ways to select:
+
+| Interaction | What it does |
+|---|---|
+| Click a bounding-box face in the 3D viewport | Toggles that region on / off |
+| Click a ribbon checkbox (TOP / BOTTOM / etc.) | Same toggle, driven from the sidebar |
+| **All** button | Adds all six regions |
+| **None** button | Clears all regions |
+
+### Multi-region path generation
+
+When **Generate Path** is pressed, SmartGrid iterates over every entry in `_selected_regions` and generates one `PaintRoute` per region:
+
+```python
+# simplified from main_window.py
+for region_id in sorted(self._selected_regions):
+    faces = self._model.get_region_faces(region_id)   # trimesh face indices for this region
+    if len(faces) > 0:
+        route = generate_route(mesh_data, region_id, faces, spray_mm)
+        routes.append(route)
+```
+
+`get_region_faces(region_id)` returns the precomputed `np.ndarray` of face indices for that region. Each region's route is generated independently using its own face set — slice planes are computed from that region's bounding box, not the whole mesh.
+
+All routes are collected into `_current_routes`, passed to `viewer.show_route()` as a single list, and exported together. The export files (JSON / CSV / OLP / G-code) include a `region` column / field so each waypoint remains traceable to its source region.
+
+**Example — bonnet + two side rails:**
+
+```
+Selected: TOP + LEFT + RIGHT
+→ generates 3 PaintRoutes, each path contained within its own region's faces
+→ viewer shows all 3 simultaneously (blue/orange passes, pink connectors)
+→ one JSON export: route[0]=TOP, route[1]=LEFT, route[2]=RIGHT
+```
+
+### Face classification algorithm
+
+The classifier in `app/mesh/regions.py` assigns each triangle to a region by comparing its outward normal against the six canonical axis directions:
+
+```python
+# simplified from regions.py
+region_normals = {
+    'TOP':    +up,   'BOTTOM': -up,
+    'FRONT':  +fwd,  'REAR':   -fwd,
+    'RIGHT':  +right,'LEFT':   -right,
+}
+for face_idx, normal in enumerate(mesh.face_normals):
+    best = max(region_normals, key=lambda r: np.dot(normal, region_normals[r]))
+    region_faces[best].append(face_idx)
+```
+
+Triangles on sharp edges or 45° blends are assigned to whichever canonical direction wins the dot-product comparison. For complex curved surfaces the assignment is approximate — compound-curve regions like blended edges or fenders may benefit from Mesh Surface or Face Grid — Conform mode, which respect the actual mesh geometry regardless of how regions are classified.
+
+### Select Faces mode
+
+The **Select Faces** toolbar button suspends camera rotation (replaces the VTK interactor style with `vtkInteractorStyleUser`) so that a click lands cleanly on the bounding box without spinning the view. The underlying mechanism — clicking a bbox solid actor to identify the region — is the same as in default navigation mode; Select Faces just makes the targeting easier on dense meshes.
+
+---
+
 ## Path Generation
 
 SmartGrid provides four toolpath generation modes for different workpiece geometries. Each mode makes a different trade-off between speed, accuracy, and surface fidelity.
+
+### Mode comparison
+
+| Mode | Mesh query | Path accuracy | Speed | Best for |
+|---|---|---|---|---|
+| **Boundary Box** | None — bbox only | Flat plane (floats on curves) | Instant | Flat panels, sheet metal |
+| **Face Grid — Adaptive** | Normal stats only | Tilted plane, per-row depth tracking | Fast | Bonnets, doors, gently curved panels |
+| **Face Grid — Conform** | Trimesh plane intersection | On-surface, tilted cutting planes | Medium | Blended edges, compound curves |
+| **Mesh Surface** | Trimesh plane intersection | On-surface, axis-aligned cutting planes | Slower | Complex surfaces, parts with holes |
+
+All four modes produce the same output format (`PaintRoute` / `PaintPass`), support multi-region selection, and export identically.
 
 ---
 
