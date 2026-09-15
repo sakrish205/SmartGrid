@@ -734,7 +734,7 @@ class MainWindow(QMainWindow):
         up_labels = {0: 'X', 1: 'Y', 2: 'Z'}
         src = ''
         if self._model.data is not None and self._model.data.source_path:
-            src = _os.path.basename(self._model.data.source_path)
+            src = os.path.basename(self._model.data.source_path)
 
         return GenerationParams(
             source_file         = src,
