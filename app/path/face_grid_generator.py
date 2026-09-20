@@ -152,15 +152,18 @@ def generate_face_grid_route(
         _col_w = (col_centers[1] - col_centers[0]) if _n_cols > 1 else (global_pass_max - global_pass_min)
 
         col_depths = np.array([
-            float(band_depth[np.abs(band_pass - cp) <= _col_w].max())
+            float(np.percentile(band_depth[np.abs(band_pass - cp) <= _col_w], 90))
             if np.any(np.abs(band_pass - cp) <= _col_w) else row_depth
             for cp in col_centers
         ])
 
-        # Smooth with a 7-point moving average to remove sampling noise
+        # Adaptive smooth: kernel = 25% of columns (min 7), removes noise
         # while preserving large-scale surface curvature.
         if _n_cols >= 5:
-            _k = min(7, _n_cols if _n_cols % 2 == 1 else _n_cols - 1)
+            _k = max(7, _n_cols // 4)
+            if _k % 2 == 0:
+                _k += 1
+            _k = min(_k, _n_cols if _n_cols % 2 == 1 else _n_cols - 1)
             col_depths = np.convolve(col_depths, np.ones(_k) / float(_k), mode='same')
             col_depths[:_k // 2] = col_depths[_k // 2]
             col_depths[-(_k // 2):] = col_depths[-(_k // 2) - 1]
