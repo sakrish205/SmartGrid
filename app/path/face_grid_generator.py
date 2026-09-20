@@ -113,19 +113,19 @@ def generate_face_grid_route(
     if direction == 'vertical':
         pass_vec, step_vec = step_vec, pass_vec
 
-    verts = mesh.vertices[mesh.faces[face_indices].ravel()]
-    pass_proj = verts @ pass_vec   # 1-D coords along left-right axis
-    step_proj = verts @ step_vec   # 1-D coords along step axis
-    depth_proj = verts @ mean_n    # 1-D coords along spray-normal
+    verts      = mesh.vertices[mesh.faces[basis_faces].ravel()]
+    pass_proj  = verts @ pass_vec
+    step_proj  = verts @ step_vec
+    depth_proj = verts @ mean_n
 
-    step_min = float(step_proj.min())
-    step_max = float(step_proj.max())
+    step_min        = float(step_proj.min())
+    step_max        = float(step_proj.max())
     global_pass_min = float(pass_proj.min())
     global_pass_max = float(pass_proj.max())
-    global_depth = float(depth_proj.max())   # outermost surface
+    global_depth    = float(depth_proj.max())
 
     _step = spray_width_mm * 0.85
-    span = step_max - step_min
+    span  = step_max - step_min
     if span <= _step:
         step_positions = [(step_min + step_max) / 2.0]
     else:
@@ -140,44 +140,17 @@ def generate_face_grid_route(
         is_forward = ((pass_id + direction_offset) % 2 == 0)
 
         in_band    = np.abs(step_proj - step_pos) <= band_half
-        band_pass  = pass_proj[in_band]
-        band_depth = depth_proj[in_band]
-        row_depth  = float(band_depth.max()) if len(band_depth) > 0 else global_depth
+        band_verts = verts[in_band]
+        row_depth  = float((band_verts @ mean_n).max()) if len(band_verts) > 0 else global_depth
 
-        # Sample depth at multiple columns along the pass direction so each
-        # pass bends with the surface curvature instead of staying flat.
-        _n_cols = max(3, int((global_pass_max - global_pass_min) / (spray_width_mm * 0.5)))
-        col_centers = np.linspace(global_pass_min, global_pass_max, _n_cols)
-        # Full column width so adjacent columns overlap — avoids empty bins.
-        _col_w = (col_centers[1] - col_centers[0]) if _n_cols > 1 else (global_pass_max - global_pass_min)
+        row_face_pos = row_depth + standoff_mm
+        pt_a = row_face_pos * mean_n + global_pass_min * pass_vec + step_pos * step_vec
+        pt_b = row_face_pos * mean_n + global_pass_max * pass_vec + step_pos * step_vec
 
-        col_depths = np.array([
-            float(np.percentile(band_depth[np.abs(band_pass - cp) <= _col_w], 90))
-            if np.any(np.abs(band_pass - cp) <= _col_w) else row_depth
-            for cp in col_centers
-        ])
-
-        # Adaptive smooth: kernel = 25% of columns (min 7), removes noise
-        # while preserving large-scale surface curvature.
-        if _n_cols >= 5:
-            _k = max(7, _n_cols // 4)
-            if _k % 2 == 0:
-                _k += 1
-            _k = min(_k, _n_cols if _n_cols % 2 == 1 else _n_cols - 1)
-            col_depths = np.convolve(col_depths, np.ones(_k) / float(_k), mode='same')
-            col_depths[:_k // 2] = col_depths[_k // 2]
-            col_depths[-(_k // 2):] = col_depths[-(_k // 2) - 1]
-
-        pts = np.array([
-            (d + standoff_mm) * mean_n + cp * pass_vec + step_pos * step_vec
-            for d, cp in zip(col_depths, col_centers)
-        ], dtype=float)
+        pts = np.array([pt_a, pt_b], dtype=float)
         if not is_forward:
             pts = pts[::-1].copy()
 
-        # RDP simplification removes residual micro-zigzags while keeping
-        # the overall surface-following curve shape.
-        pts = rdp_simplify(pts, spray_width_mm * 0.05)
         if waypoint_spacing_mm > 0:
             pts = resample_arc(pts, waypoint_spacing_mm)
         pts = prune_collinear(pts)
