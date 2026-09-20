@@ -139,45 +139,42 @@ def slice_region(
     if segments is None or len(segments) == 0:
         return None
 
-    # Filter to segments whose source triangle is in the selected region
-    region_mask = np.isin(face_ids, region_face_indices)
+    # For named regions, filter by face normal direction instead of region membership.
+    # np.isin(region_face_indices) is too strict — transition faces classified to an
+    # adjacent region (e.g. top-leaning faces assigned to TOP instead of FRONT) are
+    # valid geometry but would be silently dropped. The outward-normal threshold
+    # (> -0.25) already handles back-face exclusion for solid meshes.
+    outward = _outward_sign(region_id, up_axis)
+    if outward is not None:
+        axis, sign = outward
+        region_mask = (mesh.face_normals[face_ids, axis] * sign) > -0.25
+    else:
+        # Arbitrary selection: no known outward direction, fall back to membership.
+        region_mask = np.isin(face_ids, region_face_indices)
+
     filtered = segments[region_mask]
     filtered_face_ids = face_ids[region_mask]
 
     if len(filtered) == 0:
         return None
 
-    # Keep only segments on outward-facing faces for the named region.
-    # This prevents paths on the underside when TOP is selected, or on the
-    # back when FRONT is selected (the plane cuts both sides of a solid mesh).
-    outward = _outward_sign(region_id, up_axis)
-    if outward is not None:
+    # Outermost-cluster filter for named regions: keep only the outermost depth
+    # cluster. Threshold 80 mm — real internal ribs are ≥80 mm inside the outer
+    # shell; corrugations are rarely deeper than 70 mm, so this never fires on them.
+    if outward is not None and len(filtered) > 1:
         axis, sign = outward
-        face_normals_here = mesh.face_normals[filtered_face_ids]
+        mids = (filtered[:, 0, axis] + filtered[:, 1, axis]) / 2.0
+        sorted_m = np.sort(mids)
+        gaps     = np.diff(sorted_m)
+        best_gap_idx = int(np.argmax(gaps))
+        best_gap     = gaps[best_gap_idx]
 
-        # Stage 1 — Normal direction filter: drop only truly inward-facing faces.
-        # Threshold -0.25 lets corrugation wall faces (Nz≈0) through while still
-        # blocking underside faces (Nz < -0.25).
-        outward_mask = (face_normals_here[:, axis] * sign) > -0.25
-        if outward_mask.sum() > 0:
-            filtered = filtered[outward_mask]
-
-        # Stage 2 — Outermost-cluster filter: keep only the outermost depth cluster.
-        # Threshold 80 mm: real internal ribs are ≥80 mm inside the outer shell;
-        # corrugations are rarely deeper than 70 mm, so this never fires on them.
-        if len(filtered) > 1:
-            mids = (filtered[:, 0, axis] + filtered[:, 1, axis]) / 2.0
-            sorted_m = np.sort(mids)
-            gaps     = np.diff(sorted_m)
-            best_gap_idx = int(np.argmax(gaps))
-            best_gap     = gaps[best_gap_idx]
-
-            _MIN_CLUSTER_GAP_MM = 80.0  # ponytail: real ribs ≥80 mm inside shell; corrugations <70 mm
-            if best_gap > _MIN_CLUSTER_GAP_MM:
-                cutoff = (sorted_m[best_gap_idx] + sorted_m[best_gap_idx + 1]) / 2.0
-                keep   = mids >= cutoff if sign > 0 else mids <= cutoff
-                if keep.sum() > 0:
-                    filtered = filtered[keep]
+        _MIN_CLUSTER_GAP_MM = 80.0  # ponytail: real ribs ≥80 mm inside shell; corrugations <70 mm
+        if best_gap > _MIN_CLUSTER_GAP_MM:
+            cutoff = (sorted_m[best_gap_idx] + sorted_m[best_gap_idx + 1]) / 2.0
+            keep   = mids >= cutoff if sign > 0 else mids <= cutoff
+            if keep.sum() > 0:
+                filtered = filtered[keep]
 
     if len(filtered) == 0:
         return None
