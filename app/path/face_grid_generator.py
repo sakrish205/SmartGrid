@@ -115,23 +115,24 @@ def generate_face_grid_route(
         pass_vec, step_vec = step_vec, pass_vec
 
     verts      = mesh.vertices[mesh.faces[basis_faces].ravel()]
-    pass_proj  = verts @ pass_vec
-    step_proj  = verts @ step_vec
-    step_min        = float(step_proj.min())
-    step_max        = float(step_proj.max())
-    global_pass_min = float(pass_proj.min())
-    global_pass_max = float(pass_proj.max())
+    all_verts  = mesh.vertices[mesh.faces[face_indices].ravel()]
+    # Extent from all assigned faces; depth sampling from forward-facing basis_faces only.
+    step_min        = float((all_verts @ step_vec).min())
+    step_max        = float((all_verts @ step_vec).max())
+    global_pass_min = float((all_verts @ pass_vec).min())
+    global_pass_max = float((all_verts @ pass_vec).max())
     global_depth    = float((verts @ mean_n).max())
 
-    _step = spray_width_mm * 0.85
-    span  = step_max - step_min
+    _step     = spray_width_mm * 0.85
+    band_half = spray_width_mm * 2.0
+    step_proj = verts @ step_vec   # basis_faces only — for depth band sampling
+
+    span = step_max - step_min
     if span <= _step:
         step_positions = [(step_min + step_max) / 2.0]
     else:
         first = step_min + _step / 2.0
         step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
-
-    band_half = spray_width_mm * 2.0
 
     all_passes: list[PaintPass] = []
     for local_idx, step_pos in enumerate(step_positions):
@@ -267,11 +268,10 @@ def generate_conform_route(
     if direction == 'vertical':
         pass_vec, step_vec = step_vec, pass_vec
 
-    # Step extent along step_vec from forward-facing vertices only.
-    verts = mesh.vertices[mesh.faces[basis_faces].ravel()]
-    step_proj = verts @ step_vec
-    step_min = float(step_proj.min()) - 0.001
-    step_max = float(step_proj.max()) + 0.001
+    # Step extent from all assigned faces; basis_faces only used for mean_n/basis above.
+    all_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
+    step_min = float((all_verts @ step_vec).min()) - 0.001
+    step_max = float((all_verts @ step_vec).max()) + 0.001
 
     _step = spray_width_mm * 0.85
     span = step_max - step_min
@@ -299,8 +299,12 @@ def generate_conform_route(
         if segments is None or len(segments) == 0:
             continue
 
-        # Filter to classifier-assigned faces only (np.isin — avoids Python loop)
-        mask = np.isin(seg_face_ids, face_indices)
+        # Keep segments from faces that face toward the spray direction.
+        # Using face_normals dot mean_n instead of region assignment so that
+        # transition faces (e.g. top-leaning faces classified as TOP rather
+        # than FRONT) are included — the classifier assigns each face to one
+        # region only, which would drop valid boundary geometry.
+        mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
         segments = segments[mask]
         if len(segments) == 0:
             continue
@@ -401,14 +405,18 @@ def generate_adaptive_grid_route(
     # Always build in H-basis; direction swap handled when emitting passes.
 
     verts        = mesh.vertices[mesh.faces[basis_faces].ravel()]
-    pass_proj    = verts @ pass_vec
-    step_proj    = verts @ step_vec
+    all_verts    = mesh.vertices[mesh.faces[face_indices].ravel()]
     global_depth = float((verts @ mean_n).max())
 
-    pass_min = float(pass_proj.min())
-    pass_max = float(pass_proj.max())
-    step_min = float(step_proj.min())
-    step_max = float(step_proj.max())
+    # Extent from all assigned faces; depth sampling stays on basis_faces only.
+    pass_min = float((all_verts @ pass_vec).min())
+    pass_max = float((all_verts @ pass_vec).max())
+    step_min = float((all_verts @ step_vec).min())
+    step_max = float((all_verts @ step_vec).max())
+
+    # Projections for per-cell depth sampling — basis_faces only.
+    pass_proj = verts @ pass_vec
+    step_proj = verts @ step_vec
 
     _step     = spray_width_mm * 0.85
     band_half = spray_width_mm * 2.0
@@ -430,10 +438,11 @@ def generate_adaptive_grid_route(
         in_row    = np.abs(step_proj - s) <= band_half
         row_pass  = pass_proj[in_row]
         row_n     = (verts[in_row] @ mean_n) if in_row.any() else None
+        row_depth = float(row_n.max()) if row_n is not None else global_depth
         for j, p in enumerate(v_steps):
             if row_n is not None:
                 in_col = np.abs(row_pass - p) <= band_half
-                depth  = float(row_n[in_col].max()) if in_col.any() else global_depth
+                depth  = float(row_n[in_col].max()) if in_col.any() else row_depth
             else:
                 depth = global_depth
             grid_pts[i, j] = (depth + standoff_mm) * mean_n + p * pass_vec + s * step_vec
@@ -514,12 +523,13 @@ def get_face_grid_plane_corners(
         basis_faces = face_indices
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
 
-    verts = mesh.vertices[mesh.faces[basis_faces].ravel()]
-    pass_proj  = verts @ pass_vec
-    step_proj  = verts @ step_vec
+    verts     = mesh.vertices[mesh.faces[basis_faces].ravel()]
+    all_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
 
-    pass_min, pass_max = float(pass_proj.min()), float(pass_proj.max())
-    step_min, step_max = float(step_proj.min()), float(step_proj.max())
+    pass_min = float((all_verts @ pass_vec).min())
+    pass_max = float((all_verts @ pass_vec).max())
+    step_min = float((all_verts @ step_vec).min())
+    step_max = float((all_verts @ step_vec).max())
     face_depth = float((verts @ mean_n).max()) + standoff_mm
 
     # Centre of the plane in world space
