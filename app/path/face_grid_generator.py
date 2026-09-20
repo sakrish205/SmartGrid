@@ -116,13 +116,11 @@ def generate_face_grid_route(
     verts      = mesh.vertices[mesh.faces[basis_faces].ravel()]
     pass_proj  = verts @ pass_vec
     step_proj  = verts @ step_vec
-    depth_proj = verts @ mean_n
-
     step_min        = float(step_proj.min())
     step_max        = float(step_proj.max())
     global_pass_min = float(pass_proj.min())
     global_pass_max = float(pass_proj.max())
-    global_depth    = float(depth_proj.max())
+    global_depth    = float((verts @ mean_n).max())
 
     _step = spray_width_mm * 0.85
     span  = step_max - step_min
@@ -132,7 +130,7 @@ def generate_face_grid_route(
         first = step_min + _step / 2.0
         step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
 
-    band_half = spray_width_mm * 1.0
+    band_half = spray_width_mm * 2.0
 
     all_passes: list[PaintPass] = []
     for local_idx, step_pos in enumerate(step_positions):
@@ -153,12 +151,11 @@ def generate_face_grid_route(
 
         if waypoint_spacing_mm > 0:
             pts = resample_arc(pts, waypoint_spacing_mm)
-        pts = prune_collinear(pts)
 
         all_passes.append(PaintPass(
             id=pass_id,
             region_id=region,
-            direction='horizontal',
+            direction=direction,
             points=pts,
             is_forward=is_forward,
             sub_index=0,
@@ -269,8 +266,8 @@ def generate_conform_route(
     if direction == 'vertical':
         pass_vec, step_vec = step_vec, pass_vec
 
-    # Step extent along step_vec from the selected region vertices
-    verts = mesh.vertices[mesh.faces[face_indices].ravel()]
+    # Step extent along step_vec from forward-facing vertices only.
+    verts = mesh.vertices[mesh.faces[basis_faces].ravel()]
     step_proj = verts @ step_vec
     step_min = float(step_proj.min()) - 0.001
     step_max = float(step_proj.max()) + 0.001
@@ -394,14 +391,13 @@ def get_face_grid_plane_corners(
         basis_faces = face_indices
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
 
-    verts = mesh.vertices[mesh.faces[face_indices].ravel()]
+    verts = mesh.vertices[mesh.faces[basis_faces].ravel()]
     pass_proj  = verts @ pass_vec
     step_proj  = verts @ step_vec
-    depth_proj = verts @ mean_n
 
     pass_min, pass_max = float(pass_proj.min()), float(pass_proj.max())
     step_min, step_max = float(step_proj.min()), float(step_proj.max())
-    face_depth = float(depth_proj.max()) + standoff_mm
+    face_depth = float((verts @ mean_n).max()) + standoff_mm
 
     # Centre of the plane in world space
     pc = (pass_min + pass_max) / 2.0
