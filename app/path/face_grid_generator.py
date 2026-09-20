@@ -404,19 +404,26 @@ def generate_adaptive_grid_route(
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
     # Always build in H-basis; direction swap handled when emitting passes.
 
+    # Use all faces that face generally toward mean_n (same hemisphere filter
+    # as the Conform/Mesh-Surface segment filter).  This prevents the
+    # single-assignment classifier from shrinking the extent: boundary faces
+    # (e.g. FRONT-leaning faces on the LEFT surface) are classified to an
+    # adjacent region and absent from face_indices, but they are still
+    # physically on the visible surface and must set the grid extent.
+    fwd_face_ids = np.where(mesh.face_normals @ mean_n >= 0.0)[0]
+    fwd_verts    = mesh.vertices[mesh.faces[fwd_face_ids].ravel()]
     verts        = mesh.vertices[mesh.faces[basis_faces].ravel()]
-    all_verts    = mesh.vertices[mesh.faces[face_indices].ravel()]
-    global_depth = float((verts @ mean_n).max())
+    global_depth = float((fwd_verts @ mean_n).max())
 
-    # Extent from all assigned faces; depth sampling stays on basis_faces only.
-    pass_min = float((all_verts @ pass_vec).min())
-    pass_max = float((all_verts @ pass_vec).max())
-    step_min = float((all_verts @ step_vec).min())
-    step_max = float((all_verts @ step_vec).max())
+    # Extent and depth sampling from all forward-hemisphere faces.
+    pass_min = float((fwd_verts @ pass_vec).min())
+    pass_max = float((fwd_verts @ pass_vec).max())
+    step_min = float((fwd_verts @ step_vec).min())
+    step_max = float((fwd_verts @ step_vec).max())
 
-    # Projections for per-cell depth sampling — basis_faces only.
-    pass_proj = verts @ pass_vec
-    step_proj = verts @ step_vec
+    # Projections for per-cell depth sampling — forward-hemisphere faces.
+    pass_proj = fwd_verts @ pass_vec
+    step_proj = fwd_verts @ step_vec
 
     _step     = spray_width_mm * 0.85
     band_half = spray_width_mm * 2.0
@@ -433,11 +440,12 @@ def generate_adaptive_grid_route(
 
     # Sample surface depth at every (row i, col j) grid intersection.
     # Precompute the row mask once per H row to avoid O(N*M*V) fully recomputed work.
+    fwd_n     = fwd_verts @ mean_n   # depth projection for all forward-hemisphere verts
     grid_pts = np.empty((n_h, n_v, 3), dtype=float)
     for i, s in enumerate(h_steps):
         in_row    = np.abs(step_proj - s) <= band_half
         row_pass  = pass_proj[in_row]
-        row_n     = (verts[in_row] @ mean_n) if in_row.any() else None
+        row_n     = fwd_n[in_row] if in_row.any() else None
         row_depth = float(row_n.max()) if row_n is not None else global_depth
         for j, p in enumerate(v_steps):
             if row_n is not None:
