@@ -2,9 +2,10 @@
 
 Public API
 ----------
-generate_face_grid_route(...)   Adaptive shadow-projection
-generate_conform_route(...)     Conform: tilted-basis planes + trimesh intersection
-get_face_grid_plane_corners(...)  4 corners of the tilted spray plane for visualisation
+generate_adaptive_grid_route(...)  Adaptive H×V intersection-grid route
+generate_face_grid_route(...)      Adaptive shadow-projection (single direction)
+generate_conform_route(...)        Conform: tilted-basis planes + trimesh intersection
+get_face_grid_plane_corners(...)   4 corners of the tilted spray plane for visualisation
 """
 from __future__ import annotations
 import numpy as np
@@ -368,6 +369,128 @@ def generate_conform_route(
         total_length_mm=total_length,
         spray_normal=mean_n.copy(),
     )
+
+
+def generate_adaptive_grid_route(
+    region: str,
+    face_indices: np.ndarray,
+    mesh: trimesh.Trimesh,
+    up_axis: int,
+    spray_width_mm: float,
+    direction_offset: int = 0,
+    waypoint_spacing_mm: float = 0.0,
+    standoff_mm: float = 0.0,
+    direction: str = 'horizontal',
+) -> tuple['PaintRoute', np.ndarray]:
+    """H×V intersection-grid adaptive route.
+
+    Runs H and V grids internally, samples actual surface depth at every
+    (row, col) intersection, and builds passes as polylines through those
+    waypoints.  Returns (route, grid_pts) where grid_pts shape is (n_h, n_v, 3)
+    — used by the viewer for the curved red grid replacing the flat spray plane.
+    """
+    if region not in _resolve_face_map(up_axis):
+        raise ValueError(f'Unknown region: {region!r}')
+
+    face_axis, face_sign = _resolve_face_map(up_axis)[region]
+    _fwd_mask = mesh.face_normals[face_indices, face_axis] * face_sign > 0.0
+    basis_faces = face_indices[_fwd_mask]
+    if len(basis_faces) == 0:
+        basis_faces = face_indices
+    mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
+    # Always build in H-basis; direction swap handled when emitting passes.
+
+    verts        = mesh.vertices[mesh.faces[basis_faces].ravel()]
+    pass_proj    = verts @ pass_vec
+    step_proj    = verts @ step_vec
+    global_depth = float((verts @ mean_n).max())
+
+    pass_min = float(pass_proj.min())
+    pass_max = float(pass_proj.max())
+    step_min = float(step_proj.min())
+    step_max = float(step_proj.max())
+
+    _step     = spray_width_mm * 0.85
+    band_half = spray_width_mm * 2.0
+
+    def _positions(lo, hi):
+        if hi - lo <= _step:
+            return [(lo + hi) / 2.0]
+        first = lo + _step / 2.0
+        return list(np.arange(first, hi + _step * 0.5, _step))
+
+    h_steps = _positions(step_min, step_max)   # rows  — along step_vec
+    v_steps = _positions(pass_min, pass_max)   # cols  — along pass_vec
+    n_h, n_v = len(h_steps), len(v_steps)
+
+    # Sample surface depth at every (row i, col j) grid intersection.
+    # Precompute the row mask once per H row to avoid O(N*M*V) fully recomputed work.
+    grid_pts = np.empty((n_h, n_v, 3), dtype=float)
+    for i, s in enumerate(h_steps):
+        in_row    = np.abs(step_proj - s) <= band_half
+        row_pass  = pass_proj[in_row]
+        row_n     = (verts[in_row] @ mean_n) if in_row.any() else None
+        for j, p in enumerate(v_steps):
+            if row_n is not None:
+                in_col = np.abs(row_pass - p) <= band_half
+                depth  = float(row_n[in_col].max()) if in_col.any() else global_depth
+            else:
+                depth = global_depth
+            grid_pts[i, j] = (depth + standoff_mm) * mean_n + p * pass_vec + s * step_vec
+
+    # Build toolpath passes for the selected direction.
+    all_passes: list[PaintPass] = []
+    if direction == 'horizontal':
+        for i, s in enumerate(h_steps):
+            is_forward = ((i + direction_offset) % 2 == 0)
+            pts = grid_pts[i].copy()          # (n_v, 3)
+            if not is_forward:
+                pts = pts[::-1].copy()
+            if waypoint_spacing_mm > 0:
+                pts = resample_arc(pts, waypoint_spacing_mm)
+            all_passes.append(PaintPass(
+                id=i, region_id=region, direction=direction,
+                points=pts, is_forward=is_forward, sub_index=0,
+                slice_position=float(s),
+            ))
+    else:  # vertical
+        for j, p in enumerate(v_steps):
+            is_forward = ((j + direction_offset) % 2 == 0)
+            pts = grid_pts[:, j].copy()       # (n_h, 3)
+            if not is_forward:
+                pts = pts[::-1].copy()
+            if waypoint_spacing_mm > 0:
+                pts = resample_arc(pts, waypoint_spacing_mm)
+            all_passes.append(PaintPass(
+                id=j, region_id=region, direction=direction,
+                points=pts, is_forward=is_forward, sub_index=0,
+                slice_position=float(p),
+            ))
+
+    connections: list[Connection] = []
+    for i in range(len(all_passes) - 1):
+        conn_pts = np.array([
+            all_passes[i].points[-1].copy(),
+            all_passes[i + 1].points[0].copy(),
+        ], dtype=float)
+        if waypoint_spacing_mm > 0:
+            conn_pts = resample_arc(conn_pts, waypoint_spacing_mm)
+        connections.append(Connection(
+            id=i, from_pass_id=all_passes[i].id,
+            to_pass_id=all_passes[i + 1].id,
+            points=conn_pts, is_air_move=False,
+        ))
+
+    total_length = sum(
+        float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1)))
+        for p in all_passes if len(p.points) >= 2
+    )
+
+    return PaintRoute(
+        region_id=region, passes=all_passes, connections=connections,
+        unit='mm', spacing_mm=spray_width_mm, total_passes=len(all_passes),
+        total_length_mm=total_length, spray_normal=mean_n.copy(),
+    ), grid_pts
 
 
 def get_face_grid_plane_corners(

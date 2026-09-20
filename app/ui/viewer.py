@@ -24,6 +24,27 @@ def _hex_to_rgb(hex_color: str) -> tuple:
     return tuple(int(c[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
 
+def _render_plane_quad(plotter, corners, color, fill_opacity, line_width):
+    """Add a filled quad + its boundary edges to plotter. Returns (fill_actor, edge_actor) or None."""
+    if corners is None or len(corners) != 4:
+        return None
+    faces = np.array([[4, 0, 1, 2, 3]], dtype=np.int_)
+    quad  = pv.PolyData(corners.astype(float), faces)
+    act_fill = plotter.add_mesh(
+        quad, color=color, opacity=fill_opacity,
+        show_edges=False, lighting=False, reset_camera=False,
+    )
+    edges = quad.extract_feature_edges(
+        boundary_edges=True, non_manifold_edges=False,
+        feature_edges=False, manifold_edges=False,
+    )
+    act_edge = plotter.add_mesh(
+        edges, color=color, line_width=line_width,
+        lighting=False, reset_camera=False,
+    )
+    return act_fill, act_edge
+
+
 class MeshViewer(QWidget):
     """3D viewer: bbox clicking, manual face picking, route display."""
 
@@ -265,27 +286,8 @@ class MeshViewer(QWidget):
                 if old is not None:
                     self.plotter.remove_actor(old)
 
-        def _add_plane(corners, color, fill_opacity, line_width):
-            if corners is None or len(corners) != 4:
-                return None
-            faces = np.array([[4, 0, 1, 2, 3]], dtype=np.int_)
-            quad  = pv.PolyData(corners.astype(float), faces)
-            act_fill = self.plotter.add_mesh(
-                quad, color=color, opacity=fill_opacity,
-                show_edges=False, lighting=False, reset_camera=False,
-            )
-            edges = quad.extract_feature_edges(
-                boundary_edges=True, non_manifold_edges=False,
-                feature_edges=False, manifold_edges=False,
-            )
-            act_edge = self.plotter.add_mesh(
-                edges, color=color, line_width=line_width,
-                lighting=False, reset_camera=False,
-            )
-            return act_fill, act_edge
-
-        pair_ref = _add_plane(ref_corners,      self._FACE_PLANE_COLOR,  0.12, 2.5)
-        pair_std = _add_plane(standoff_corners, self._SPRAY_PLANE_COLOR, 0.22, 2.5)
+        pair_ref = _render_plane_quad(self.plotter, ref_corners,      self._FACE_PLANE_COLOR,  0.12, 2.5)
+        pair_std = _render_plane_quad(self.plotter, standoff_corners, self._SPRAY_PLANE_COLOR, 0.22, 2.5)
 
         if pair_ref:
             self._actors[f'face_grid_ref_fill{suffix}'] = pair_ref[0]
@@ -308,6 +310,47 @@ class MeshViewer(QWidget):
                         lighting=False, reset_camera=False,
                     )
                     self._actors[f'{base_key}{suffix}'] = act
+
+        self.plotter.render()
+
+    def show_adaptive_grid(
+        self,
+        ref_corners: np.ndarray | None,
+        grid_pts: np.ndarray,
+        show_grid: bool = False,
+        clear: bool = True,
+        suffix: str = '',
+    ) -> None:
+        """Adaptive mode: blue ref plane + curved red intersection-grid lines.
+
+        grid_pts shape (n_h, n_v, 3) — H×V intersection waypoints.
+        Red flat plane is replaced by H-direction + V-direction polylines
+        through their sampled 3D depths (visible only when show_grid=True).
+        """
+        if clear:
+            for key in list(k for k in self._actors if k.startswith('face_grid_')):
+                old = self._actors.pop(key, None)
+                if old is not None:
+                    self.plotter.remove_actor(old)
+
+        pair_ref = _render_plane_quad(self.plotter, ref_corners, self._FACE_PLANE_COLOR, 0.12, 2.5)
+        if pair_ref:
+            self._actors[f'face_grid_ref_fill{suffix}'] = pair_ref[0]
+            self._actors[f'face_grid_ref_edge{suffix}'] = pair_ref[1]
+
+        if show_grid and grid_pts is not None and grid_pts.size > 0:
+            n_h, n_v = grid_pts.shape[:2]
+            lines: list[np.ndarray] = []
+            if n_v >= 2:
+                lines += [grid_pts[i] for i in range(n_h)]   # H-direction lines
+            if n_h >= 2:
+                lines += [grid_pts[:, j] for j in range(n_v)]  # V-direction lines
+            if lines:
+                act = self.plotter.add_mesh(
+                    _make_multiline(lines), color=self._SPRAY_PLANE_COLOR,
+                    opacity=0.85, line_width=1.5, lighting=False, reset_camera=False,
+                )
+                self._actors[f'face_grid_adaptive_grid{suffix}'] = act
 
         self.plotter.render()
 

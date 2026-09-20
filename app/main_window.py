@@ -372,6 +372,7 @@ class MainWindow(QMainWindow):
         self._coll_worker:   Optional[QThread] = None
         self._current_colors: dict[str, str]  = self._load_view_settings()
         self._face_grid_planes_cache: tuple | None = None
+        self._adaptive_grid_cache:   tuple | None = None
 
         self._build_ui()
         self._build_menus()
@@ -800,6 +801,7 @@ class MainWindow(QMainWindow):
                     f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
                 return
         self._face_grid_planes_cache = None
+        self._adaptive_grid_cache    = None
         self._viewer.clear_face_grid_planes()
         self._viewer.show_bbox(True)
         self._on_route_ready(routes)
@@ -816,7 +818,7 @@ class MainWindow(QMainWindow):
             self._generate_face_grid_flat(spray_mm)
 
     def _generate_face_grid_flat(self, spray_mm: float) -> None:
-        """Depth-Adaptive: passes confined to the selected region's faces."""
+        """Depth-Adaptive: H×V intersection-grid passes."""
         from app.path import face_grid_generator as _fg_gen
         data     = self._model.data
         mesh     = data.trimesh_mesh
@@ -826,7 +828,7 @@ class MainWindow(QMainWindow):
         standoff = self._ribbon.get_standoff_mm()
 
         routes: list[PaintRoute] = []
-        spray_corners: list[np.ndarray] = []
+        adaptive_list: list[tuple] = []
         ref_corners_first: np.ndarray | None = None
 
         direction = self._ribbon.get_direction()
@@ -835,23 +837,20 @@ class MainWindow(QMainWindow):
             if len(region_faces) == 0:
                 continue
             try:
-                routes.append(_fg_gen.generate_face_grid_route(
+                route, grid_pts = _fg_gen.generate_adaptive_grid_route(
                     region, region_faces, mesh, up,
                     spray_width_mm=spray_mm,
                     direction_offset=offset,
                     waypoint_spacing_mm=wpt_mm,
                     standoff_mm=standoff,
                     direction=direction,
-                ))
-                spray_corners.append(_fg_gen.get_face_grid_plane_corners(
-                    region, region_faces, mesh, up,
-                    standoff_mm=standoff,
-                ))
+                )
+                routes.append(route)
                 if ref_corners_first is None:
                     ref_corners_first = _fg_gen.get_face_grid_plane_corners(
-                        region, region_faces, mesh, up,
-                        standoff_mm=0.0,
+                        region, region_faces, mesh, up, standoff_mm=0.0,
                     )
+                adaptive_list.append((ref_corners_first if len(adaptive_list) == 0 else None, grid_pts))
             except Exception as exc:
                 QMessageBox.critical(self, 'Generation error',
                     f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
@@ -862,17 +861,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
         self._on_route_ready(routes)
-        if spray_corners:
-            ref_list = []
-            for i, sc in enumerate(spray_corners):
-                rc = ref_corners_first if i == 0 else None
-                ref_list.append((rc, sc))
-            self._face_grid_planes_cache = (ref_list, spray_mm * 0.85)
+        if adaptive_list:
+            self._face_grid_planes_cache = None
+            self._adaptive_grid_cache = (adaptive_list, spray_mm)
             show_grid = self._ribbon.is_show_grid()
-            for i, (rc, sc) in enumerate(ref_list):
-                self._viewer.show_face_grid_planes(
-                    rc, sc,
-                    step_spacing=spray_mm,
+            for i, (rc, gp) in enumerate(adaptive_list):
+                self._viewer.show_adaptive_grid(
+                    rc, gp,
                     show_grid=show_grid,
                     clear=(i == 0),
                     suffix=f'_{i}' if i > 0 else '',
@@ -912,6 +907,7 @@ class MainWindow(QMainWindow):
             plane_pairs.append((rc, sc))
 
         self._face_grid_planes_cache = (plane_pairs, spray_mm * 0.85)
+        self._adaptive_grid_cache    = None
         show_grid = self._ribbon.is_show_grid()
         for i, (rc, sc) in enumerate(plane_pairs):
             self._viewer.show_face_grid_planes(
@@ -977,6 +973,7 @@ class MainWindow(QMainWindow):
                              waypoint_spacing_mm=wpt_mm,
                              direction=self._ribbon.get_direction())
         self._face_grid_planes_cache = None
+        self._adaptive_grid_cache    = None
         self._viewer.clear_face_grid_planes()
         self._viewer.show_bbox(True)
         worker.finished.connect(self._on_route_ready)
@@ -1112,6 +1109,7 @@ class MainWindow(QMainWindow):
 
     def _clear_paths(self) -> None:
         self._face_grid_planes_cache = None
+        self._adaptive_grid_cache    = None
         if self._coll_worker:
             try:
                 self._coll_worker.finished.disconnect()
@@ -1133,7 +1131,19 @@ class MainWindow(QMainWindow):
     def _update_grid(self) -> None:
         if self._viewer is None:
             return
-        # Face grid mode: redraw planes/grid from cache
+        # Adaptive mode: redraw curved intersection grid from cache
+        if self._adaptive_grid_cache is not None:
+            adaptive_list, _ = self._adaptive_grid_cache
+            show_grid = self._ribbon.is_show_grid()
+            for i, (rc, gp) in enumerate(adaptive_list):
+                self._viewer.show_adaptive_grid(
+                    rc, gp,
+                    show_grid=show_grid,
+                    clear=(i == 0),
+                    suffix=f'_{i}' if i > 0 else '',
+                )
+            return
+        # Flat/conform mode: redraw planes/grid from cache
         if self._face_grid_planes_cache is not None:
             plane_pairs, spc = self._face_grid_planes_cache
             show_grid = self._ribbon.is_show_grid()
