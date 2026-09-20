@@ -615,6 +615,7 @@ class MeshViewer(QWidget):
                         paint_pass.points, color, arrow_len,
                         f'arr_{ri}_{paint_pass.id}_{paint_pass.sub_index}',
                         line_width=float(self._colors.get('arrow_line_width', '4.0')),
+                        face_normal=route.spray_normal,
                     )
 
             for color, pt_list in buckets.items():
@@ -1008,8 +1009,12 @@ def _add_pass_chevrons(
     cells: list[int] = []
     idx = 0
 
-    # Use world axes for perp so chevrons are always visible regardless of
-    # which face the pass is on (face-normal-based perp collapses on side faces).
+    # Perp vector lies in the face plane: normalize(seg_dir × face_normal).
+    # Fall back to world-axis candidates only when face_normal is unavailable.
+    _fn = np.asarray(face_normal, dtype=float) if face_normal is not None else None
+    _fn_norm = float(np.linalg.norm(_fn)) if _fn is not None else 0.0
+    _fn_unit = _fn / _fn_norm if _fn_norm > 1e-9 else None
+
     _candidates = [
         np.array([0., 0., 1.]),
         np.array([0., 1., 0.]),
@@ -1018,12 +1023,18 @@ def _add_pass_chevrons(
 
     for center, seg_dir in positions:
         perp = np.zeros(3)
-        for ref in _candidates:
-            candidate = np.cross(seg_dir, ref)
+        if _fn_unit is not None:
+            candidate = np.cross(seg_dir, _fn_unit)
             pn = float(np.linalg.norm(candidate))
             if pn > 0.15:
                 perp = candidate / pn
-                break
+        if np.linalg.norm(perp) < 0.5:   # fallback when face_normal is missing/parallel
+            for ref in _candidates:
+                candidate = np.cross(seg_dir, ref)
+                pn = float(np.linalg.norm(candidate))
+                if pn > 0.15:
+                    perp = candidate / pn
+                    break
 
         # Back-left and back-right arms (chevron points forward like ">")
         p1 = center - tick_len * (seg_dir + perp)

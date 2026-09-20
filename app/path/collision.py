@@ -31,6 +31,9 @@ def detect_collisions(
     flagged: dict[int, str] = {}
     near_threshold = standoff_mm * 0.5 if standoff_mm > 0 else 0.0
     max_depth = 0.0
+    # When standoff is 0 paths sit on the surface by design — mesh.contains()
+    # on surface points is a boundary case and produces false positives.
+    skip_hard = (standoff_mm == 0.0)
 
     _CHUNK = 500   # ponytail: VTK ray-cast overflows C++ stack on large arrays; 500 pts is safe
 
@@ -40,12 +43,15 @@ def detect_collisions(
             if len(pts) == 0:
                 continue
 
-            # Chunk to avoid VTK stack overflow on large point arrays
-            inside = np.zeros(len(pts), dtype=bool)
-            for _start in range(0, len(pts), _CHUNK):
-                inside[_start:_start + _CHUNK] = mesh.contains(pts[_start:_start + _CHUNK])
+            if skip_hard:
+                pass  # on-surface paths never trigger hard collision
+            else:
+                # Chunk to avoid VTK stack overflow on large point arrays
+                inside = np.zeros(len(pts), dtype=bool)
+                for _start in range(0, len(pts), _CHUNK):
+                    inside[_start:_start + _CHUNK] = mesh.contains(pts[_start:_start + _CHUNK])
 
-            if inside.any():
+            if not skip_hard and inside.any():
                 in_pts = pts[inside]
                 _d_arr = np.empty(len(in_pts))
                 for _s in range(0, len(in_pts), _CHUNK):
