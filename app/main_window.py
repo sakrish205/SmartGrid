@@ -998,14 +998,15 @@ class MainWindow(QMainWindow):
             from app.path import bbox_generator as _bbox_gen
             routes = [_bbox_gen.merge_routes(routes)]
         self._current_routes  = routes
-        self._collision_ids   = {}
+        from app.path.collision import detect_overlaps
+        self._collision_ids   = detect_overlaps(routes)
 
         # Show paths immediately — collision highlights added after background check
         self._viewer.show_route(
             routes,
             show_arrows=self._ribbon.is_show_arrows(),
             show_waypoints=self._ribbon.is_show_waypoints(),
-            collision_ids={},
+            collision_ids=self._collision_ids,
         )
         self._ribbon.update_route_stats(routes, self._ribbon.current_unit)
         self._ribbon.set_path_exists(bool(routes))
@@ -1060,13 +1061,14 @@ class MainWindow(QMainWindow):
         if self._coll_worker:
             self._coll_worker.deleteLater()
             self._coll_worker = None
-        self._collision_ids = collision_ids
-        if self._current_routes and collision_ids:
+        # Merge: collision/near_miss take priority; keep existing overlap flags
+        self._collision_ids = {**self._collision_ids, **collision_ids}
+        if self._current_routes and self._collision_ids:
             self._viewer.show_route(
                 self._current_routes,
                 show_arrows=self._ribbon.is_show_arrows(),
                 show_waypoints=self._ribbon.is_show_waypoints(),
-                collision_ids=collision_ids,
+                collision_ids=self._collision_ids,
             )
         n_coll = sum(1 for v in collision_ids.values() if v == 'collision')
         n_near = sum(1 for v in collision_ids.values() if v == 'near_miss')

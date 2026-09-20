@@ -60,8 +60,11 @@ def compute_slice_planes(
     plane_normal: np.ndarray = cfg['plane_normal']
     slice_axis: int          = cfg['slice_axis']
     if direction == 'vertical':
-        fwd_axis = (up_axis + 1) % 3
-        slice_axis = (up_axis + 2) % 3 if slice_axis == fwd_axis else fwd_axis
+        # Vertical: swap to the other in-plane axis.
+        # The face normal's dominant axis + the two in-plane axes = {0,1,2}.
+        # Current slice_axis is one in-plane axis; the other is 3 - fn_axis - slice_axis.
+        fn_axis = int(np.argmax(np.abs(mean_face_normal)))
+        slice_axis = 3 - fn_axis - slice_axis
         plane_normal = np.zeros(3, dtype=float)
         plane_normal[slice_axis] = 1.0
 

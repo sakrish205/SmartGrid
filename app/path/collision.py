@@ -65,3 +65,49 @@ def detect_collisions(
                     flagged[p.id] = 'near_miss'
 
     return flagged, max_depth
+
+
+def detect_overlaps(routes: list[PaintRoute]) -> dict[int, str]:
+    """Flag passes from different regions whose points come within spacing_mm/2 of each other.
+
+    Returns {pass_id: 'overlap'}.  Uses a KDTree per region pair — O(N log N).
+    Only meaningful when routes contain passes from more than one region_id.
+    """
+    from scipy.spatial import cKDTree
+
+    # Group passes by region_id (preserved per-pass even in merged routes)
+    regions: dict[str, list] = {}
+    spacing = 50.0
+    for route in routes:
+        if route.spacing_mm > 0:
+            spacing = route.spacing_mm
+        for p in route.passes:
+            if len(p.points) > 0:
+                regions.setdefault(p.region_id, []).append(p)
+
+    region_keys = list(regions.keys())
+    if len(region_keys) < 2:
+        return {}
+
+    threshold = spacing * 0.5
+    flagged: dict[int, str] = {}
+
+    for i in range(len(region_keys)):
+        for j in range(i + 1, len(region_keys)):
+            passes_a = regions[region_keys[i]]
+            passes_b = regions[region_keys[j]]
+
+            pts_b = np.vstack([p.points for p in passes_b])
+            pid_b = np.concatenate([np.full(len(p.points), p.id, dtype=np.int64) for p in passes_b])
+            tree_b = cKDTree(pts_b)
+
+            for pa in passes_a:
+                if pa.id in flagged:
+                    continue
+                dists, idxs = tree_b.query(pa.points, k=1)
+                hit = np.where(dists < threshold)[0]
+                if len(hit):
+                    flagged[pa.id] = 'overlap'
+                    flagged[int(pid_b[idxs[hit[0]]])] = 'overlap'
+
+    return flagged

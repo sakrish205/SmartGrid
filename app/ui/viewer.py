@@ -557,6 +557,8 @@ class MeshViewer(QWidget):
                     color = '#FF1744'
                 elif _cid == 'near_miss':
                     color = '#FF9100'
+                elif _cid == 'overlap':
+                    color = '#FFD700'
                 else:
                     color = fwd_color if paint_pass.is_forward else rev_color
                 buckets.setdefault(color, []).append(paint_pass.points)
