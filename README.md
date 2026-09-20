@@ -477,6 +477,7 @@ Connector (air) moves are always written as rapid/travel — speed control appli
 | **Unit** | mm / cm / m / in / ft |
 | **Spray Width (Pitch)** | Centre-to-centre distance between adjacent passes |
 | **Standoff** | Spray-gun offset from the mesh surface (mm) |
+| **Direction** | H (horizontal passes, vertical step) / V (vertical passes, horizontal step) |
 | **Sweep** | CW / CCW starting direction |
 | **Waypoints** | Enable uniform resampling |
 | **Interval** | Waypoint resampling spacing |
