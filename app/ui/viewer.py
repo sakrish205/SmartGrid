@@ -338,19 +338,30 @@ class MeshViewer(QWidget):
             self._actors[f'face_grid_ref_fill{suffix}'] = pair_ref[0]
             self._actors[f'face_grid_ref_edge{suffix}'] = pair_ref[1]
 
-        if show_grid and grid_pts is not None and grid_pts.size > 0:
-            n_h, n_v = grid_pts.shape[:2]
-            lines: list[np.ndarray] = []
-            if n_v >= 2:
-                lines += [grid_pts[i] for i in range(n_h)]   # H-direction lines
-            if n_h >= 2:
-                lines += [grid_pts[:, j] for j in range(n_v)]  # V-direction lines
-            if lines:
-                act = self.plotter.add_mesh(
-                    _make_multiline(lines), color=self._SPRAY_PLANE_COLOR,
-                    opacity=0.85, line_width=1.5, lighting=False, reset_camera=False,
-                )
-                self._actors[f'face_grid_adaptive_grid{suffix}'] = act
+        if grid_pts is not None and grid_pts.size > 0:
+            # Grid intersection dots — always visible (like edge waypoints).
+            wpt_color = self._colors.get('waypoint', '#FFD700')
+            wpt_size  = float(self._colors.get('waypoint_size', '8.0'))
+            act_wpt = self.plotter.add_mesh(
+                pv.PolyData(grid_pts.reshape(-1, 3).astype(float)),
+                color=wpt_color, point_size=wpt_size,
+                render_points_as_spheres=True, lighting=False, reset_camera=False,
+            )
+            self._actors[f'face_grid_adaptive_wpts{suffix}'] = act_wpt
+
+            if show_grid:
+                n_h, n_v = grid_pts.shape[:2]
+                lines: list[np.ndarray] = []
+                if n_v >= 2:
+                    lines += [grid_pts[i] for i in range(n_h)]   # H-direction lines
+                if n_h >= 2:
+                    lines += [grid_pts[:, j] for j in range(n_v)]  # V-direction lines
+                if lines:
+                    act = self.plotter.add_mesh(
+                        _make_multiline(lines), color=self._SPRAY_PLANE_COLOR,
+                        opacity=0.85, line_width=1.5, lighting=False, reset_camera=False,
+                    )
+                    self._actors[f'face_grid_adaptive_grid{suffix}'] = act
 
         self.plotter.render()
 
