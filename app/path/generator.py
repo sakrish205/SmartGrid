@@ -81,6 +81,7 @@ def generate_route(
     region_face_indices: np.ndarray,
     spray_width_mm: float,
     waypoint_spacing_mm: float = 0.0,   # 0 = keep raw slicer points
+    direction: str = 'horizontal',
 ) -> PaintRoute:
     """Main entry point: given a face selection, return a complete PaintRoute."""
     if len(region_face_indices) == 0:
@@ -92,6 +93,7 @@ def generate_route(
         region_id,
         mesh_data.up_axis,
         spray_width_mm,
+        direction=direction,
     )
 
     all_passes: list[PaintPass] = []

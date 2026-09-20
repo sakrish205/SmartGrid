@@ -91,6 +91,7 @@ def generate_face_grid_route(
     direction_offset: int = 0,
     waypoint_spacing_mm: float = 0.0,
     standoff_mm: float = 0.0,
+    direction: str = 'horizontal',
 ) -> PaintRoute:
     """Return a PaintRoute of surface-tilted parallel passes.
 
@@ -109,6 +110,8 @@ def generate_face_grid_route(
     if len(basis_faces) == 0:
         basis_faces = face_indices
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
+    if direction == 'vertical':
+        pass_vec, step_vec = step_vec, pass_vec
 
     verts = mesh.vertices[mesh.faces[face_indices].ravel()]
     pass_proj = verts @ pass_vec   # 1-D coords along left-right axis
@@ -245,6 +248,7 @@ def generate_conform_route(
     direction_offset: int = 0,
     waypoint_spacing_mm: float = 0.0,
     standoff_mm: float = 0.0,
+    direction: str = 'horizontal',
 ) -> PaintRoute:
     """Conform toolpath: tilted-basis cutting planes + trimesh intersection.
 
@@ -266,6 +270,8 @@ def generate_conform_route(
     if len(basis_faces) == 0:
         basis_faces = face_indices
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
+    if direction == 'vertical':
+        pass_vec, step_vec = step_vec, pass_vec
 
     # Step extent along step_vec from the selected region vertices
     verts = mesh.vertices[mesh.faces[face_indices].ravel()]

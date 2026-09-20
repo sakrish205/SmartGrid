@@ -43,6 +43,7 @@ def compute_slice_planes(
     region_id: str,
     up_axis: int,
     spray_width_mm: float,
+    direction: str = 'horizontal',
 ) -> list[tuple[np.ndarray, np.ndarray, float]]:
     """Return list of (plane_normal, plane_origin, position) tuples.
 
@@ -52,10 +53,17 @@ def compute_slice_planes(
     """
     # Compute mean of |normals| for the selected faces so arbitrary selections
     # can infer the correct slice axis without knowing the region name.
+    if len(region_face_indices) == 0:
+        return []
     mean_face_normal = np.abs(mesh.face_normals[region_face_indices]).mean(axis=0)
     cfg = compute_slice_config(region_id, up_axis, mean_face_normal=mean_face_normal)
     plane_normal: np.ndarray = cfg['plane_normal']
     slice_axis: int          = cfg['slice_axis']
+    if direction == 'vertical':
+        fwd_axis = (up_axis + 1) % 3
+        slice_axis = (up_axis + 2) % 3 if slice_axis == fwd_axis else fwd_axis
+        plane_normal = np.zeros(3, dtype=float)
+        plane_normal[slice_axis] = 1.0
 
     # Region bounding box along slice axis only
     region_verts = mesh.vertices[mesh.faces[region_face_indices].ravel()]

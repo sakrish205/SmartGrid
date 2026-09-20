@@ -565,16 +565,11 @@ class MeshViewer(QWidget):
                     mid_pts_list.append(paint_pass.points[1:-1])
 
                 if show_arrows:
-                    face_normal = _region_face_normal(
-                        route.region_id,
-                        self._mesh_data.up_axis if self._mesh_data else 2,
-                    )
                     _add_pass_chevrons(
                         self.plotter, self._actors,
                         paint_pass.points, color, arrow_len,
                         f'arr_{ri}_{paint_pass.id}_{paint_pass.sub_index}',
                         line_width=float(self._colors.get('arrow_line_width', '4.0')),
-                        face_normal=face_normal,
                     )
 
             for color, pt_list in buckets.items():
@@ -968,11 +963,9 @@ def _add_pass_chevrons(
     cells: list[int] = []
     idx = 0
 
-    # Perpendicular reference: use the face normal so chevron arms stay
-    # IN the face plane and are visible from the correct viewing direction.
-    # Fallback candidates if the face normal is parallel to seg_dir.
+    # Use world axes for perp so chevrons are always visible regardless of
+    # which face the pass is on (face-normal-based perp collapses on side faces).
     _candidates = [
-        face_normal if face_normal is not None else np.array([0., 0., 1.]),
         np.array([0., 0., 1.]),
         np.array([0., 1., 0.]),
         np.array([1., 0., 0.]),

@@ -1,6 +1,18 @@
 """Entry point: creates QApplication, shows MainWindow."""
 from __future__ import annotations
 import sys
+import logging
+import logging.handlers
+import pathlib
+
+
+def _setup_logging() -> None:
+    log_path = pathlib.Path(__file__).parent / 'smartgrid.log'
+    handler = logging.handlers.RotatingFileHandler(
+        log_path, maxBytes=5 * 1024 * 1024, backupCount=2, encoding='utf-8')
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s %(name)s: %(message)s'))
+    logging.basicConfig(level=logging.WARNING, handlers=[handler])
 
 
 _APP_STYLE = (
@@ -38,6 +50,7 @@ _APP_STYLE = (
 
 
 def main() -> None:
+    _setup_logging()
     # QApplication must be created before any PyVista/VTK initialisation
     from PySide6.QtWidgets import QApplication
     from PySide6.QtGui import QIcon

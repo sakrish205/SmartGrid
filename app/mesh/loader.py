@@ -34,8 +34,6 @@ def load_mesh(filepath: str) -> trimesh.Trimesh:
     if not isinstance(raw, trimesh.Trimesh):
         raise ValueError(f"Could not load a single mesh from: {filepath}")
 
-    trimesh.repair.fix_normals(raw)  # internally fixes winding too
-
     if raw.is_empty or len(raw.faces) < 4:
         raise ValueError("Mesh has no usable faces — check the file.")
 

@@ -226,6 +226,7 @@ class _PathWorker(QThread):
         spray_mm: float,
         waypoint_spacing_mm: float = 0.0,
         standoff_mm: float = 0.0,
+        direction: str = 'horizontal',
     ) -> None:
         super().__init__()
         self._mesh_data        = mesh_data
@@ -233,6 +234,7 @@ class _PathWorker(QThread):
         self._spray_mm         = spray_mm
         self._waypoint_spacing = waypoint_spacing_mm
         self._standoff_mm      = standoff_mm
+        self._direction        = direction
 
     def run(self) -> None:
         try:
@@ -246,6 +248,7 @@ class _PathWorker(QThread):
                     region_face_indices=face_indices,
                     spray_width_mm=self._spray_mm,
                     waypoint_spacing_mm=self._waypoint_spacing,
+                    direction=self._direction,
                 )
                 if self._standoff_mm > 0.0:
                     route = _offset_route_by_standoff(route, mesh, self._standoff_mm)
@@ -275,7 +278,9 @@ class _CollisionWorker(QThread):
                 suggested = math.ceil(raw / 5.0) * 5.0
             self.finished.emit((collision_ids, suggested))
         except Exception:
-            # Swallow — collision check is advisory; a crash here must not kill the app
+            import logging, traceback
+            logging.getLogger(__name__).error(
+                'CollisionWorker failed:\n%s', traceback.format_exc())
             self.finished.emit(({}, 0.0))
 
 
@@ -423,7 +428,7 @@ class MainWindow(QMainWindow):
         self._ribbon.view_settings_req.connect(self._open_view_settings)
 
         # Defer heavy imports (trimesh, pyvista, pyvistaqt) to after first paint
-        QTimer.singleShot(150, self._init_viewer)
+        QTimer.singleShot(0, self._init_viewer)
 
     def _init_viewer(self) -> None:
         """Kick off background import worker; main thread stays live throughout."""
@@ -824,6 +829,7 @@ class MainWindow(QMainWindow):
         spray_corners: list[np.ndarray] = []
         ref_corners_first: np.ndarray | None = None
 
+        direction = self._ribbon.get_direction()
         for region in sorted(self._selected_regions):
             region_faces = np.array(self._model.get_region_faces(region), dtype=np.int64)
             if len(region_faces) == 0:
@@ -835,6 +841,7 @@ class MainWindow(QMainWindow):
                     direction_offset=offset,
                     waypoint_spacing_mm=wpt_mm,
                     standoff_mm=standoff,
+                    direction=direction,
                 ))
                 spray_corners.append(_fg_gen.get_face_grid_plane_corners(
                     region, region_faces, mesh, up,
@@ -922,11 +929,12 @@ class MainWindow(QMainWindow):
         class _ConformWorker(QThread):
             finished = Signal(object)
             error    = Signal(str)
-            def __init__(self, pairs, mesh, up, spray_mm, standoff_mm, offset, wpt_mm):
+            def __init__(self, pairs, mesh, up, spray_mm, standoff_mm, offset, wpt_mm, direction):
                 super().__init__()
                 self._pairs, self._mesh = pairs, mesh
                 self._up, self._spray = up, spray_mm
                 self._standoff, self._offset, self._wpt = standoff_mm, offset, wpt_mm
+                self._direction = direction
             def run(self):
                 try:
                     routes = []
@@ -937,6 +945,7 @@ class MainWindow(QMainWindow):
                             direction_offset=self._offset,
                             waypoint_spacing_mm=self._wpt,
                             standoff_mm=self._standoff,
+                            direction=self._direction,
                         )
                         routes.append(r)
                     self.finished.emit(routes)
@@ -944,7 +953,8 @@ class MainWindow(QMainWindow):
                     import traceback as _tb
                     self.error.emit(f'{type(exc).__name__}: {exc}\n{_tb.format_exc()}')
 
-        worker = _ConformWorker(pairs, mesh, up, spray_mm, standoff, offset, wpt_mm)
+        worker = _ConformWorker(pairs, mesh, up, spray_mm, standoff, offset, wpt_mm,
+                                self._ribbon.get_direction())
         worker.finished.connect(self._on_route_ready)
         worker.error.connect(self._on_route_error)
         self._worker = worker
@@ -964,7 +974,8 @@ class MainWindow(QMainWindow):
         self._ribbon.set_generating(True)
         self.statusBar().showMessage('Generating mesh paths...')
         worker = _PathWorker(self._model.data, pairs, spray_mm,
-                             waypoint_spacing_mm=wpt_mm)
+                             waypoint_spacing_mm=wpt_mm,
+                             direction=self._ribbon.get_direction())
         self._face_grid_planes_cache = None
         self._viewer.clear_face_grid_planes()
         self._viewer.show_bbox(True)
@@ -983,6 +994,9 @@ class MainWindow(QMainWindow):
                 pass
             self._worker.deleteLater()
             self._worker = None
+        if len(routes) > 1:
+            from app.path import bbox_generator as _bbox_gen
+            routes = [_bbox_gen.merge_routes(routes)]
         self._current_routes  = routes
         self._collision_ids   = {}
 

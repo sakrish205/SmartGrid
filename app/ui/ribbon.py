@@ -461,8 +461,24 @@ class SmartRibbon(QWidget):
             'Typical values: 80–150 mm for automotive surfaces.')
         pitch_hl.addWidget(self._pitch_spin)
 
+        dir_hl = QHBoxLayout()
+        dir_hl.setSpacing(8)
+        dir_hl.addWidget(_row_label('Direction'))
+        self._dir_h_radio = QRadioButton('H')
+        self._dir_v_radio = QRadioButton('V')
+        self._dir_h_radio.setChecked(True)
+        self._dir_grp = QButtonGroup(self)
+        self._dir_grp.addButton(self._dir_h_radio, 0)
+        self._dir_grp.addButton(self._dir_v_radio, 1)
+        for r in (self._dir_h_radio, self._dir_v_radio):
+            r.setStyleSheet(_RADIO_CSS)
+        dir_hl.addWidget(self._dir_h_radio)
+        dir_hl.addWidget(self._dir_v_radio)
+        dir_hl.addStretch()
+
         vl.addLayout(unit_hl)
         vl.addLayout(pitch_hl)
+        vl.addLayout(dir_hl)
         g.add_layout(vl)
         return g
 
@@ -788,7 +804,7 @@ class SmartRibbon(QWidget):
         return None   # vertical direction not exposed
 
     def get_direction(self) -> str:
-        return 'horizontal'
+        return 'vertical' if self._dir_v_radio.isChecked() else 'horizontal'
 
     def get_path_target(self) -> str:
         if self._bbox_radio.isChecked():

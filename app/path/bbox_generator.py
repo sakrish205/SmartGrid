@@ -31,6 +31,8 @@ def generate_bbox_route(
     position coincide with the mesh bounding box face (the blue wire cage) while the
     pass width/height is still clipped to the selected region's own extents.
     """
+    if spray_width_mm <= 0:
+        raise ValueError(f"spray_width_mm must be > 0, got {spray_width_mm}")
     xmin, xmax, ymin, ymax, zmin, zmax = bounds
     mins = [xmin, ymin, zmin]
     maxs = [xmax, ymax, zmax]
@@ -125,6 +127,103 @@ def generate_bbox_route(
         total_passes=len(all_passes),
         total_length_mm=total_length,
         spray_normal=spray_normal,
+    )
+
+
+# ── Multi-route merge ────────────────────────────────────────────────────────
+
+def merge_routes(routes: list[PaintRoute]) -> PaintRoute:
+    """Merge multiple single-region routes into one continuous path.
+
+    Greedy nearest-neighbour ordering: from the current endpoint, pick the
+    nearest end (start or finish) of remaining routes, flipping traversal
+    direction if entering from the far end.  Air-move Connections bridge the
+    gaps between segments.
+    """
+    if len(routes) <= 1:
+        return routes[0]
+
+    remaining = list(routes)
+    ordered = [remaining.pop(0)]
+    while remaining:
+        last_pt = ordered[-1].passes[-1].points[-1]
+        best_dist, best_idx, best_flip = float('inf'), 0, False
+        for i, r in enumerate(remaining):
+            d0 = float(np.linalg.norm(last_pt - r.passes[0].points[0]))
+            d1 = float(np.linalg.norm(last_pt - r.passes[-1].points[-1]))
+            if d0 < best_dist:
+                best_dist, best_idx, best_flip = d0, i, False
+            if d1 < best_dist:
+                best_dist, best_idx, best_flip = d1, i, True
+        r = remaining.pop(best_idx)
+        ordered.append(_flip_route(r) if best_flip else r)
+
+    all_passes: list[PaintPass] = []
+    all_conns:  list[Connection] = []
+
+    for seg_idx, route in enumerate(ordered):
+        id_map: dict[int, int] = {}
+        for p in route.passes:
+            new_id = len(all_passes)
+            id_map[p.id] = new_id
+            all_passes.append(PaintPass(
+                id=new_id, region_id=p.region_id, direction=p.direction,
+                points=p.points.copy(), is_forward=p.is_forward,
+                sub_index=p.sub_index, slice_position=p.slice_position,
+            ))
+        for c in route.connections:
+            all_conns.append(Connection(
+                id=len(all_conns),
+                from_pass_id=id_map.get(c.from_pass_id, c.from_pass_id),
+                to_pass_id=id_map.get(c.to_pass_id, c.to_pass_id),
+                points=c.points.copy(), is_air_move=c.is_air_move,
+            ))
+        if seg_idx < len(ordered) - 1:
+            all_conns.append(Connection(
+                id=len(all_conns),
+                from_pass_id=len(all_passes) - 1,
+                to_pass_id=len(all_passes),
+                points=np.array([
+                    route.passes[-1].points[-1].copy(),
+                    ordered[seg_idx + 1].passes[0].points[0].copy(),
+                ], dtype=float),
+                is_air_move=True,
+            ))
+
+    return PaintRoute(
+        region_id='merged',
+        passes=all_passes,
+        connections=all_conns,
+        unit=ordered[0].unit,
+        spacing_mm=ordered[0].spacing_mm,
+        total_passes=len(all_passes),
+        total_length_mm=sum(r.total_length_mm for r in ordered),
+        spray_normal=ordered[0].spray_normal,
+    )
+
+
+def _flip_route(route: PaintRoute) -> PaintRoute:
+    """Reverse a route end-to-start for NN stitching."""
+    passes = [
+        PaintPass(
+            id=p.id, region_id=p.region_id, direction=p.direction,
+            points=p.points[::-1].copy(), is_forward=not p.is_forward,
+            sub_index=p.sub_index, slice_position=p.slice_position,
+        )
+        for p in reversed(route.passes)
+    ]
+    conns = [
+        Connection(
+            id=c.id, from_pass_id=c.to_pass_id, to_pass_id=c.from_pass_id,
+            points=c.points[::-1].copy(), is_air_move=c.is_air_move,
+        )
+        for c in reversed(route.connections)
+    ]
+    return PaintRoute(
+        region_id=route.region_id, passes=passes, connections=conns,
+        unit=route.unit, spacing_mm=route.spacing_mm,
+        total_passes=route.total_passes, total_length_mm=route.total_length_mm,
+        spray_normal=route.spray_normal,
     )
 
 
