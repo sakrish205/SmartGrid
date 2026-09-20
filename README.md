@@ -12,8 +12,19 @@ SmartGrid solves the **manufacturing process-planning problem** of generating sy
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green)](https://pypi.org/project/PySide6/)
-[![Version](https://img.shields.io/badge/version-1.3-informational)]()
+[![Version](https://img.shields.io/badge/version-1.4-informational)]()
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+
+---
+
+## Recent Improvements (v1.4)
+
+- **Full surface coverage** — all three surface-following modes (Conform, Mesh Surface, Adaptive) now use a forward-hemisphere face filter (`face_normals · mean_n ≥ 0`) instead of the single-assignment region classifier. Boundary and transition faces that the classifier assigns to an adjacent region are included, eliminating missing coverage at region edges and on top surfaces.
+- **Adaptive grid intersection waypoints** — every H×V grid intersection point is preserved as a mandatory anchor in the exported path. Waypoint resampling operates per-segment (`_resample_anchored`) so intersections are never replaced by evenly-spaced interpolations.
+- **Always-visible grid intersection dots** — the Adaptive Face Grid mode always renders the H×V intersection points as yellow dots in the 3D viewer (independent of the Waypoints toggle), alongside the red curved surface grid.
+- **Background path generation** — all four path modes run in a background `QThread` worker; the UI remains responsive during generation and shows a status-bar progress message.
+- **Correct arrow orientation** — travel-direction chevron marks use `normalize(seg_dir × face_normal)` as the perpendicular, so arrows lie in the face plane and are visible from the spray direction on every face.
+- **Standoff=0 collision fix** — hard collision detection (`mesh.contains`) is skipped when standoff is 0; surface-touching paths no longer produce false red highlights.
 
 ---
 
@@ -213,22 +224,28 @@ Extends Boundary Box by tilting the spray plane to match the actual surface orie
 
 1. The mean outward normal `mean_n` is computed from all forward-facing region faces (faces whose normal has a positive component along the region's face axis). This gives the dominant surface tilt.
 2. An orthonormal basis is built: `pass_vec = normalize(mean_n × up)` gives the left–right sweep direction in the tilted plane; `step_vec = normalize(pass_vec × mean_n)` gives the step direction perpendicular to both.
-3. All region vertices are projected onto this basis: `pass_proj = v · pass_vec`, `step_proj = v · step_vec`, `depth_proj = v · mean_n`.
-4. For each step position, a band of vertices within ±`pitch × 0.65` is collected. The outermost depth in that band (`max(depth_proj)`) becomes the spray plane depth for that row — the pass elevation tracks the actual surface peak.
-5. World-space endpoints are reconstructed: `P = row_depth × mean_n + p_min × pass_vec + step_pos × step_vec`.
-6. Standoff is added along `mean_n` at point construction time.
+3. The extent of the spray region is computed from all forward-hemisphere faces — `fwd_face_ids = where(face_normals @ mean_n >= 0)` — not just the classifier-assigned subset, so boundary and transition faces contribute to the bounding extent.
+4. All forward-hemisphere vertices are projected onto the basis: `pass_proj = v · pass_vec`, `step_proj = v · step_vec`, `depth_proj = v · mean_n`.
+5. For each step position, a band of vertices within ±`pitch × 0.65` is collected. The outermost depth in that band (`max(depth_proj)`) becomes the spray plane depth for that row — the pass elevation tracks the actual surface peak.
+6. World-space endpoints are reconstructed: `P = row_depth × mean_n + p_min × pass_vec + step_pos × step_vec`.
+7. Each pass is a polyline through the H×V grid intersection points `grid_pts[i, j]` sampled directly on the 3D surface. Uniform waypoint resampling uses `_resample_anchored`, which resamples each segment independently so every grid intersection is preserved as a mandatory anchor in the exported path.
+8. Standoff is added along `mean_n` at point construction time.
 
 ```python
-# core: face_grid_generator.py — generate_face_grid_route
+# core: face_grid_generator.py — generate_adaptive_grid_route
 mean_n   = normalize(mesh.face_normals[forward_faces].mean(axis=0))
 pass_vec = normalize(cross(mean_n, up))        # left-right sweep axis
 step_vec = normalize(cross(pass_vec, mean_n))  # step axis
 
+fwd_face_ids = np.where(mesh.face_normals @ mean_n >= 0.0)[0]  # full hemisphere extent
+fwd_verts    = mesh.vertices[mesh.faces[fwd_face_ids].ravel()]
+
 for step_pos in step_positions:
-    band = verts[|step_proj - step_pos| <= pitch * 0.65]
+    band = fwd_verts[|step_proj - step_pos| <= pitch * 0.65]
     row_depth = (band @ mean_n).max() + standoff_mm
-    pt_a = row_depth*mean_n + p_min*pass_vec + step_pos*step_vec
-    pt_b = row_depth*mean_n + p_max*pass_vec + step_pos*step_vec
+    # grid_pts[i, j] = surface depth sample at each (row, col) intersection
+    pass_pts = grid_pts[row_idx]                     # H×V intersection waypoints
+    pass_pts = _resample_anchored(pass_pts, spacing) # resample per-segment, pin intersections
 ```
 
 > **Orthonormal basis projection** — standard linear algebra (cross product basis construction). No single attribution.
@@ -248,7 +265,7 @@ A hybrid of Adaptive and Mesh Surface. Uses Adaptive's tilted mean-normal basis 
 1. Same mean-normal basis as Adaptive: `mean_n`, `pass_vec`, `step_vec` computed from forward-facing region faces.
 2. Step extent is measured along `step_vec` from the selected region's vertices (not a world axis), so step spacing is true arc-length distance on a tilted surface.
 3. Cutting planes are oriented with `plane_normal = step_vec` (perpendicular to the step direction) — this is the key difference from Mesh Surface, which always uses a world-axis normal.
-4. `trimesh.intersections.mesh_plane` intersects the full mesh against each tilted cutting plane. Returned segments are filtered to the classifier-assigned face set only.
+4. `trimesh.intersections.mesh_plane` intersects the full mesh against each tilted cutting plane. Returned segments are filtered using a forward-hemisphere mask — `face_normals[seg_face_ids] @ mean_n >= 0.0` — rather than the classifier-assigned face set. This ensures boundary and transition faces (which the classifier assigns to adjacent regions) are included, giving complete surface coverage at region edges.
 5. Segments are stitched into ordered polylines via a graph-walk on quantised endpoints (tolerance 10⁻⁶ m). Multiple chains per plane level (holes, discontinuities) are handled naturally.
 6. Short corner fragments and misaligned sub-passes are dropped. RDP simplification (ε = 0.3 mm) removes jaggies from triangle discretisation.
 7. Uniform standoff is applied as `pts += standoff_mm × mean_n` — a single vector shift, not a per-point nearest-face snap.
@@ -262,7 +279,9 @@ for plane_idx, step_pos in enumerate(step_positions):
     segments, face_ids = trimesh.intersections.mesh_plane(
         mesh, plane_normal=step_vec,
         plane_origin=step_pos * step_vec, return_faces=True)
-    segments = segments[np.isin(face_ids, face_indices)]  # classifier faces only
+    # Forward-hemisphere filter — includes boundary faces the classifier excludes
+    mask = mesh.face_normals[face_ids] @ mean_n >= 0.0
+    segments = segments[mask]
     chains = _stitch_segments(segments)                   # graph-walk → polylines
     pts = rdp_simplify(chain, eps=0.3)                    # remove micro-jaggies
     pts += standoff_mm * mean_n                           # uniform standoff
@@ -287,7 +306,7 @@ The most geometrically faithful mode. Axis-aligned cutting planes intersect the 
 1. The slice axis is determined by region and up-axis: TOP/BOTTOM use the forward axis; side faces (FRONT/REAR/LEFT/RIGHT) use the up axis. Cutting planes are always axis-aligned (world coordinates).
 2. Plane positions are spaced at `pitch` intervals from the region's own bounding box along the slice axis, extended ±0.001 mm to ensure boundary triangles are caught.
 3. Each `trimesh.intersections.mesh_plane` call returns all segments where the plane cuts the mesh, plus the source face ID of each segment.
-4. A two-stage outward-face filter is applied: first, segments whose source face normal does not point outward for the selected region are dropped (prevents paths appearing on the underside of the mesh). Second, a largest-gap cluster analysis on segment heights drops internal ribs and supports that survived the normal filter.
+4. An outward-face filter is applied via `_outward_sign(region_id, up_axis)`: for regions with a known outward axis (FRONT/REAR/LEFT/RIGHT/TOP/BOTTOM), a face-normal dot-product threshold replaces the classifier membership test — segments whose source face normal does not point outward are dropped. This forward-hemisphere approach includes boundary and transition faces that the classifier assigns to adjacent regions, giving complete coverage. A subsequent largest-gap cluster analysis on segment heights drops any internal ribs or supports that survived the normal filter.
 5. Remaining segments are stitched into ordered polylines by a graph-walk on quantised endpoints. Multiple chains per level represent holes (e.g. sunroof cutouts) — they become separate sub-passes, not connected across the gap.
 6. Sub-passes shorter than `max(pitch × 10%, 5 mm)` or whose direction deviates more than 65° from the primary pass are dropped as corner fragments.
 7. RDP simplification (ε = 0.3 mm) removes discretisation jaggies. Up to 6 sub-passes per slice level are kept.
@@ -299,10 +318,11 @@ for plane_idx, step_pos in enumerate(step_positions):
     segments, face_ids = trimesh.intersections.mesh_plane(
         mesh, plane_normal=step_normal,
         plane_origin=origin, return_faces=True)
-    # Stage 1: region filter
-    segments = segments[np.isin(face_ids, region_faces)]
-    # Stage 2: outward-face filter + largest-gap cluster (slicer.py)
+    # Primary filter: forward-hemisphere normal check (slicer.py — slice_region)
+    # _outward_sign() returns the axis and sign for the selected region;
+    # segments are kept when face_normals[face_id, axis] * sign > -0.25
     segments = slice_region(mesh, region_faces, plane_normal, origin, region_id, up_axis)
+    # slice_region also runs a largest-gap cluster check to drop internal ribs
     polylines = stitcher.stitch(segments)              # graph-walk → chains
     polylines = _filter_polylines(polylines, pitch)    # drop corner fragments
     pts = rdp_simplify(pts, eps=0.3)                   # RDP ε = 0.3 mm
@@ -376,7 +396,7 @@ After every path generation SmartGrid automatically checks all spray passes agai
 | **Hard collision** | Pass waypoint is inside the mesh volume | Red `#FF1744` |
 | **Near miss** | Closest surface distance < standoff × 0.5 | Orange `#FF9100` |
 
-The near-miss check is skipped when standoff is 0 (paths on the surface by design).
+The hard collision check (`mesh.contains`) is also skipped when standoff is 0 — surface-touching paths produce false positives from the ray-cast boundary case. The near-miss check is skipped for the same reason.
 
 **Algorithm — two-tier check per pass:**
 
@@ -493,9 +513,10 @@ The integrated PyVista/VTK viewer provides visual validation of:
 - Pitch grid
 - Spray passes — forward (blue) / reverse (orange)
 - Hard collisions (red) / near-misses (orange)
-- Travel direction (chevron tick marks)
+- Travel direction (chevron tick marks, perpendicular to the face normal for correct orientation on all faces)
 - Connectors (pink)
 - Waypoints (gold dots)
+- Adaptive Face Grid: red curved surface grid and always-visible yellow grid intersection dots (mandatory export anchors)
 - Mesh rendering and display settings
 
 This allows the generated trajectory to be inspected before export.
