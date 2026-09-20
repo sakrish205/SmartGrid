@@ -455,6 +455,17 @@ def generate_adaptive_grid_route(
                 depth = global_depth
             grid_pts[i, j] = (depth + standoff_mm) * mean_n + p * pass_vec + s * step_vec
 
+    def _resample_anchored(pts: np.ndarray, spacing: float) -> np.ndarray:
+        """Resample between each consecutive pair of grid intersection points,
+        preserving the intersections themselves as mandatory waypoints."""
+        if spacing <= 0 or len(pts) < 2:
+            return pts
+        out = [pts[0]]
+        for k in range(len(pts) - 1):
+            seg = resample_arc(pts[k:k + 2], spacing)
+            out.extend(seg[1:])   # seg[0] already in out; seg[-1] = pts[k+1]
+        return np.array(out, dtype=float)
+
     # Build toolpath passes for the selected direction.
     all_passes: list[PaintPass] = []
     if direction == 'horizontal':
@@ -463,8 +474,7 @@ def generate_adaptive_grid_route(
             pts = grid_pts[i].copy()          # (n_v, 3)
             if not is_forward:
                 pts = pts[::-1].copy()
-            if waypoint_spacing_mm > 0:
-                pts = resample_arc(pts, waypoint_spacing_mm)
+            pts = _resample_anchored(pts, waypoint_spacing_mm)
             all_passes.append(PaintPass(
                 id=i, region_id=region, direction=direction,
                 points=pts, is_forward=is_forward, sub_index=0,
@@ -476,8 +486,7 @@ def generate_adaptive_grid_route(
             pts = grid_pts[:, j].copy()       # (n_h, 3)
             if not is_forward:
                 pts = pts[::-1].copy()
-            if waypoint_spacing_mm > 0:
-                pts = resample_arc(pts, waypoint_spacing_mm)
+            pts = _resample_anchored(pts, waypoint_spacing_mm)
             all_passes.append(PaintPass(
                 id=j, region_id=region, direction=direction,
                 points=pts, is_forward=is_forward, sub_index=0,
