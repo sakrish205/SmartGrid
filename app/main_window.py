@@ -818,7 +818,7 @@ class MainWindow(QMainWindow):
             self._generate_face_grid_flat(spray_mm)
 
     def _generate_face_grid_flat(self, spray_mm: float) -> None:
-        """Depth-Adaptive: H×V intersection-grid passes."""
+        """Depth-Adaptive: H×V intersection-grid passes (background worker)."""
         from app.path import face_grid_generator as _fg_gen
         data     = self._model.data
         mesh     = data.trimesh_mesh
@@ -826,52 +826,76 @@ class MainWindow(QMainWindow):
         offset   = 1 if self._ribbon.is_direction_flipped() else 0
         wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
         standoff = self._ribbon.get_standoff_mm()
-
-        routes: list[PaintRoute] = []
-        adaptive_list: list[tuple] = []
-        ref_corners_first: np.ndarray | None = None
-
         direction = self._ribbon.get_direction()
-        for region in sorted(self._selected_regions):
-            region_faces = np.array(self._model.get_region_faces(region), dtype=np.int64)
-            if len(region_faces) == 0:
-                continue
-            try:
-                route, grid_pts = _fg_gen.generate_adaptive_grid_route(
-                    region, region_faces, mesh, up,
-                    spray_width_mm=spray_mm,
-                    direction_offset=offset,
-                    waypoint_spacing_mm=wpt_mm,
-                    standoff_mm=standoff,
-                    direction=direction,
-                )
-                routes.append(route)
-                if ref_corners_first is None:
-                    ref_corners_first = _fg_gen.get_face_grid_plane_corners(
-                        region, region_faces, mesh, up, standoff_mm=0.0,
-                    )
-                adaptive_list.append((ref_corners_first if len(adaptive_list) == 0 else None, grid_pts))
-            except Exception as exc:
-                QMessageBox.critical(self, 'Generation error',
-                    f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
-                return
 
-        self._viewer.show_bbox(False)
-        if not routes:
+        pairs = []
+        for region in sorted(self._selected_regions):
+            faces = np.array(self._model.get_region_faces(region), dtype=np.int64)
+            if len(faces) > 0:
+                pairs.append((region, faces))
+
+        if not pairs:
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
-        self._on_route_ready(routes)
-        if adaptive_list:
+
+        class _AdaptiveWorker(QThread):
+            finished = Signal(object)   # list of (route, grid_pts, ref_corners)
+            error    = Signal(str)
+            def __init__(self, pairs, mesh, up, spray_mm, offset, wpt_mm, standoff, direction):
+                super().__init__()
+                self._pairs, self._mesh = pairs, mesh
+                self._up, self._spray = up, spray_mm
+                self._offset, self._wpt = offset, wpt_mm
+                self._standoff, self._direction = standoff, direction
+            def run(self):
+                try:
+                    results = []
+                    ref_corners_first = None
+                    for region, faces in self._pairs:
+                        route, grid_pts = _fg_gen.generate_adaptive_grid_route(
+                            region, faces, self._mesh, self._up,
+                            spray_width_mm=self._spray,
+                            direction_offset=self._offset,
+                            waypoint_spacing_mm=self._wpt,
+                            standoff_mm=self._standoff,
+                            direction=self._direction,
+                        )
+                        if ref_corners_first is None:
+                            ref_corners_first = _fg_gen.get_face_grid_plane_corners(
+                                region, faces, self._mesh, self._up, standoff_mm=0.0,
+                            )
+                        rc = ref_corners_first if not results else None
+                        results.append((route, grid_pts, rc))
+                    self.finished.emit(results)
+                except Exception as exc:
+                    import traceback as _tb
+                    self.error.emit(f'{type(exc).__name__}: {exc}\n{_tb.format_exc()}')
+
+        def _on_adaptive_done(results):
+            self._viewer.show_bbox(False)
+            routes   = [r for r, _, _ in results]
+            adaptive = [(rc, gp) for _, gp, rc in results]
+            self._on_route_ready(routes)
             self._face_grid_planes_cache = None
-            self._adaptive_grid_cache = (adaptive_list, spray_mm)
+            self._adaptive_grid_cache    = (adaptive, spray_mm)
             show_grid = self._ribbon.is_show_grid()
-            for i, (rc, gp) in enumerate(adaptive_list):
+            for i, (rc, gp) in enumerate(adaptive):
                 self._viewer.show_adaptive_grid(
                     rc, gp,
                     show_grid=show_grid,
                     clear=(i == 0),
                     suffix=f'_{i}' if i > 0 else '',
                 )
+            self._ribbon.set_generating(False)
+
+        worker = _AdaptiveWorker(pairs, mesh, up, spray_mm, offset, wpt_mm, standoff, direction)
+        worker.finished.connect(_on_adaptive_done)
+        worker.error.connect(self._on_route_error)
+        self._viewer.show_bbox(False)
+        self._ribbon.set_generating(True)
+        self.statusBar().showMessage('Generating adaptive paths…')
+        self._worker = worker
+        worker.start()
 
     def _generate_face_grid_mesh(self, spray_mm: float) -> None:
         """Conform: tilted-basis cutting planes + trimesh intersection + uniform standoff."""
