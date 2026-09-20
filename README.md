@@ -339,6 +339,33 @@ for plane_idx, step_pos in enumerate(step_positions):
 
 ---
 
+## Direction Modes
+
+The **Direction** control (H / V / Both) sets the sweep orientation for all path modes:
+
+| Setting | Pass direction | Step direction |
+|---|---|---|
+| **H** (horizontal) | Left–right along the pass axis | Up–down along the step axis |
+| **V** (vertical) | Up–down along the step axis | Left–right along the pass axis |
+| **Both** | Generates a full H pass set followed by a full V pass set in a single Generate run |
+
+**Both** mode produces cross-hatched coverage — useful for surfaces requiring uniform film thickness in two directions. The H and V route sets are independent routes in the export, each with their own passes and connectors.
+
+---
+
+## Face Grid Reference Planes
+
+When either Face Grid mode (Adaptive or Conform) is active, the 3D viewer shows two semi-transparent reference quads:
+
+| Quad | Colour | Position |
+|---|---|---|
+| **Face Plane** | Blue | Outermost surface extent at zero standoff |
+| **Spray Plane** | Red | Face Plane offset outward by the configured standoff |
+
+These let you verify the standoff and spray-plane orientation against the mesh before generating passes.
+
+---
+
 ## Boustrophedon Toolpath
 
 The spray passes alternate direction to create a continuous lawnmower-style trajectory:
@@ -389,14 +416,17 @@ Default standoff is `0`.
 
 After every path generation SmartGrid automatically checks all spray passes against the loaded mesh and flags any passes that would cause interference.
 
-**Two severity levels:**
+**Three severity levels:**
 
 | Level | Condition | Viewer colour |
 |---|---|---|
 | **Hard collision** | Pass waypoint is inside the mesh volume | Red `#FF1744` |
 | **Near miss** | Closest surface distance < standoff × 0.5 | Orange `#FF9100` |
+| **Overlap** | Passes from different regions within pitch × 0.5 of each other | Gold `#FFD700` |
 
 The hard collision check (`mesh.contains`) is also skipped when standoff is 0 — surface-touching paths produce false positives from the ray-cast boundary case. The near-miss check is skipped for the same reason.
+
+The collision check (hard + near-miss) is skipped entirely for Face Grid — Adaptive and Face Grid — Conform modes: standoff is baked into the path at generation time, so there is no floating plane to intersect the mesh.
 
 **Algorithm — two-tier check per pass:**
 
@@ -419,7 +449,7 @@ for route in routes:
                 flagged[p.id] = 'near_miss'
 ```
 
-Flagged passes are highlighted in the 3D viewer immediately after generation. The status bar reports the count:
+Flagged passes are highlighted in the 3D viewer immediately after generation. The status bar reports the count and a **suggested standoff** — the deepest penetration depth rounded up to the nearest 5 mm — so there is a concrete corrected value to enter:
 
 ```
 Path generation complete — 12 passes, 11 connections.  ⚠ 1 collision(s), 2 near-miss(es) — shown red/orange  |  Suggested standoff: 25 mm
@@ -528,15 +558,15 @@ This allows the generated trajectory to be inspected before export.
 
 ### JSON
 
-Structured toolpath containing:
+Structured toolpath (schema version `2.0`) containing:
 
-- Metadata and summary (source file, mode, regions, speed, standoff, generated-at timestamp)
-- Routes and regions
-- Spray passes with direction flag
-- Pass lengths
-- 3D waypoints
-- Connections / transit moves
-- Air-move information
+- **Metadata** — source file, software version, up-axis, mode, regions, speed, standoff, ISO-8601 `generated_at` timestamp
+- **`olp_convention` block** — machine-readable tool-frame mapping: Z = −spray_normal (into surface), X = pass travel direction, Y = cross(Z, X); includes quick-reference import paths for RoboDK / Visual Components / DELMIA
+- **Routes and regions** — one route per selected region
+- **Spray passes** — each with `is_forward` flag, arc `length_mm`, `slice_position`, and `sub_index` (for multi-chain levels with holes)
+- **3D waypoints** with outward surface normals
+- **Connections / transit moves**
+- **`execution_sequence` array** — ordered list of `{type, id, Trigger}` giving the exact robot program playback order
 
 ### CSV
 
@@ -559,11 +589,13 @@ One row per trajectory point:
 
 Four robot-OLP formats are exported via **Export OLP**:
 
+All OLP formats start with a `#` comment header: format name, generation timestamp, source file, path mode, and active regions.
+
 #### RoboDK
 7-column CSV (no header row): `X,Y,Z,NX,NY,NZ,speed_mmpm` — spray passes only. Drag-drop into RoboDK via *Utilities › Import Curve*. `NX/NY/NZ` = outward surface normal (RoboDK uses it as the curve approach direction).
 
 #### Visual Components
-CSV with header `seq_id,X,Y,Z,NX,NY,NZ,Trigger,speed_mmpm`. Spray passes have `Trigger=ON` with normals and speed; connector moves have `Trigger=OFF` with blank normals and blank speed.
+CSV with header `seq_id,X,Y,Z,NX,NY,NZ,Trigger,speed_mmpm`. Spray passes have `Trigger=ON` with normals and speed; connector moves are interleaved with `Trigger=OFF`, blank normals, and blank speed — preserving the full execution sequence in one file.
 
 #### DELMIA APT
 APT text file. Spray passes use `GOTO/X,Y,Z,I,J,K` where `I,J,K` = tool Z axis = `-spray_normal` (points into the surface). Connector moves use `RAPID/X,Y,Z`. `FEDRAT/value,MMPM` is written only when speed changes (auto mode) or once per pass (custom mode); spray gun written as `SPINDL/ON` and `SPINDL/OFF`.
