@@ -106,8 +106,8 @@ _LARGE_BTN_CSS = (
 _TOGGLE_CSS = (
     'QPushButton{'
     '  background:#ffffff;border:1px solid #c0c0c0;border-radius:0px;'
-    '  padding:2px 5px;font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;'
-    '  min-width:36px;min-height:20px;'
+    '  padding:2px 6px;font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;'
+    '  min-height:20px;'
     '}'
     'QPushButton:hover{background:#e5e5e5;border-color:#888;}'
     'QPushButton:checked{background:#0078d4;border-color:#005a9e;color:#ffffff;}'
@@ -372,6 +372,7 @@ class SmartRibbon(QWidget):
     def _build_file(self) -> _Group:
         g = _Group('File')
         self._open_btn = _large_btn('Open', _make_icon('open', 20))
+        self._open_btn.setFixedWidth(46)   # ~25% narrower than default large btn
         g.add(self._open_btn)
         return g
 
@@ -388,10 +389,7 @@ class SmartRibbon(QWidget):
         row1.setSpacing(2)
         row1.setContentsMargins(0, 0, 0, 0)
         for region in _REGIONS:
-            short = {'BOTTOM': 'BOT', 'FRONT': 'FRT', 'REAR': 'REAR',
-                     'LEFT': 'LEFT', 'RIGHT': 'RIGHT'}.get(region, region)
-            btn = _toggle_btn(short)
-            btn.setToolTip(region)
+            btn = _toggle_btn(region)
             self._region_btns[region] = btn
             row1.addWidget(btn)
 
@@ -577,10 +575,10 @@ class SmartRibbon(QWidget):
     # ── Sweep ─────────────────────────────────────────────────────────────
     def _build_sweep(self) -> _Group:
         g = _Group('Sweep')
-        g.setMinimumWidth(84)
+        g.setMinimumWidth(62)
         vl = QVBoxLayout()
         vl.setSpacing(2)
-        vl.setContentsMargins(4, 0, 4, 0)
+        vl.setContentsMargins(2, 0, 2, 0)
         self._cw_radio  = QRadioButton('↺ CW')
         self._ccw_radio = QRadioButton('↻ CCW')
         self._cw_radio.setChecked(True)
@@ -619,7 +617,7 @@ class SmartRibbon(QWidget):
         self._wpt_interval_spin.setSingleStep(5.0)
         self._wpt_interval_spin.setValue(20.0)
         self._wpt_interval_spin.setSuffix('  mm')
-        self._wpt_interval_spin.setMinimumWidth(80)
+        self._wpt_interval_spin.setMinimumWidth(90)
         self._wpt_interval_spin.setMaximumWidth(110)
         self._wpt_interval_spin.setStyleSheet(_SPIN_CSS)
         self._wpt_interval_spin.setToolTip(
@@ -701,9 +699,12 @@ class SmartRibbon(QWidget):
     # ── Export ────────────────────────────────────────────────────────────
     def _build_export(self) -> _Group:
         g = _Group('Export')
-        self._exp_json_btn = _large_btn('Export\nJSON', _make_icon('export', 20))
-        self._exp_csv_btn  = _large_btn('Export\nCSV',  _make_icon('export', 20))
-        self._exp_olp_btn  = _large_btn('Export\nOLP',  _make_icon('export', 20))
+        self._exp_json_btn = _small_btn('Export\nJSON', _make_icon('export', 16))
+        self._exp_csv_btn  = _small_btn('Export\nCSV',  _make_icon('export', 16))
+        self._exp_olp_btn  = _small_btn('Export\nOLP',  _make_icon('export', 16))
+        for b in (self._exp_json_btn, self._exp_csv_btn, self._exp_olp_btn):
+            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            b.setFixedWidth(46)
         g.add(self._exp_json_btn)
         g.add(self._exp_csv_btn)
         g.add(self._exp_olp_btn)
@@ -774,8 +775,10 @@ class SmartRibbon(QWidget):
         factor_old = UNIT_TO_MM.get(self._current_unit, 1.0)
         factor_new = UNIT_TO_MM.get(new_unit, 1.0)
 
+        ratio = factor_old / factor_new
         self._pitch_spin.blockSignals(True)
-        self._pitch_spin.setValue(self._pitch_spin.value() * factor_old / factor_new)
+        self._pitch_spin.setRange(0.1 * ratio, 100_000.0 * ratio)
+        self._pitch_spin.setValue(self._pitch_spin.value() * ratio)
         self._pitch_spin.setSuffix(f'  {new_unit}')
         self._pitch_spin.blockSignals(False)
 

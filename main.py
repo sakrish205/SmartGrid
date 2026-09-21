@@ -57,7 +57,7 @@ def main() -> None:
     import pathlib
     app = QApplication(sys.argv)
     app.setApplicationName("SmartGrid")
-    app.setApplicationVersion("1.3")
+    app.setApplicationVersion("1.5")
     app.setStyleSheet(_APP_STYLE)
     _icon = pathlib.Path(__file__).parent / 'app' / 'ui' / 'icons' / 'icon.png'
     if _icon.exists():

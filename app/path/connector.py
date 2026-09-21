@@ -48,11 +48,10 @@ def connect_passes(
             continue
 
         if dist_to_end < dist_to_start:
-            nxt_points = nxt.points[::-1].copy()
-        else:
-            nxt_points = nxt.points
+            nxt.points = nxt.points[::-1].copy()
+            nxt.is_forward = not nxt.is_forward
 
-        start_pt = nxt_points[0]
+        start_pt = nxt.points[0]
         pts = np.array([end_pt, start_pt], dtype=float)
         if waypoint_spacing_mm > 0.0:
             pts = resample_arc(pts, waypoint_spacing_mm)

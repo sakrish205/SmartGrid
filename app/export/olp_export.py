@@ -49,9 +49,8 @@ def export_robodk(
     Passes only (Trigger ON).  No header row — RoboDK rejects files with one.
     NX/NY/NZ = outward surface normal; RoboDK uses it as the curve approach direction.
     """
-    fixed = params.paint_speed_mmpm if params else 1000.0
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        f.write(_meta_header('RoboDK', params))
+        # No header — RoboDK Import Curve rejects non-numeric lines; always 6-col
         writer = csv.writer(f)
         for route in routes:
             sn = route.spray_normal
@@ -59,14 +58,12 @@ def export_robodk(
             ny = round(float(sn[1]), 6)
             nz = round(float(sn[2]), 6)
             for p in route.passes:
-                speeds = _pass_speeds(p, speeds_map, fixed)
-                for i, pt in enumerate(p.points):
+                for pt in p.points:
                     writer.writerow([
                         round(float(pt[0]), 4),
                         round(float(pt[1]), 4),
                         round(float(pt[2]), 4),
                         nx, ny, nz,
-                        round(float(speeds[i]), 1),
                     ])
 
 
@@ -84,7 +81,6 @@ def export_vc(
     _FIELDS = ['seq_id', 'X', 'Y', 'Z', 'NX', 'NY', 'NZ', 'Trigger', 'speed_mmpm']
     fixed = params.paint_speed_mmpm if params else 1000.0
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        f.write(_meta_header('VisualComponents', params))
         writer = csv.DictWriter(f, fieldnames=_FIELDS)
         writer.writeheader()
         seq = 0

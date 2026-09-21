@@ -661,7 +661,7 @@ class MeshViewer(QWidget):
                 self._actors[f'conn_{ri}'] = actor
 
             conn_wpt_segs = [c.points for c in route.connections
-                             if len(c.points) > 2]
+                             if show_waypoints and len(c.points) > 2]
             if conn_wpt_segs:
                 actor = self.plotter.add_mesh(
                     pv.PolyData(np.vstack(conn_wpt_segs)),
@@ -940,6 +940,8 @@ def _make_plane_grid(
 
 def _make_multiline(pt_arrays: list[np.ndarray]) -> pv.PolyData:
     """Pack multiple disconnected polylines into one PolyData (one GPU upload)."""
+    if not pt_arrays:
+        return pv.PolyData()
     all_pts = np.vstack(pt_arrays)
     cells: list[int] = []
     offset = 0

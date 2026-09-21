@@ -87,11 +87,16 @@ def _compute_surface_basis(
     pass_vec = np.cross(mean_n, up_vec)
     pv_len = np.linalg.norm(pass_vec)
     if pv_len < 1e-9:
-        # Normal is nearly parallel to up — use forward axis instead
+        # Normal is nearly parallel to up — try forward axis
         fwd_vec = np.zeros(3, dtype=float)
         fwd_vec[(up_axis + 1) % 3] = 1.0
         pass_vec = np.cross(mean_n, fwd_vec)
         pv_len = np.linalg.norm(pass_vec)
+        if pv_len < 1e-9:
+            # Completely degenerate — use lateral axis as final fallback
+            pass_vec = np.zeros(3, dtype=float)
+            pass_vec[(up_axis + 2) % 3] = 1.0
+            pv_len = 1.0
     pass_vec = pass_vec / pv_len
 
     # step_vec: perpendicular to both normal and pass_vec (the step direction)
@@ -341,7 +346,7 @@ def generate_conform_route(
             all_passes.append(PaintPass(
                 id=pass_id,
                 region_id=region,
-                direction='horizontal',
+                direction=direction,
                 points=pts,
                 is_forward=is_forward,
                 sub_index=sub_idx,

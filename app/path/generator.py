@@ -138,7 +138,7 @@ def generate_route(
             all_passes.append(PaintPass(
                 id=pass_id,
                 region_id=region_id,
-                direction='horizontal',
+                direction=direction,
                 points=pts,
                 is_forward=is_forward,
                 sub_index=sub_idx,

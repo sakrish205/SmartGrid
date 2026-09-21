@@ -15,10 +15,10 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QDialog,
     QDialogButtonBox, QRadioButton, QButtonGroup,
     QLabel, QScrollArea, QFrame,
-    QComboBox, QDoubleSpinBox,
+    QComboBox, QDoubleSpinBox, QTextBrowser,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QEvent, QTimer
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
+from PySide6.QtCore import Qt, QThread, Signal, QEvent, QTimer, QUrl
+from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QDesktopServices
 
 # Heavy imports (trimesh, pyvista, pyvistaqt) are deferred to first use
 # so the window appears before the 2-3 s cold-start load completes.
@@ -381,7 +381,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle('SmartGrid  —  3D Surface Grid & Pitch Mapper')
-        self.resize(1400, 860)
+        self.resize(1600, 860)
         self.setAcceptDrops(True)
         self.setStyleSheet(
             'QMainWindow{background:#e8e8e8;}'
@@ -401,6 +401,7 @@ class MainWindow(QMainWindow):
         self._worker:        Optional[QThread] = None
         self._load_worker:   Optional[QThread] = None
         self._coll_worker:   Optional[QThread] = None
+        self._zombie_workers: list = []  # coll workers dropped while still running
         self._current_colors: dict[str, str]  = self._load_view_settings()
         self._face_grid_planes_cache: tuple | None = None
         self._adaptive_grid_cache:   tuple | None = None
@@ -420,16 +421,14 @@ class MainWindow(QMainWindow):
         vl.setContentsMargins(0, 0, 0, 0)
         vl.setSpacing(0)
 
-        # Ribbon wrapped in a horizontal scroll area so it never clips on small windows
         from app.ui.ribbon import RIBBON_H
         self._ribbon = SmartRibbon()
         ribbon_scroll = QScrollArea()
         ribbon_scroll.setWidget(self._ribbon)
-        ribbon_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        ribbon_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         ribbon_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        ribbon_scroll.setWidgetResizable(False)
-        sb_h = ribbon_scroll.horizontalScrollBar().sizeHint().height()
-        ribbon_scroll.setFixedHeight(RIBBON_H + 4 + sb_h)
+        ribbon_scroll.setWidgetResizable(True)
+        ribbon_scroll.setFixedHeight(RIBBON_H + 4)
         ribbon_scroll.setFrameShape(QFrame.Shape.NoFrame)
         ribbon_scroll.setStyleSheet('QScrollArea{background:transparent;border:none;}')
         vl.addWidget(ribbon_scroll)
@@ -472,7 +471,9 @@ class MainWindow(QMainWindow):
         """Main-thread only: imports already warm — only QtInteractor blocks (~1-2 s)."""
         from app.ui.viewer import MeshViewer    # instant — already in sys.modules
         from models.mesh_model import MeshModel # instant — already in sys.modules
-        self._model = MeshModel()
+        # Only create a blank model if no file was loaded while viewer was initialising
+        if self._model is None:
+            self._model = MeshModel()
         self._viewer = MeshViewer()             # QtInteractor OpenGL init — main thread required
 
         # Replace placeholder with the real viewer
@@ -491,7 +492,11 @@ class MainWindow(QMainWindow):
         # Apply persisted view colours to the now-ready viewer
         self._on_colors_changed(self._current_colors)
 
-        self.statusBar().showMessage('Ready — open an STL or OBJ file to begin.')
+        if self._model.data is not None:
+            # File was loaded before the viewer finished initialising — apply it now
+            self._apply_loaded_model()
+        else:
+            self.statusBar().showMessage('Ready — open an STL or OBJ file to begin.')
 
     def _build_menus(self) -> None:
         mb = self.menuBar()
@@ -531,6 +536,14 @@ class MainWindow(QMainWindow):
         export_menu.addAction('Export JSON...', self._export_json)
         export_menu.addAction('Export CSV...',  self._export_csv)
         export_menu.addAction('Export OLP...',  self._export_olp)
+
+        help_menu = mb.addMenu('Help')
+        help_menu.addAction('How to Use SmartGrid...', self._show_help)
+        help_menu.addSeparator()
+        help_menu.addAction('GitHub Repository',
+            lambda: QDesktopServices.openUrl(QUrl('https://github.com/sakrish205/SmartGrid')))
+        help_menu.addSeparator()
+        help_menu.addAction('About SmartGrid...', self._show_about)
 
     # ------------------------------------------------------------------
     # View helpers
@@ -650,7 +663,7 @@ class MainWindow(QMainWindow):
                 break
 
     def _load(self, filepath: str) -> None:
-        if self._load_worker:
+        if self._load_worker or self._worker:
             return
         dlg = _UpAxisDialog(filepath, self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -677,10 +690,14 @@ class MainWindow(QMainWindow):
             self._load_worker.deleteLater()
             self._load_worker = None
         self._model = model
-        n_faces = len(model.data.trimesh_mesh.faces)
-
         if self._viewer is None:
-            return
+            return  # viewer still initialising; _create_viewer will call _apply_loaded_model
+        self._apply_loaded_model()
+
+    def _apply_loaded_model(self) -> None:
+        """Apply self._model to the viewer and ribbon. Both must be ready."""
+        model = self._model
+        n_faces = len(model.data.trimesh_mesh.faces)
         self._viewer.load_mesh(model.data)
         self._viewer.enable_bbox_clicking(self._on_bbox_region_clicked)
 
@@ -817,16 +834,17 @@ class MainWindow(QMainWindow):
         routes: list[PaintRoute] = []
         for region in sorted(self._selected_regions):
             try:
+                standoff = self._ribbon.get_standoff_mm()
                 if direction in ('horizontal', 'both'):
                     routes.append(_bbox_gen.generate_bbox_route(
                         region, bounds, spray_mm, up,
                         direction='horizontal', direction_offset=offset,
-                        waypoint_spacing_mm=wpt_mm))
+                        waypoint_spacing_mm=wpt_mm, standoff_mm=standoff))
                 if direction in ('vertical', 'both'):
                     routes.append(_bbox_gen.generate_bbox_route(
                         region, bounds, v_mm, up,
                         direction='vertical', direction_offset=offset,
-                        waypoint_spacing_mm=wpt_mm))
+                        waypoint_spacing_mm=wpt_mm, standoff_mm=standoff))
             except Exception as exc:
                 QMessageBox.critical(self, 'Generation error',
                     f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
@@ -1009,6 +1027,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('Generating mesh paths...')
         worker = _PathWorker(self._model.data, pairs, spray_mm,
                              waypoint_spacing_mm=wpt_mm,
+                             standoff_mm=self._ribbon.get_standoff_mm(),
                              direction=self._ribbon.get_direction())
         self._face_grid_planes_cache = None
         self._adaptive_grid_cache    = None
@@ -1084,7 +1103,7 @@ class MainWindow(QMainWindow):
                     self._coll_worker.finished.disconnect()
                 except RuntimeError:
                     pass
-                # Don't deleteLater — thread may still be running; drop ref and let Qt clean up
+                self._zombie_workers.append(self._coll_worker)  # keep alive until thread finishes
                 self._coll_worker = None
             self._coll_worker = _CollisionWorker(
                 routes, self._model.data.trimesh_mesh, self._ribbon.get_standoff_mm())
@@ -1092,6 +1111,7 @@ class MainWindow(QMainWindow):
             self._coll_worker.start()
 
     def _on_collision_ready(self, result) -> None:
+        self._zombie_workers = [w for w in self._zombie_workers if w.isRunning()]
         collision_ids, suggested = result
         if self._coll_worker:
             self._coll_worker.deleteLater()
@@ -1141,7 +1161,8 @@ class MainWindow(QMainWindow):
                 self._coll_worker.finished.disconnect()
             except RuntimeError:
                 pass
-            self._coll_worker = None  # don't deleteLater — may still be running
+            self._zombie_workers.append(self._coll_worker)
+            self._coll_worker = None
         QMessageBox.critical(self, 'Generation error', message)
         self.statusBar().showMessage('Generation failed.')
 
@@ -1153,7 +1174,8 @@ class MainWindow(QMainWindow):
                 self._coll_worker.finished.disconnect()
             except RuntimeError:
                 pass
-            self._coll_worker = None  # don't deleteLater — may still be running
+            self._zombie_workers.append(self._coll_worker)
+            self._coll_worker = None
         if self._viewer is None:
             return
         self._viewer.clear_route()
@@ -1207,6 +1229,107 @@ class MainWindow(QMainWindow):
         up   = self._model.data.up_axis
         for region in self._selected_regions:
             self._viewer.show_bbox_grid(region, bounds, up, h_mm, v_mm)
+
+    # ------------------------------------------------------------------
+    # Help / About
+    # ------------------------------------------------------------------
+
+    def _show_help(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle('How to Use SmartGrid')
+        dlg.setMinimumSize(560, 480)
+        vl = QVBoxLayout(dlg)
+        vl.setContentsMargins(16, 16, 16, 12)
+
+        tb = QTextBrowser()
+        tb.setOpenExternalLinks(True)
+        tb.setStyleSheet('font-family:"Segoe UI",Arial;font-size:12px;')
+        tb.setHtml('''
+<h2 style="margin-top:0">SmartGrid — Quick Start</h2>
+
+<h3>1 · Open a mesh</h3>
+<p>Drag an <b>STL / OBJ / STEP</b> file onto the window, or use
+<b>File › Open STL / OBJ / STEP…</b> (Ctrl+O).<br>
+When prompted, pick the axis that points <em>up</em> in your file (Z is the
+most common default).</p>
+
+<h3>2 · Select a region</h3>
+<p>After loading, a transparent bounding-box cage appears around the mesh.
+<b>Click any face of the cage</b> to select that surface region
+(Top, Bottom, Front, Rear, Left, Right). You can also toggle regions using the
+checkboxes in the ribbon. Multiple regions may be selected simultaneously.</p>
+
+<h3>3 · Choose a path mode</h3>
+<ul>
+  <li><b>Boundary Box</b> – flat parallel passes projected from the bounding box.
+      Fast, useful for roughly flat surfaces.</li>
+  <li><b>Adaptive</b> – a single H×V grid fitted to the actual surface geometry.
+      Best for curved or multi-face selections.</li>
+  <li><b>Conform</b> – tilted cutting planes follow the surface normal; paths
+      hug the mesh. Use with a standoff distance.</li>
+  <li><b>Mesh Surface</b> – axis-aligned slices through the mesh. Good for
+      organic shapes with complex topology.</li>
+</ul>
+
+<h3>4 · Tune parameters</h3>
+<p>Adjust <b>Spray Width</b>, <b>Standoff</b>, <b>Waypoint Spacing</b>,
+<b>Direction</b> (H / V / Both), and <b>Sweep</b> direction in the ribbon.
+Press <b>Generate</b> (Ctrl+G / F5) to compute the toolpath.</p>
+
+<h3>5 · Inspect the result</h3>
+<p><b>Blue</b> passes = forward; <b>Green</b> passes = reverse;
+<b>Red</b> = collision with mesh; <b>Orange</b> = near-miss.<br>
+Toggle <b>Show Grid</b>, <b>Arrows</b>, and <b>Waypoints</b> in the ribbon for
+additional visual feedback.</p>
+
+<h3>6 · Export</h3>
+<p>Use the <b>Export</b> menu (or ribbon buttons) to save the toolpath as
+<b>JSON</b>, <b>CSV</b>, or one of the supported OLP formats
+(RoboDK, Visual Components, DELMIA APT, G-code).</p>
+
+<hr>
+<p style="color:#555;font-size:11px">
+For updates and full documentation visit the
+<a href="https://github.com/sakrish205/SmartGrid">GitHub repository</a>.
+</p>
+''')
+        vl.addWidget(tb)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btns.rejected.connect(dlg.reject)
+        btns.accepted.connect(dlg.accept)
+        # Close button maps to rejected; wire accepted too for safety
+        btns.button(QDialogButtonBox.StandardButton.Close).clicked.connect(dlg.accept)
+        vl.addWidget(btns)
+        dlg.exec()
+
+    def _show_about(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle('About SmartGrid')
+        dlg.setFixedWidth(400)
+        vl = QVBoxLayout(dlg)
+        vl.setContentsMargins(20, 20, 20, 16)
+        vl.setSpacing(8)
+
+        tb = QTextBrowser()
+        tb.setOpenExternalLinks(True)
+        tb.setFrameShape(QFrame.Shape.NoFrame)
+        tb.setStyleSheet('font-family:"Segoe UI",Arial;font-size:12px;background:transparent;')
+        tb.setHtml('''
+<h2 style="margin:0 0 4px 0">SmartGrid  <span style="font-weight:normal;font-size:13px;color:#555">v1.5</span></h2>
+<p style="margin:0 0 12px 0;color:#555">3D Surface Grid &amp; Pitch Mapper</p>
+<p>Robotic spray-paint toolpath planner for STL, OBJ and STEP meshes.<br>
+Supports Boundary Box, Adaptive, Conform and Mesh Surface path modes
+with JSON / CSV / OLP export.</p>
+<p><a href="https://github.com/sakrish205/SmartGrid">github.com/sakrish205/SmartGrid</a></p>
+''')
+        tb.setMaximumHeight(160)
+        vl.addWidget(tb)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btns.button(QDialogButtonBox.StandardButton.Close).clicked.connect(dlg.accept)
+        vl.addWidget(btns)
+        dlg.exec()
 
     # ------------------------------------------------------------------
     # Export

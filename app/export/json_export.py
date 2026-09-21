@@ -142,8 +142,8 @@ def _pass_to_dict(p, spray_normal: list) -> dict:
         "is_forward":     p.is_forward,
         "length_mm":      round(length, 3),
         "surface_normal": spray_normal,
-        "start":          pts[0],
-        "end":            pts[-1],
+        "start":          pts[0] if pts else [],
+        "end":            pts[-1] if pts else [],
         "tcp_waypoints":  pts,
     }
 

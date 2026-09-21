@@ -140,7 +140,9 @@ def merge_routes(routes: list[PaintRoute]) -> PaintRoute:
     direction if entering from the far end.  Air-move Connections bridge the
     gaps between segments.
     """
-    if len(routes) <= 1:
+    if not routes:
+        raise ValueError("merge_routes called with empty routes list")
+    if len(routes) == 1:
         return routes[0]
 
     remaining = list(routes)
