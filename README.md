@@ -12,12 +12,20 @@ SmartGrid solves the **manufacturing process-planning problem** of generating sy
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green)](https://pypi.org/project/PySide6/)
-[![Version](https://img.shields.io/badge/version-1.4-informational)]()
+[![Version](https://img.shields.io/badge/version-1.5-informational)]()
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
 ---
 
-## Recent Improvements (v1.4)
+## Recent Improvements (v1.5)
+
+- **Multi-face unified paths** — selecting multiple regions now generates one continuous path across all selected faces. Mesh Surface combines side regions (FRONT/REAR/LEFT/RIGHT) into one group and top/bottom into another; Conform and Adaptive combine all selected regions into one unified grid and path — no seams, no boundary gaps.
+- **Conform pass ordering** — TSP-lite nearest-neighbour ordering applied within each slice level eliminates chaotic connection lines when multiple chains appear at the same height.
+- **Mesh Surface multi-region coverage** — combined regions use a hemisphere filter (`face_normals · mean_n ≥ −0.25`) in the slicer instead of strict face-membership filtering, ensuring boundary and transition faces are included across the full surface extent.
+- **Adaptive unified grid** — two or more selected regions are combined into one bounding box; a single H×V grid spanning all faces is generated and one path is produced, with the mean surface normal driving the grid orientation.
+- **Clean path colours** — overlap-flagged passes (previously gold) now render in the standard forward/backward colours; only true mesh collisions remain red.
+
+## Previous Improvements (v1.4)
 
 - **Full surface coverage** — all three surface-following modes (Conform, Mesh Surface, Adaptive) now use a forward-hemisphere face filter (`face_normals · mean_n ≥ 0`) instead of the single-assignment region classifier. Boundary and transition faces that the classifier assigns to an adjacent region are included, eliminating missing coverage at region edges and on top surfaces.
 - **Adaptive grid intersection waypoints** — every H×V grid intersection point is preserved as a mandatory anchor in the exported path. Waypoint resampling operates per-segment (`_resample_anchored`) so intersections are never replaced by evenly-spaced interpolations.
