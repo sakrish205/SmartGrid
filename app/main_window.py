@@ -30,6 +30,37 @@ from app.export.olp_export import export_robodk, export_vc, export_delmia_apt, e
 from app.ui.view_settings_dialog import ViewSettingsDialog, DEFAULTS as _COLOR_DEFAULTS
 
 
+_SIDE_REGIONS = frozenset({'FRONT', 'REAR', 'LEFT', 'RIGHT'})
+_TB_REGIONS   = frozenset({'TOP', 'BOTTOM'})
+
+
+def _group_for_mesh(selected_regions, model):
+    """Combine side regions into one group and top/bottom into another."""
+    groups = []
+    for bucket in (_SIDE_REGIONS, _TB_REGIONS):
+        members = sorted(selected_regions & bucket)
+        if not members:
+            continue
+        arrays = [np.asarray(model.get_region_faces(r), dtype=np.int64) for r in members]
+        arrays = [a for a in arrays if len(a) > 0]
+        if not arrays:
+            continue
+        name = '+'.join(members) if len(members) > 1 else members[0]
+        groups.append((name, np.unique(np.concatenate(arrays))))
+    return groups
+
+
+def _group_for_face_grid(selected_regions, model):
+    """Combine all selected regions into a single group."""
+    members = sorted(selected_regions)
+    arrays = [np.asarray(model.get_region_faces(r), dtype=np.int64) for r in members]
+    arrays = [a for a in arrays if len(a) > 0]
+    if not arrays:
+        return []
+    name = '+'.join(members) if len(members) > 1 else members[0]
+    return [(name, np.unique(np.concatenate(arrays)))]
+
+
 def _detect_unit(max_extent: float) -> str:
     if max_extent > 100:
         return 'mm'
@@ -828,12 +859,7 @@ class MainWindow(QMainWindow):
         standoff = self._ribbon.get_standoff_mm()
         direction = self._ribbon.get_direction()
 
-        pairs = []
-        for region in sorted(self._selected_regions):
-            faces = np.array(self._model.get_region_faces(region), dtype=np.int64)
-            if len(faces) > 0:
-                pairs.append((region, faces))
-
+        pairs = _group_for_face_grid(self._selected_regions, self._model)
         if not pairs:
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
@@ -907,12 +933,7 @@ class MainWindow(QMainWindow):
         offset   = 1 if self._ribbon.is_direction_flipped() else 0
         wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
 
-        pairs = []
-        for region in sorted(self._selected_regions):
-            faces = self._model.get_region_faces(region)
-            if len(faces) > 0:
-                pairs.append((region, faces))
-
+        pairs = _group_for_face_grid(self._selected_regions, self._model)
         if not pairs:
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
@@ -981,11 +1002,7 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _generate_mesh(self, spray_mm: float) -> None:
-        pairs = []
-        for region_id in sorted(self._selected_regions):
-            faces = self._model.get_region_faces(region_id)
-            if len(faces) > 0:
-                pairs.append((region_id, faces))
+        pairs = _group_for_mesh(self._selected_regions, self._model)
         if not pairs:
             QMessageBox.warning(self, 'No selection',
                 'Select bounding box regions first.')

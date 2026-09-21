@@ -34,6 +34,28 @@ def _resolve_face_map(up_axis: int) -> dict[str, tuple[int, int]]:
     }
 
 
+def _get_basis_faces(region: str, face_indices: np.ndarray,
+                     mesh, up_axis: int) -> np.ndarray:
+    """Return forward-facing subset of face_indices for basis computation.
+
+    Falls back to hemisphere filter for combined region names (e.g. 'FRONT+LEFT').
+    """
+    face_map = _resolve_face_map(up_axis)
+    if region in face_map:
+        face_axis, face_sign = face_map[region]
+        mask = mesh.face_normals[face_indices, face_axis] * face_sign > 0.0
+        result = face_indices[mask]
+        return result if len(result) > 0 else face_indices
+    # Combined region — hemisphere filter from mean normal
+    mean_n = mesh.face_normals[face_indices].mean(axis=0)
+    n = np.linalg.norm(mean_n)
+    if n > 1e-9:
+        mask = mesh.face_normals[face_indices] @ (mean_n / n) >= 0.0
+        result = face_indices[mask]
+        return result if mask.any() else face_indices
+    return face_indices
+
+
 
 # ---------------------------------------------------------------------------
 # Surface-tilt basis
@@ -101,15 +123,7 @@ def generate_face_grid_route(
     shadow-projects the outermost vertex depth along mean_normal so paths sit
     on the actual tilted surface.  Standoff lifts paths outward from there.
     """
-    if region not in _resolve_face_map(up_axis):
-        raise ValueError(f'Unknown region: {region!r}')
-
-    face_axis, face_sign = _resolve_face_map(up_axis)[region]
-    # Restrict basis_faces to the selected region's forward-facing faces.
-    _fwd_mask = mesh.face_normals[face_indices, face_axis] * face_sign > 0.0
-    basis_faces = face_indices[_fwd_mask]
-    if len(basis_faces) == 0:
-        basis_faces = face_indices
+    basis_faces = _get_basis_faces(region, face_indices, mesh, up_axis)
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
     if direction == 'vertical':
         pass_vec, step_vec = step_vec, pass_vec
@@ -256,14 +270,7 @@ def generate_conform_route(
     if len(face_indices) == 0:
         raise ValueError(f"Conform: region '{region}' has no faces.")
 
-    face_axis, face_sign = _resolve_face_map(up_axis)[region]
-    # Restrict basis_faces to the selected region's forward-facing faces only.
-    # Using the whole mesh contaminates mean_n on complex meshes (other regions'
-    # upward faces dilute the surface normal of the selected region).
-    _fwd_mask = mesh.face_normals[face_indices, face_axis] * face_sign > 0.0
-    basis_faces = face_indices[_fwd_mask]
-    if len(basis_faces) == 0:
-        basis_faces = face_indices
+    basis_faces = _get_basis_faces(region, face_indices, mesh, up_axis)
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
     if direction == 'vertical':
         pass_vec, step_vec = step_vec, pass_vec
@@ -393,14 +400,7 @@ def generate_adaptive_grid_route(
     waypoints.  Returns (route, grid_pts) where grid_pts shape is (n_h, n_v, 3)
     — used by the viewer for the curved red grid replacing the flat spray plane.
     """
-    if region not in _resolve_face_map(up_axis):
-        raise ValueError(f'Unknown region: {region!r}')
-
-    face_axis, face_sign = _resolve_face_map(up_axis)[region]
-    _fwd_mask = mesh.face_normals[face_indices, face_axis] * face_sign > 0.0
-    basis_faces = face_indices[_fwd_mask]
-    if len(basis_faces) == 0:
-        basis_faces = face_indices
+    basis_faces = _get_basis_faces(region, face_indices, mesh, up_axis)
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
     # Always build in H-basis; direction swap handled when emitting passes.
 
@@ -533,11 +533,7 @@ def get_face_grid_plane_corners(
     Depth is the outermost vertex projected along mean_normal, then lifted by
     standoff_mm.  Extent comes from face_indices vertices.
     """
-    face_axis, face_sign = _resolve_face_map(up_axis)[region]
-    _fwd_mask = mesh.face_normals[face_indices, face_axis] * face_sign > 0.0
-    basis_faces = face_indices[_fwd_mask]
-    if len(basis_faces) == 0:
-        basis_faces = face_indices
+    basis_faces = _get_basis_faces(region, face_indices, mesh, up_axis)
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
 
     verts     = mesh.vertices[mesh.faces[basis_faces].ravel()]
