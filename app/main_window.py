@@ -902,35 +902,30 @@ class MainWindow(QMainWindow):
                         self.finished.emit([(raw[0], all_grid_pts, ref_corners_first)] if raw else [])
                         return
 
-                    # Merge all passes from all routes, sort by slice_position
+                    # Merge all passes sorted by world-space height (up_axis centroid).
+                    # slice_position is per-region step_vec space — not comparable across regions.
                     all_passes = []
                     for route in raw:
                         all_passes.extend(route.passes)
 
-                    # TSP-lite: sort by slice_position, nearest-neighbour within level
-                    lmap = defaultdict(list)
-                    for p in all_passes:
-                        lmap[round(p.slice_position, 3)].append(p)
-                    sorted_passes = []
-                    for pos in sorted(lmap.keys()):
-                        grp = lmap[pos]
-                        if len(grp) > 1:
-                            cur = sorted_passes[-1].points[-1] if sorted_passes else grp[0].points[0]
-                            rem = list(grp)
-                            while rem:
-                                i = min(range(len(rem)), key=lambda i: min(
-                                    np.linalg.norm(rem[i].points[0] - cur),
-                                    np.linalg.norm(rem[i].points[-1] - cur),
-                                ))
-                                p = rem.pop(i)
-                                if np.linalg.norm(p.points[-1] - cur) < np.linalg.norm(p.points[0] - cur):
-                                    p = PaintPass(id=p.id, region_id=p.region_id, direction=p.direction,
-                                                  points=p.points[::-1].copy(), is_forward=not p.is_forward,
-                                                  sub_index=p.sub_index, slice_position=p.slice_position)
-                                sorted_passes.append(p)
-                                cur = p.points[-1]
-                        else:
-                            sorted_passes.extend(grp)
+                    up = self._up
+                    all_passes.sort(key=lambda p: float(p.points[:, up].mean()))
+
+                    # Greedy nearest-neighbour reorder to minimise travel between passes
+                    sorted_passes = [all_passes[0]]
+                    rem = list(all_passes[1:])
+                    while rem:
+                        cur = sorted_passes[-1].points[-1]
+                        i = min(range(len(rem)), key=lambda i: min(
+                            np.linalg.norm(rem[i].points[0] - cur),
+                            np.linalg.norm(rem[i].points[-1] - cur),
+                        ))
+                        p = rem.pop(i)
+                        if np.linalg.norm(p.points[-1] - cur) < np.linalg.norm(p.points[0] - cur):
+                            p = PaintPass(id=p.id, region_id=p.region_id, direction=p.direction,
+                                          points=p.points[::-1].copy(), is_forward=not p.is_forward,
+                                          sub_index=p.sub_index, slice_position=p.slice_position)
+                        sorted_passes.append(p)
 
                     # Re-number passes and rebuild connections
                     sorted_passes = [
@@ -961,7 +956,7 @@ class MainWindow(QMainWindow):
                         total_length_mm=sum(r.total_length_mm for r in raw),
                         spray_normal=mean_n / n if n > 1e-9 else mean_n,
                     )
-                    self.finished.emit([(merged, all_grid_pts, ref_corners_first)])
+                    self.finished.emit([(merged, [all_grid_pts[0]], ref_corners_first)])
                 except Exception as exc:
                     import traceback as _tb
                     self.error.emit(f'{type(exc).__name__}: {exc}\n{_tb.format_exc()}')
