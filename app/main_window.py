@@ -899,9 +899,7 @@ class MainWindow(QMainWindow):
                         all_grid_pts.append(grid_pts)
 
                     if len(raw) <= 1:
-                        rc = ref_corners_first
-                        gp = all_grid_pts[0] if all_grid_pts else None
-                        self.finished.emit([(raw[0], gp, rc)] if raw else [])
+                        self.finished.emit([(raw[0], all_grid_pts, ref_corners_first)] if raw else [])
                         return
 
                     # Merge all passes from all routes, sort by slice_position
@@ -963,28 +961,33 @@ class MainWindow(QMainWindow):
                         total_length_mm=sum(r.total_length_mm for r in raw),
                         spray_normal=mean_n / n if n > 1e-9 else mean_n,
                     )
-                    # Combined grid pts: stack all; use first ref_corners
-                    combined_gp = np.concatenate(all_grid_pts, axis=0) if all_grid_pts else all_grid_pts[0]
-                    self.finished.emit([(merged, combined_gp, ref_corners_first)])
+                    self.finished.emit([(merged, all_grid_pts, ref_corners_first)])
                 except Exception as exc:
                     import traceback as _tb
                     self.error.emit(f'{type(exc).__name__}: {exc}\n{_tb.format_exc()}')
 
         def _on_adaptive_done(results):
             self._viewer.show_bbox(False)
-            routes   = [r for r, _, _ in results]
-            adaptive = [(rc, gp) for _, gp, rc in results]
+            # results is list of (route, gp_or_list, rc)
+            routes = [r for r, _, _ in results]
             self._on_route_ready(routes)
             self._face_grid_planes_cache = None
-            self._adaptive_grid_cache    = (adaptive, spray_mm)
             show_grid = self._ribbon.is_show_grid()
-            for i, (rc, gp) in enumerate(adaptive):
-                self._viewer.show_adaptive_grid(
-                    rc, gp,
-                    show_grid=show_grid,
-                    clear=(i == 0),
-                    suffix=f'_{i}' if i > 0 else '',
-                )
+            adaptive = []
+            display_idx = 0
+            for route, gp_data, rc in results:
+                gp_list = gp_data if isinstance(gp_data, list) else [gp_data]
+                for j, gp in enumerate(gp_list):
+                    rc_show = rc if display_idx == 0 else None
+                    self._viewer.show_adaptive_grid(
+                        rc_show, gp,
+                        show_grid=show_grid,
+                        clear=(display_idx == 0),
+                        suffix=f'_{display_idx}' if display_idx > 0 else '',
+                    )
+                    adaptive.append((rc_show, gp))
+                    display_idx += 1
+            self._adaptive_grid_cache = (adaptive, spray_mm)
             self._ribbon.set_generating(False)
 
         worker = _AdaptiveWorker(pairs, mesh, up, spray_mm, offset, wpt_mm, standoff, direction)
