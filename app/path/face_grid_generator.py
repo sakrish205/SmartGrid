@@ -349,6 +349,33 @@ def generate_conform_route(
             ))
             pass_id += 1
 
+    # TSP-lite: sort by slice position, greedy nearest-neighbour within each level
+    from collections import defaultdict
+    _lmap: dict[float, list] = defaultdict(list)
+    for _p in all_passes:
+        _lmap[round(_p.slice_position, 4)].append(_p)
+    _sorted: list[PaintPass] = []
+    for _pos in sorted(_lmap.keys()):
+        _grp = _lmap[_pos]
+        if len(_grp) > 1:
+            _cur = _sorted[-1].points[-1] if _sorted else _grp[0].points[0]
+            _rem = list(_grp)
+            while _rem:
+                _i = min(range(len(_rem)), key=lambda i: min(
+                    np.linalg.norm(_rem[i].points[0] - _cur),
+                    np.linalg.norm(_rem[i].points[-1] - _cur),
+                ))
+                _p = _rem.pop(_i)
+                if np.linalg.norm(_p.points[-1] - _cur) < np.linalg.norm(_p.points[0] - _cur):
+                    _p = PaintPass(id=_p.id, region_id=_p.region_id, direction=_p.direction,
+                                   points=_p.points[::-1].copy(), is_forward=not _p.is_forward,
+                                   sub_index=_p.sub_index, slice_position=_p.slice_position)
+                _sorted.append(_p)
+                _cur = _p.points[-1]
+        else:
+            _sorted.extend(_grp)
+    all_passes = _sorted
+
     connections: list[Connection] = []
     for i in range(len(all_passes) - 1):
         conn_pts = np.array([
