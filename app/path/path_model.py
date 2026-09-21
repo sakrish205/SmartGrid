@@ -12,7 +12,7 @@ UNIT_TO_MM: dict[str, float] = {
 }
 
 
-_SOFTWARE = 'SmartGrid 1.4'
+_SOFTWARE = 'SmartGrid 1.3'
 
 
 @dataclass
