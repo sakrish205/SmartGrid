@@ -877,8 +877,11 @@ class MainWindow(QMainWindow):
                 self._standoff, self._direction = standoff, direction
             def run(self):
                 try:
-                    results = []
+                    from collections import defaultdict
+                    from app.path.path_model import PaintPass, Connection, PaintRoute
+                    raw = []
                     ref_corners_first = None
+                    all_grid_pts = []
                     for region, faces in self._pairs:
                         route, grid_pts = _fg_gen.generate_adaptive_grid_route(
                             region, faces, self._mesh, self._up,
@@ -892,9 +895,77 @@ class MainWindow(QMainWindow):
                             ref_corners_first = _fg_gen.get_face_grid_plane_corners(
                                 region, faces, self._mesh, self._up, standoff_mm=0.0,
                             )
-                        rc = ref_corners_first if not results else None
-                        results.append((route, grid_pts, rc))
-                    self.finished.emit(results)
+                        raw.append(route)
+                        all_grid_pts.append(grid_pts)
+
+                    if len(raw) <= 1:
+                        rc = ref_corners_first
+                        gp = all_grid_pts[0] if all_grid_pts else None
+                        self.finished.emit([(raw[0], gp, rc)] if raw else [])
+                        return
+
+                    # Merge all passes from all routes, sort by slice_position
+                    all_passes = []
+                    for route in raw:
+                        all_passes.extend(route.passes)
+
+                    # TSP-lite: sort by slice_position, nearest-neighbour within level
+                    lmap = defaultdict(list)
+                    for p in all_passes:
+                        lmap[round(p.slice_position, 3)].append(p)
+                    sorted_passes = []
+                    for pos in sorted(lmap.keys()):
+                        grp = lmap[pos]
+                        if len(grp) > 1:
+                            cur = sorted_passes[-1].points[-1] if sorted_passes else grp[0].points[0]
+                            rem = list(grp)
+                            while rem:
+                                i = min(range(len(rem)), key=lambda i: min(
+                                    np.linalg.norm(rem[i].points[0] - cur),
+                                    np.linalg.norm(rem[i].points[-1] - cur),
+                                ))
+                                p = rem.pop(i)
+                                if np.linalg.norm(p.points[-1] - cur) < np.linalg.norm(p.points[0] - cur):
+                                    p = PaintPass(id=p.id, region_id=p.region_id, direction=p.direction,
+                                                  points=p.points[::-1].copy(), is_forward=not p.is_forward,
+                                                  sub_index=p.sub_index, slice_position=p.slice_position)
+                                sorted_passes.append(p)
+                                cur = p.points[-1]
+                        else:
+                            sorted_passes.extend(grp)
+
+                    # Re-number passes and rebuild connections
+                    sorted_passes = [
+                        PaintPass(id=idx, region_id=p.region_id, direction=p.direction,
+                                  points=p.points, is_forward=p.is_forward,
+                                  sub_index=p.sub_index, slice_position=p.slice_position)
+                        for idx, p in enumerate(sorted_passes)
+                    ]
+                    conns = []
+                    for i in range(len(sorted_passes) - 1):
+                        conn_pts = np.array([sorted_passes[i].points[-1].copy(),
+                                             sorted_passes[i+1].points[0].copy()], dtype=float)
+                        if self._wpt > 0:
+                            from app.path.resampler import resample_arc
+                            conn_pts = resample_arc(conn_pts, self._wpt)
+                        conns.append(Connection(id=i, from_pass_id=i, to_pass_id=i+1,
+                                                points=conn_pts, is_air_move=False))
+
+                    mean_n = np.mean([r.spray_normal for r in raw], axis=0)
+                    n = np.linalg.norm(mean_n)
+                    merged = PaintRoute(
+                        region_id='+'.join(r.region_id for r in raw),
+                        passes=sorted_passes,
+                        connections=conns,
+                        unit='mm',
+                        spacing_mm=raw[0].spacing_mm,
+                        total_passes=len(sorted_passes),
+                        total_length_mm=sum(r.total_length_mm for r in raw),
+                        spray_normal=mean_n / n if n > 1e-9 else mean_n,
+                    )
+                    # Combined grid pts: stack all; use first ref_corners
+                    combined_gp = np.concatenate(all_grid_pts, axis=0) if all_grid_pts else all_grid_pts[0]
+                    self.finished.emit([(merged, combined_gp, ref_corners_first)])
                 except Exception as exc:
                     import traceback as _tb
                     self.error.emit(f'{type(exc).__name__}: {exc}\n{_tb.format_exc()}')
