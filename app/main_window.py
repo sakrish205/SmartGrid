@@ -859,7 +859,9 @@ class MainWindow(QMainWindow):
         standoff = self._ribbon.get_standoff_mm()
         direction = self._ribbon.get_direction()
 
-        pairs = _group_for_face_grid(self._selected_regions, self._model)
+        pairs = [(r, np.asarray(self._model.get_region_faces(r), dtype=np.int64))
+                 for r in sorted(self._selected_regions)
+                 if len(self._model.get_region_faces(r)) > 0]
         if not pairs:
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
