@@ -12,7 +12,7 @@ from app.path import stitcher as _stitcher
 from app.path import connector as _connector
 from app.path.resampler import rdp_simplify, resample_arc, prune_collinear
 
-_RDP_EPSILON       = 0.3   # mm — remove micro-jaggies from triangle discretisation
+_RDP_EPSILON       = 1.0   # mm — after Laplacian smoothing, 1 mm is safe and keeps curves clean
 _MIN_PASS_FRACTION = 0.10  # drop passes shorter than 10% of spray_width_mm …
 _MIN_PASS_ABS_MM   = 1.0   # … absolute floor — was 5 mm, lowered so narrow tooth-tops and curved edges survive
 _MAX_ANGLE_DEV_DEG = 65.0  # angle limit only for SHORT passes; long passes kept at any angle
@@ -21,6 +21,21 @@ _MAX_SUB_PER_LEVEL = 6     # max sub-index passes per slice level (prevents frag
 
 def _arc_length(pts: np.ndarray) -> float:
     return float(np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1)))
+
+
+def _laplacian_smooth(pts: np.ndarray, iterations: int = 4) -> np.ndarray:
+    """Smooth a polyline by averaging each interior point with its neighbours.
+
+    Pins start and end so the pass endpoints never move.
+    Removes triangle-edge zigzags without shifting paths off the surface.
+    """
+    if len(pts) < 3:
+        return pts
+    for _ in range(iterations):
+        out = pts.copy()
+        out[1:-1] = (pts[:-2] + pts[1:-1] + pts[2:]) / 3.0
+        pts = out
+    return pts
 
 
 def _dominant_dir(pts: np.ndarray) -> np.ndarray:
@@ -130,7 +145,7 @@ def generate_route(
             if len(polyline) < 2:
                 continue
             pts = polyline if is_forward else polyline[::-1].copy()
-            # Smooth micro-jaggies from mesh triangulation, then resample uniformly
+            pts = _laplacian_smooth(pts)
             pts = rdp_simplify(pts, _RDP_EPSILON)
             if waypoint_spacing_mm > 0 and len(pts) >= 2:
                 pts = resample_arc(pts, waypoint_spacing_mm)

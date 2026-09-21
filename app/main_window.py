@@ -38,6 +38,50 @@ def _detect_unit(max_extent: float) -> str:
     return 'm'
 
 
+_SIDE_REGIONS = frozenset({'FRONT', 'REAR', 'LEFT', 'RIGHT'})
+_TB_REGIONS   = frozenset({'TOP', 'BOTTOM'})
+
+
+def _group_regions_for_mesh(selected_regions: set, model) -> list:
+    """Group selected regions by slice axis for unified Mesh Surface generation.
+
+    FRONT/REAR/LEFT/RIGHT share up_axis → one combined group.
+    TOP/BOTTOM share fwd_axis → separate combined group.
+    Returns [(combined_name, combined_face_indices), ...].
+    """
+    groups = []
+    for bucket in [_SIDE_REGIONS, _TB_REGIONS]:
+        members = sorted(selected_regions & bucket)
+        if not members:
+            continue
+        face_arrays = [np.asarray(model.get_region_faces(r), dtype=np.int64)
+                       for r in members]
+        face_arrays = [f for f in face_arrays if len(f) > 0]
+        if not face_arrays:
+            continue
+        combined = np.unique(np.concatenate(face_arrays))
+        name = '+'.join(members) if len(members) > 1 else members[0]
+        groups.append((name, combined))
+    return groups
+
+
+def _group_regions_for_face_grid(selected_regions: set, model) -> list:
+    """Combine all selected regions into one group for Face Grid modes.
+
+    Mean-normal basis handles mixed faces correctly; no axis constraint needed.
+    Returns [(combined_name, combined_face_indices)].
+    """
+    members = sorted(selected_regions)
+    face_arrays = [np.asarray(model.get_region_faces(r), dtype=np.int64)
+                   for r in members]
+    face_arrays = [f for f in face_arrays if len(f) > 0]
+    if not face_arrays:
+        return []
+    combined = np.unique(np.concatenate(face_arrays))
+    name = '+'.join(members) if len(members) > 1 else members[0]
+    return [(name, combined)]
+
+
 # ---------------------------------------------------------------------------
 # Dynamic speed — one place to tune all auto-speed behaviour
 # ---------------------------------------------------------------------------
@@ -828,12 +872,7 @@ class MainWindow(QMainWindow):
         standoff = self._ribbon.get_standoff_mm()
         direction = self._ribbon.get_direction()
 
-        pairs = []
-        for region in sorted(self._selected_regions):
-            faces = np.array(self._model.get_region_faces(region), dtype=np.int64)
-            if len(faces) > 0:
-                pairs.append((region, faces))
-
+        pairs = _group_regions_for_face_grid(self._selected_regions, self._model)
         if not pairs:
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
@@ -907,26 +946,19 @@ class MainWindow(QMainWindow):
         offset   = 1 if self._ribbon.is_direction_flipped() else 0
         wpt_mm   = self._ribbon.get_waypoint_spacing_mm()
 
-        pairs = []
-        for region in sorted(self._selected_regions):
-            faces = self._model.get_region_faces(region)
-            if len(faces) > 0:
-                pairs.append((region, faces))
-
+        pairs = _group_regions_for_face_grid(self._selected_regions, self._model)
         if not pairs:
             QMessageBox.warning(self, 'No faces', 'Selected regions have no classified faces.')
             return
 
-        # Build ref/spray plane corners for each selected region
+        # Build ref/spray plane corners for each group
         plane_pairs = []
         for i, (region, faces) in enumerate(pairs):
             rc = _fg_gen.get_face_grid_plane_corners(
-                region, faces, mesh, up,
-                standoff_mm=0.0,
+                region, faces, mesh, up, standoff_mm=0.0,
             ) if i == 0 else None
             sc = _fg_gen.get_face_grid_plane_corners(
-                region, faces, mesh, up,
-                standoff_mm=standoff,
+                region, faces, mesh, up, standoff_mm=standoff,
             )
             plane_pairs.append((rc, sc))
 
@@ -981,11 +1013,7 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _generate_mesh(self, spray_mm: float) -> None:
-        pairs = []
-        for region_id in sorted(self._selected_regions):
-            faces = self._model.get_region_faces(region_id)
-            if len(faces) > 0:
-                pairs.append((region_id, faces))
+        pairs = _group_regions_for_mesh(self._selected_regions, self._model)
         if not pairs:
             QMessageBox.warning(self, 'No selection',
                 'Select bounding box regions first.')

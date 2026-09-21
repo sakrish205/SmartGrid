@@ -51,7 +51,7 @@ def export_robodk(
     """
     fixed = params.paint_speed_mmpm if params else 1000.0
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        f.write(_meta_header('RoboDK', params))
+        # RoboDK curve-import rejects any non-numeric rows — no header written.
         writer = csv.writer(f)
         for route in routes:
             sn = route.spray_normal
