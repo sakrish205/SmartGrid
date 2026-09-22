@@ -25,6 +25,147 @@ SmartGrid solves the **manufacturing process-planning problem** of generating sy
 - **Adaptive unified grid** — two or more selected regions are combined into one bounding box; a single H×V grid spanning all faces is generated and one path is produced, with the mean surface normal driving the grid orientation.
 - **Clean path colours** — overlap-flagged passes (previously gold) now render in the standard forward/backward colours; only true mesh collisions remain red.
 
+## Bug Fixes (v1.5.1)
+
+### Connector toolpath gap — `connector.py`
+
+**Problem:** When the far end of the next pass was closer than the near end, the connector bridged to `nxt.points[-1]` but the pass still started executing from `nxt.points[0]`. The robot would finish the air move at one end of the pass, then jump to the other end to begin spraying — an unconnected gap in the exported toolpath.
+
+**Root cause:** The old code created a reversed *copy* for the connector endpoint calculation but never mutated the pass itself, so connector and pass used opposite endpoints.
+
+```python
+# Before — connector ends at nxt.points[-1], pass starts at nxt.points[0] → GAP
+if dist_to_end < dist_to_start:
+    nxt_points = nxt.points[::-1].copy()   # copy discarded; nxt unchanged
+start_pt = nxt_points[0]                   # = nxt.points[-1] when reversed
+
+# After — pass is reversed in-place; connector and pass share the same start
+if dist_to_end < dist_to_start:
+    nxt.points     = nxt.points[::-1].copy()   # mutate the pass
+    nxt.is_forward = not nxt.is_forward
+start_pt = nxt.points[0]                        # always consistent
+```
+
+---
+
+### Standoff silently ignored in Bbox and Mesh Surface — `main_window.py`
+
+**Problem:** The standoff spinbox had no effect in Bbox or Mesh Surface mode. Both callers forgot to pass `standoff_mm` to their respective workers — it defaulted to `0.0` and the standoff code path was never executed. Adaptive and Conform were unaffected (they always passed it).
+
+```python
+# Before — Bbox: standoff_mm never forwarded
+routes.append(generate_bbox_route(region, bounds, spray_mm, up,
+    direction='horizontal', waypoint_spacing_mm=wpt_mm))
+
+# After
+standoff = self._ribbon.get_standoff_mm()
+routes.append(generate_bbox_route(region, bounds, spray_mm, up,
+    direction='horizontal', waypoint_spacing_mm=wpt_mm, standoff_mm=standoff))
+
+# Before — Mesh Surface: _PathWorker default standoff_mm=0.0; _offset_route_by_standoff never ran
+worker = _PathWorker(self._model.data, pairs, spray_mm,
+    waypoint_spacing_mm=wpt_mm, direction=self._ribbon.get_direction())
+
+# After
+worker = _PathWorker(self._model.data, pairs, spray_mm,
+    waypoint_spacing_mm=wpt_mm,
+    standoff_mm=self._ribbon.get_standoff_mm(),
+    direction=self._ribbon.get_direction())
+```
+
+---
+
+### NaN waypoints from degenerate face groups — `face_grid_generator.py`
+
+**Problem:** When a face group's geometry is near-degenerate (all normals nearly collinear), the cross products used to build the surface basis can produce a zero vector. Dividing by its norm produces NaN/inf, which silently propagated into every waypoint coordinate and would crash robot controllers on import.
+
+**Fix:** Two-level fallback — if both primary and secondary cross products degenerate, assign a fixed orthogonal axis from the world frame:
+
+```python
+pass_vec = np.cross(mean_n, up_vec)
+pv_len   = np.linalg.norm(pass_vec)
+
+if pv_len < 1e-9:                          # primary degenerate — try lateral axis
+    fwd_vec  = np.zeros(3); fwd_vec[(up_axis + 1) % 3] = 1.0
+    pass_vec = np.cross(mean_n, fwd_vec)
+    pv_len   = np.linalg.norm(pass_vec)
+
+    if pv_len < 1e-9:                      # both degenerate — use depth axis
+        pass_vec = np.zeros(3); pass_vec[(up_axis + 2) % 3] = 1.0
+        pv_len   = 1.0
+
+pass_vec = pass_vec / pv_len               # always a valid unit vector
+```
+
+---
+
+### Collision worker GC crash — `main_window.py`
+
+**Problem:** Setting `self._coll_worker = None` while the `QThread` was still running released the last Python reference to the object. The GC could destroy the thread mid-execution, producing an intermittent segfault that was hard to reproduce.
+
+**Fix:** A `_zombie_workers` list holds references until the thread completes, then cleans up at `_on_collision_ready`:
+
+```python
+# In __init__
+self._zombie_workers: list = []
+
+# When discarding a running collision worker
+self._zombie_workers.append(self._coll_worker)
+self._coll_worker = None   # safe — reference kept in _zombie_workers
+
+# In _on_collision_ready — clean up finished threads
+self._zombie_workers = [w for w in self._zombie_workers if w.isRunning()]
+```
+
+---
+
+### Direction hardcoded to `'horizontal'` — `generator.py`, `face_grid_generator.py`
+
+**Problem:** Both Mesh Surface (`generator.py`) and Conform (`face_grid_generator.py`) constructed every `PaintPass` with `direction='horizontal'` regardless of the ribbon setting. Vertical passes were generated correctly but tagged as horizontal.
+
+```python
+# Before
+PaintPass(id=pass_id, region_id=region_id, direction='horizontal', ...)
+
+# After
+PaintPass(id=pass_id, region_id=region_id, direction=direction, ...)
+```
+
+---
+
+### RoboDK export rejected — `olp_export.py`
+
+**Problem 1:** A `# SmartGrid OLP Export…` comment header was written before the data rows. RoboDK *Utilities › Import Curve* expects the first line to be numeric and rejects any file containing non-numeric rows — every export was silently broken.
+
+**Problem 2:** Auto speed mode added a 7th column (`speed_mmpm`). RoboDK Import Curve strictly expects 6 columns (`X,Y,Z,NX,NY,NZ`) and rejects 7-column files.
+
+**Fix:** RoboDK export is now always clean 6-column data with no header, no comments, no speed column. Per-waypoint speed is available in DELMIA APT and G-code exports.
+
+---
+
+### Visual Components header pollution — `olp_export.py`
+
+**Problem:** `# SmartGrid OLP Export…` comment lines were written before the `seq_id,X,Y,Z,…` CSV header row. A standard CSV parser treats those lines as the first data rows and fails to find the column names.
+
+**Fix:** Removed. VC export now starts directly with the `seq_id,X,Y,Z,NX,NY,NZ,Trigger,speed_mmpm` header row.
+
+---
+
+### Other fixes
+
+| Issue | File | Fix |
+|---|---|---|
+| `merge_routes([])` → `IndexError` | `bbox_generator.py` | Explicit empty-list guard |
+| Empty pass `pts[0]`/`pts[-1]` in JSON export | `json_export.py` | `pts[0] if pts else []` |
+| Startup race: viewer overwrites pre-loaded model | `main_window.py` | `_apply_loaded_model()` helper; blank model only when `self._model is None` |
+| File load allowed during path generation | `main_window.py` | Block `_load` while `_worker` or `_load_worker` is running |
+| Pitch spinbox range stuck in mm after unit change | `ribbon.py` | Scale range and value by `factor_old / factor_new` on unit switch |
+| Viewer crash on empty path list | `viewer.py` | Early return of `pv.PolyData()` in `_make_multiline` |
+| Connection waypoint dots ignore `show_waypoints` flag | `viewer.py` | Added `show_waypoints and` guard on connector dot render |
+| Version string `"1.3"` in About / title bar | `main.py` | `"1.3"` → `"1.5"` |
+
+---
+
 ## Previous Improvements (v1.4)
 
 - **Full surface coverage** — all three surface-following modes (Conform, Mesh Surface, Adaptive) now use a forward-hemisphere face filter (`face_normals · mean_n ≥ 0`) instead of the single-assignment region classifier. Boundary and transition faces that the classifier assigns to an adjacent region are included, eliminating missing coverage at region edges and on top surfaces.
