@@ -412,9 +412,9 @@ Normal selection depends on the path mode:
 | Path Mode | Normal |
 |---|---|
 | Boundary Box | Face-axis unit vector |
-| Face Grid | Mean face normal |
-| Mesh Surface | Nearest mesh-face normal |
-| Conform | Nearest mesh-face normal |
+| Face Grid — Adaptive | Mean face normal |
+| Face Grid — Conform | Mean face normal (uniform shift along `mean_n`) |
+| Mesh Surface | Nearest mesh-face normal (per-point, via trimesh proximity) |
 
 Default standoff is `0`.
 
@@ -497,7 +497,7 @@ Speed is written into every OLP export format:
 |---|---|
 | DELMIA APT | `FEDRAT/value,MMPM` written only when speed changes (auto), or once per pass block (custom) |
 | G-code | `G1 F{speed} X Y Z` on the first or any changed-speed waypoint; bare `G1 X Y Z` otherwise |
-| RoboDK CSV | 7th column `speed_mmpm` on every spray pass row |
+| RoboDK CSV | Not written — always 6-col; use DELMIA APT or G-code for per-waypoint speed |
 | Visual Components CSV | `speed_mmpm` column on every spray pass row; blank on connectors |
 | JSON / neutral CSV | Stored in `GenerationParams.paint_speed_mmpm` |
 
@@ -597,13 +597,11 @@ One row per trajectory point:
 
 Four robot-OLP formats are exported via **Export OLP**:
 
-All OLP formats start with a `#` comment header: format name, generation timestamp, source file, path mode, and active regions.
-
 #### RoboDK
-7-column CSV (no header row): `X,Y,Z,NX,NY,NZ,speed_mmpm` — spray passes only. Drag-drop into RoboDK via *Utilities › Import Curve*. `NX/NY/NZ` = outward surface normal (RoboDK uses it as the curve approach direction).
+6-column CSV, no header row: `X,Y,Z,NX,NY,NZ` — spray passes only. Drag-drop into RoboDK via *Utilities › Import Curve*. No header or comment lines — RoboDK Import Curve rejects any non-numeric line. `NX/NY/NZ` = outward surface normal (RoboDK uses it as the curve approach direction). Per-waypoint speed is not written here; use DELMIA APT or G-code if speed data is required.
 
 #### Visual Components
-CSV with header `seq_id,X,Y,Z,NX,NY,NZ,Trigger,speed_mmpm`. Spray passes have `Trigger=ON` with normals and speed; connector moves are interleaved with `Trigger=OFF`, blank normals, and blank speed — preserving the full execution sequence in one file.
+CSV with header `seq_id,X,Y,Z,NX,NY,NZ,Trigger,speed_mmpm` (no comment lines before the header). Spray passes have `Trigger=ON` with normals and speed; connector moves are interleaved with `Trigger=OFF`, blank normals, and blank speed — preserving the full execution sequence in one file.
 
 #### DELMIA APT
 APT text file. Spray passes use `GOTO/X,Y,Z,I,J,K` where `I,J,K` = tool Z axis = `-spray_normal` (points into the surface). Connector moves use `RAPID/X,Y,Z`. `FEDRAT/value,MMPM` is written only when speed changes (auto mode) or once per pass (custom mode); spray gun written as `SPINDL/ON` and `SPINDL/OFF`.
