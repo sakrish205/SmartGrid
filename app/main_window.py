@@ -1128,10 +1128,11 @@ class MainWindow(QMainWindow):
         n_near = sum(1 for v in collision_ids.values() if v == 'near_miss')
         total_passes = sum(r.total_passes for r in self._current_routes)
         total_conns  = sum(len(r.connections) for r in self._current_routes)
-        coll_suffix = ''
         if n_coll or n_near:
             coll_suffix = (f'  ⚠ {n_coll} collision(s), {n_near} near-miss(es)'
                            f' — shown red/orange  |  Suggested standoff: {suggested:.0f} mm')
+        else:
+            coll_suffix = '  ✓ No collisions'
         self.statusBar().showMessage(
             f'Path generation complete  —  {total_passes} passes, {total_conns} connections.{coll_suffix}')
 
