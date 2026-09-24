@@ -291,6 +291,7 @@ class _PathWorker(QThread):
 
 class _CollisionWorker(QThread):
     finished = Signal(object)  # tuple[dict[int, str], float]  (collision_ids, suggested_standoff)
+    error    = Signal(str)
 
     def __init__(self, routes, mesh, standoff_mm: float) -> None:
         super().__init__()
@@ -308,11 +309,8 @@ class _CollisionWorker(QThread):
                 raw = (self._standoff + max_depth + 2.0) if has_hard else (self._standoff * 2.0 + 2.0)
                 suggested = math.ceil(raw / 5.0) * 5.0
             self.finished.emit((collision_ids, suggested))
-        except Exception:
-            import logging, traceback
-            logging.getLogger(__name__).error(
-                'CollisionWorker failed:\n%s', traceback.format_exc())
-            self.finished.emit(({}, 0.0))
+        except Exception as exc:
+            self.error.emit(f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
 
 
 # ---------------------------------------------------------------------------
@@ -1108,6 +1106,7 @@ class MainWindow(QMainWindow):
             self._coll_worker = _CollisionWorker(
                 routes, self._model.data.trimesh_mesh, self._ribbon.get_standoff_mm())
             self._coll_worker.finished.connect(self._on_collision_ready)
+            self._coll_worker.error.connect(self._on_collision_error)
             self._coll_worker.start()
 
     def _on_collision_ready(self, result) -> None:
@@ -1135,6 +1134,21 @@ class MainWindow(QMainWindow):
                            f' — shown red/orange  |  Suggested standoff: {suggested:.0f} mm')
         self.statusBar().showMessage(
             f'Path generation complete  —  {total_passes} passes, {total_conns} connections.{coll_suffix}')
+
+    def _on_collision_error(self, msg: str) -> None:
+        self._zombie_workers = [w for w in self._zombie_workers if w.isRunning()]
+        if self._coll_worker:
+            self._coll_worker.deleteLater()
+            self._coll_worker = None
+        total_passes = sum(r.total_passes for r in self._current_routes) if self._current_routes else 0
+        total_conns  = sum(len(r.connections) for r in self._current_routes) if self._current_routes else 0
+        self.statusBar().showMessage(
+            f'Path generation complete  —  {total_passes} passes, {total_conns} connections.'
+            '  ⚠ Collision check failed (see details).')
+        QMessageBox.warning(self, 'Collision check failed',
+            'The collision check could not complete — the path has been generated '
+            'but collisions have not been verified.\n\n'
+            f'Reason: {msg.splitlines()[0]}')
 
     def _refresh_route_display(self) -> None:
         if self._viewer is None or not self._current_routes:
