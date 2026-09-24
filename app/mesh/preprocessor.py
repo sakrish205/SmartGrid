@@ -25,7 +25,9 @@ def preprocess(mesh: trimesh.Trimesh, source_path: str, up_axis: int = 2) -> Mes
     face_normals = mesh.face_normals.copy()   # (F, 3) — copy so trimesh can't mutate it
 
     # (F, 3): mean of each face's three vertex positions
-    face_centroids = mesh.vertices[mesh.faces].mean(axis=1)
+    # Direct sum avoids a (F, 3, 3) intermediate (72 MB on 1M-face meshes)
+    v, f = mesh.vertices, mesh.faces
+    face_centroids = (v[f[:, 0]] + v[f[:, 1]] + v[f[:, 2]]) / 3.0
 
     bounds = mesh.bounds          # shape (2, 3): [min, max]
     bbox_min = bounds[0]
@@ -52,6 +54,10 @@ def preprocess(mesh: trimesh.Trimesh, source_path: str, up_axis: int = 2) -> Mes
 def _to_pyvista(mesh: trimesh.Trimesh) -> pv.PolyData:
     """Convert trimesh.Trimesh to pyvista.PolyData (done once, stored on MeshData)."""
     n = len(mesh.faces)
-    # PyVista face format: [3, v0, v1, v2, 3, v0, v1, v2, ...]
-    connectivity = np.column_stack([np.full(n, 3, dtype=np.int_), mesh.faces]).ravel()
+    # PyVista face format: [3, v0, v1, v2, ...] — write directly to avoid column_stack copy
+    connectivity = np.empty(n * 4, dtype=np.int64)
+    connectivity[0::4] = 3
+    connectivity[1::4] = mesh.faces[:, 0]
+    connectivity[2::4] = mesh.faces[:, 1]
+    connectivity[3::4] = mesh.faces[:, 2]
     return pv.PolyData(mesh.vertices.copy(), connectivity)

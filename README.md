@@ -25,6 +25,67 @@ SmartGrid solves the **manufacturing process-planning problem** of generating sy
 - **Adaptive unified grid** — two or more selected regions are combined into one bounding box; a single H×V grid spanning all faces is generated and one path is produced, with the mean surface normal driving the grid orientation.
 - **Clean path colours** — overlap-flagged passes (previously gold) now render in the standard forward/backward colours; only true mesh collisions remain red.
 
+## Performance Improvements (v1.5.2)
+
+### Large mesh load time
+
+Three bottlenecks reduced peak memory and CPU time when loading high-polygon meshes (500k–2M+ faces):
+
+**1. Face centroid computation — peak memory cut from 72 MB to 24 MB per op**
+
+```python
+# Before — creates a temporary (F, 3, 3) array (72 MB on 1M faces)
+face_centroids = mesh.vertices[mesh.faces].mean(axis=1)
+
+# After — three (F, 3) arrays, no large intermediate
+v, f = mesh.vertices, mesh.faces
+face_centroids = (v[f[:, 0]] + v[f[:, 1]] + v[f[:, 2]]) / 3.0
+```
+
+**2. PyVista connectivity array — avoids 32 MB intermediate copy**
+
+```python
+# Before — column_stack builds (F, 4) then ravel copies it again
+connectivity = np.column_stack([np.full(n, 3, dtype=np.int_), mesh.faces]).ravel()
+
+# After — write directly into the output array with stride indexing
+connectivity = np.empty(n * 4, dtype=np.int64)
+connectivity[0::4] = 3
+connectivity[1::4] = mesh.faces[:, 0]
+connectivity[2::4] = mesh.faces[:, 1]
+connectivity[3::4] = mesh.faces[:, 2]
+```
+
+**3. STEP import — prevents over-tessellation + skips redundant mesh repair**
+
+gmsh's default auto-sizing produces millions of tiny triangles on large/complex CAD models. A minimum element size is now set relative to the model's bounding-box diagonal:
+
+```python
+diagonal = bounding_box_diagonal(model)
+min_size  = max(diagonal * 0.05, 0.5)   # 5% of diagonal, ≥ 0.5 mm
+gmsh.option.setNumber('Mesh.CharacteristicLengthMin', min_size)
+```
+
+gmsh output is already correctly wound and validated, so `process=True` mesh repair in trimesh is now skipped (`process=False`), with only `fix_normals` applied.
+
+| `mesh_size_factor` | Triangle density | Speed |
+|---|---|---|
+| `0.02` | Fine | Slow |
+| `0.05` | Medium (default) | Balanced |
+| `0.10` | Coarse | Fast |
+
+**4. Granular load progress — status bar now shows which step is running**
+
+```
+Reading body_panel.step…
+Preprocessing 847,312 faces…
+Classifying regions…
+```
+
+Previously only "Reading…" and "Finalising…" were shown, so large meshes appeared frozen during the preprocess and classify steps.
+
+---
+
 ## Bug Fixes (v1.5.1)
 
 ### Connector toolpath gap — `connector.py`
@@ -870,6 +931,8 @@ SmartGrid currently focuses on **geometric toolpath generation**. It does not it
 The Adaptive Face Grid method can float on surfaces with significant curvature along the sweep direction because individual passes are straight.
 
 Collision detection uses per-point ray casting (`mesh.contains`) — on very dense meshes with many flagged passes this can be slow. A signed-distance field approach would improve throughput for high-polygon models.
+
+STEP tessellation uses a minimum element size of 5% of the model diagonal (`mesh_size_factor=0.05`). Very fine surface detail smaller than this threshold will be approximated. Reduce `mesh_size_factor` in `loader.py` for higher-fidelity tessellation at the cost of more triangles and longer load time.
 
 G-code tool orientation (A, B, C rotary axes) is not written — a platform-specific post-processor is required to map spray-normal vectors to robot joint angles.
 

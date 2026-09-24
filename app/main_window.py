@@ -237,10 +237,18 @@ class _LoadWorker(QThread):
     def run(self) -> None:
         try:
             from models.mesh_model import MeshModel as _MM
-            self.progress.emit(f'Reading {os.path.basename(self._filepath)}...')
+            from app.mesh.loader import load_mesh
+            from app.mesh.preprocessor import preprocess
+            from app.mesh.regions import classify_regions
+            name = os.path.basename(self._filepath)
+            self.progress.emit(f'Reading {name}…')
+            mesh = load_mesh(self._filepath)
+            self.progress.emit(f'Preprocessing {len(mesh.faces):,} faces…')
+            data = preprocess(mesh, self._filepath, up_axis=self._up_axis)
+            self.progress.emit('Classifying regions…')
             model = _MM()
-            model.load(self._filepath, up_axis=self._up_axis)
-            self.progress.emit('Finalising...')
+            model._data    = data
+            model._regions = classify_regions(data)
             self.finished.emit(model)
         except Exception as exc:
             self.error.emit(f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
