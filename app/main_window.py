@@ -330,7 +330,11 @@ class _CollisionWorker(QThread):
     def run(self) -> None:
         try:
             from app.path.collision import detect_collisions
-            collision_ids, max_depth = detect_collisions(self._routes, self._mesh, self._standoff)
+            from app.robot.robot_profile import get_active_profile as _gap
+            _prof = _gap()
+            nozzle_r = _prof.nozzle_radius_mm if _prof else 0.0
+            collision_ids, max_depth = detect_collisions(
+                self._routes, self._mesh, self._standoff, nozzle_radius_mm=nozzle_r)
             suggested = 0.0
             if collision_ids:
                 has_hard = max_depth > 0
@@ -1125,8 +1129,11 @@ class MainWindow(QMainWindow):
             from app.path import bbox_generator as _bbox_gen
             routes = [_bbox_gen.merge_routes(routes)]
         self._current_routes  = routes
-        from app.path.collision import detect_overlaps
+        from app.path.collision import detect_overlaps, check_orientation
         self._collision_ids   = detect_overlaps(routes)
+        profile = get_active_profile()
+        if profile:
+            self._collision_ids.update(check_orientation(routes, profile))
 
         # Show paths immediately — collision highlights added after background check
         self._viewer.show_route(
