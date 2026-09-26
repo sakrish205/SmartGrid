@@ -647,6 +647,9 @@ class MeshViewer(QWidget):
                     _make_multiline(pt_list), color=color,
                     line_width=lw, render_lines_as_tubes=False, reset_camera=False,
                 )
+                # Push lines in front of the mesh surface to prevent z-fighting
+                actor.GetMapper().SetResolveCoincidentTopologyToPolygonOffset()
+                actor.GetMapper().SetRelativeCoincidentTopologyLineOffsetParameters(-1, -1)
                 self._actors[f'pass_{ri}_{color}'] = actor
 
             if end_pts_list:

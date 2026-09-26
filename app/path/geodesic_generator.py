@@ -125,11 +125,29 @@ def generate_geodesic_route(
     if len(region_face_indices) == 0:
         raise ValueError(f"Region '{region_id}' has no classified triangles.")
 
-    # Build submesh (shared vertices, only region faces)
+    # Geodesic solver is impractical on very large regions — fall back to slicer.
+    # ponytail: 200k face cap; lower if solver is still slow on target hardware.
+    _MAX_GEODESIC_FACES = 200_000
+    if len(region_face_indices) > _MAX_GEODESIC_FACES:
+        _log.info('geodesic: region %s has %d faces > %d cap, using slicer fallback',
+                  region_id, len(region_face_indices), _MAX_GEODESIC_FACES)
+        from app.path import generator as _gen
+        return _gen.generate_route(
+            mesh_data, region_id, region_face_indices,
+            spray_width_mm, waypoint_spacing_mm, direction,
+        )
+
+    # Build submesh — compact to referenced vertices only.
+    # potpourri3d requires no unreferenced vertices; full.vertices with a face
+    # subset crashes with GC_SAFETY_ASSERT.
     full = mesh_data.trimesh_mesh
+    region_faces  = full.faces[region_face_indices]
+    used_verts    = np.unique(region_faces)
+    vert_map      = np.full(len(full.vertices), -1, dtype=np.int64)
+    vert_map[used_verts] = np.arange(len(used_verts), dtype=np.int64)
     sub_mesh = trimesh.Trimesh(
-        vertices=full.vertices,
-        faces=full.faces[region_face_indices],
+        vertices=full.vertices[used_verts],
+        faces=vert_map[region_faces],
         process=False,
     )
 
@@ -159,11 +177,14 @@ def generate_geodesic_route(
     solver = pp3d.MeshHeatMethodDistanceSolver(sub_mesh.vertices, sub_mesh.faces)
     dist = solver.compute_distance_multisource(seed_verts.tolist())
 
-    d_max = float(dist.max())
-    if d_max < step:
-        _log.warning('geodesic: region %s geodesic span %.1f mm < step %.1f mm', region_id, d_max, step)
+    finite = dist[np.isfinite(dist)]
+    d_max = float(finite.max()) if len(finite) else 0.0
+    dist = np.where(np.isfinite(dist), dist, d_max)
 
-    pass_levels = np.arange(step / 2.0, d_max, step)
+    if d_max < step / 2.0:
+        pass_levels = np.array([max(d_max / 2.0, 1e-3)])
+    else:
+        pass_levels = np.arange(step / 2.0, d_max, step)
     _log.debug('geodesic: %d pass levels over %.1f mm', len(pass_levels), d_max)
 
     all_passes: list[PaintPass] = []

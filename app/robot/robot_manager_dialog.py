@@ -9,6 +9,27 @@ from PySide6.QtCore import Qt
 
 from app.robot.robot_profile import RobotProfile, load_profiles, save_profiles
 
+_DIALOG_CSS = (
+    'QDialog{background:#ffffff;}'
+    'QLabel{color:#252525;background:transparent;}'
+    'QListWidget{background:#ffffff;color:#252525;border:1px solid #d2d0ce;'
+    '  border-radius:2px;outline:none;}'
+    'QListWidget::item{padding:4px 8px;color:#252525;}'
+    'QListWidget::item:selected{background:#0078d4;color:#ffffff;}'
+    'QListWidget::item:hover{background:#edebe9;}'
+    'QPushButton{background:#ffffff;color:#252525;border:1px solid #d2d0ce;'
+    '  border-radius:2px;padding:5px 14px;min-width:80px;}'
+    'QPushButton:hover{background:#edebe9;border-color:#8a8886;}'
+    'QPushButton:pressed{background:#d2d0ce;}'
+    'QPushButton:disabled{color:#a19f9d;border-color:#e1dfdd;}'
+    'QLineEdit{background:#ffffff;color:#252525;border:1px solid #d2d0ce;'
+    '  border-radius:2px;padding:3px 6px;}'
+    'QLineEdit:focus{border-color:#0078d4;}'
+    'QDoubleSpinBox{background:#ffffff;color:#252525;border:1px solid #d2d0ce;'
+    '  border-radius:2px;padding:2px 4px;}'
+    'QFormLayout QLabel{color:#252525;}'
+)
+
 
 class RobotProfileDialog(QDialog):
     """Add / edit a single robot profile."""
@@ -17,6 +38,7 @@ class RobotProfileDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('Robot Profile' if profile else 'New Robot Profile')
         self.setMinimumWidth(400)
+        self.setStyleSheet(_DIALOG_CSS)
 
         p = profile or RobotProfile(name='New Robot')
         self._fields: dict[str, QDoubleSpinBox | QLineEdit] = {}
@@ -97,6 +119,7 @@ class RobotManagerDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('Robot Profiles')
         self.setMinimumSize(420, 340)
+        self.setStyleSheet(_DIALOG_CSS)
 
         self._profiles, self._active = load_profiles()
 
