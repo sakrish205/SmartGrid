@@ -38,6 +38,15 @@ def _pass_speeds(p, speeds_map: dict[int, np.ndarray] | None, fixed: float) -> n
     return np.full(len(p.points), fixed)
 
 
+def _get_normal(route: 'PaintRoute', p, pt_idx: int) -> tuple[float, float, float]:
+    """Per-waypoint surface normal if available, else route spray_normal."""
+    if p.normals is not None and pt_idx < len(p.normals):
+        n = p.normals[pt_idx]
+    else:
+        n = route.spray_normal
+    return round(float(n[0]), 6), round(float(n[1]), 6), round(float(n[2]), 6)
+
+
 def export_robodk(
     routes: list[PaintRoute],
     filepath: str,
@@ -53,12 +62,9 @@ def export_robodk(
         # No header — RoboDK Import Curve rejects non-numeric lines; always 6-col
         writer = csv.writer(f)
         for route in routes:
-            sn = route.spray_normal
-            nx = round(float(sn[0]), 6)
-            ny = round(float(sn[1]), 6)
-            nz = round(float(sn[2]), 6)
             for p in route.passes:
-                for pt in p.points:
+                for i, pt in enumerate(p.points):
+                    nx, ny, nz = _get_normal(route, p, i)
                     writer.writerow([
                         round(float(pt[0]), 4),
                         round(float(pt[1]), 4),
@@ -85,14 +91,11 @@ def export_vc(
         writer.writeheader()
         seq = 0
         for route in routes:
-            sn = route.spray_normal
-            nx = round(float(sn[0]), 6)
-            ny = round(float(sn[1]), 6)
-            nz = round(float(sn[2]), 6)
             conn_by_from = {c.from_pass_id: c for c in route.connections}
             for p in route.passes:
                 speeds = _pass_speeds(p, speeds_map, fixed)
                 for i, pt in enumerate(p.points):
+                    nx, ny, nz = _get_normal(route, p, i)
                     writer.writerow({
                         'seq_id': seq,
                         'X': round(float(pt[0]), 4),
@@ -139,10 +142,6 @@ def export_delmia_apt(
         f.write('$$\n')
 
         for route in routes:
-            sn = route.spray_normal
-            ix = round(-float(sn[0]), 6)
-            iy = round(-float(sn[1]), 6)
-            iz = round(-float(sn[2]), 6)
             conn_by_from = {c.from_pass_id: c for c in route.connections}
 
             f.write(f'$$ Region: {route.region_id}\n')
@@ -156,10 +155,11 @@ def export_delmia_apt(
                     if sp != prev_sp:
                         f.write(f'FEDRAT/{sp:.1f},MMPM\n')
                         prev_sp = sp
+                    nx, ny, nz = _get_normal(route, p, i)
                     x = round(float(pt[0]), 4)
                     y = round(float(pt[1]), 4)
                     z = round(float(pt[2]), 4)
-                    f.write(f'GOTO/{x},{y},{z},{ix},{iy},{iz}\n')
+                    f.write(f'GOTO/{x},{y},{z},{-nx},{-ny},{-nz}\n')
                 f.write('SPINDL/OFF\n')
 
                 conn = conn_by_from.get(p.id)

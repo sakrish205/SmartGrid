@@ -611,6 +611,8 @@ class MeshViewer(QWidget):
                     color = '#FF1744'
                 elif _cid == 'near_miss':
                     color = '#FF9100'
+                elif _cid == 'orientation_exceeded':
+                    color = '#FF6D00'
                 else:
                     color = fwd_color if paint_pass.is_forward else rev_color
                 buckets.setdefault(color, []).append(paint_pass.points)
@@ -626,6 +628,19 @@ class MeshViewer(QWidget):
                         line_width=float(self._colors.get('arrow_line_width', '4.0')),
                         face_normal=route.spray_normal,
                     )
+                    if paint_pass.normals is not None and len(paint_pass.normals) == len(paint_pass.points):
+                        # Draw surface-normal sticks: short lines from each waypoint along normal
+                        norm_len = arrow_len * 0.4
+                        starts = paint_pass.points
+                        ends   = paint_pass.points + paint_pass.normals * norm_len
+                        segs   = np.stack([starts, ends], axis=1)  # (N, 2, 3)
+                        nrm_color = '#FF6D00' if _cid == 'orientation_exceeded' else '#00E5FF'
+                        actor = self.plotter.add_mesh(
+                            _make_multiline(list(segs)),
+                            color=nrm_color, line_width=2.0,
+                            render_lines_as_tubes=False, reset_camera=False,
+                        )
+                        self._actors[f'norm_{ri}_{paint_pass.id}'] = actor
 
             for color, pt_list in buckets.items():
                 actor = self.plotter.add_mesh(
@@ -723,7 +738,7 @@ class MeshViewer(QWidget):
 
     def clear_route(self) -> None:
         keys = [k for k in self._actors
-                if k.startswith(('pass_', 'conn_', 'arr_', 'wpt_'))]
+                if k.startswith(('pass_', 'conn_', 'arr_', 'wpt_', 'norm_'))]
         for k in keys:
             self.plotter.remove_actor(self._actors.pop(k))
         self.plotter.render()
