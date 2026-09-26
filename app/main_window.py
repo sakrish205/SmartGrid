@@ -268,6 +268,7 @@ class _PathWorker(QThread):
         waypoint_spacing_mm: float = 0.0,
         standoff_mm: float = 0.0,
         direction: str = 'horizontal',
+        robot_profile=None,   # RobotProfile | None — triggers geodesic when set
     ) -> None:
         super().__init__()
         self._mesh_data        = mesh_data
@@ -276,24 +277,41 @@ class _PathWorker(QThread):
         self._waypoint_spacing = waypoint_spacing_mm
         self._standoff_mm      = standoff_mm
         self._direction        = direction
+        self._robot_profile    = robot_profile
 
     def run(self) -> None:
         try:
-            from app.path import generator as _gen
-            routes = []
             mesh = self._mesh_data.trimesh_mesh
-            for region_id, face_indices in self._pairs:
-                route = _gen.generate_route(
-                    self._mesh_data,
-                    region_id=region_id,
-                    region_face_indices=face_indices,
-                    spray_width_mm=self._spray_mm,
-                    waypoint_spacing_mm=self._waypoint_spacing,
-                    direction=self._direction,
-                )
-                if self._standoff_mm > 0.0:
-                    route = _offset_route_by_standoff(route, mesh, self._standoff_mm)
-                routes.append(route)
+            routes = []
+            if self._robot_profile is not None:
+                from app.path.geodesic_generator import generate_geodesic_route
+                for region_id, face_indices in self._pairs:
+                    route = generate_geodesic_route(
+                        self._mesh_data,
+                        region_face_indices=face_indices,
+                        region_id=region_id,
+                        spray_width_mm=self._spray_mm,
+                        robot_profile=self._robot_profile,
+                        waypoint_spacing_mm=self._waypoint_spacing,
+                        direction=self._direction,
+                    )
+                    if self._standoff_mm > 0.0:
+                        route = _offset_route_by_standoff(route, mesh, self._standoff_mm)
+                    routes.append(route)
+            else:
+                from app.path import generator as _gen
+                for region_id, face_indices in self._pairs:
+                    route = _gen.generate_route(
+                        self._mesh_data,
+                        region_id=region_id,
+                        region_face_indices=face_indices,
+                        spray_width_mm=self._spray_mm,
+                        waypoint_spacing_mm=self._waypoint_spacing,
+                        direction=self._direction,
+                    )
+                    if self._standoff_mm > 0.0:
+                        route = _offset_route_by_standoff(route, mesh, self._standoff_mm)
+                    routes.append(route)
             self.finished.emit(routes)
         except Exception as exc:
             self.error.emit(f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
@@ -1075,12 +1093,15 @@ class MainWindow(QMainWindow):
                 'Select bounding box regions first.')
             return
         wpt_mm = self._ribbon.get_waypoint_spacing_mm()
+        profile = get_active_profile()
         self._ribbon.set_generating(True)
-        self.statusBar().showMessage('Generating mesh paths...')
+        msg = 'Generating geodesic paths…' if profile else 'Generating mesh paths...'
+        self.statusBar().showMessage(msg)
         worker = _PathWorker(self._model.data, pairs, spray_mm,
                              waypoint_spacing_mm=wpt_mm,
                              standoff_mm=self._ribbon.get_standoff_mm(),
-                             direction=self._ribbon.get_direction())
+                             direction=self._ribbon.get_direction(),
+                             robot_profile=profile)
         self._face_grid_planes_cache = None
         self._adaptive_grid_cache    = None
         self._viewer.clear_face_grid_planes()

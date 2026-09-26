@@ -6,6 +6,7 @@ trimesh[easy]>=4.3.0    # tested 5.0.0
 numpy>=1.26.0           # tested 2.5.2
 scipy>=1.11.0           # tested 1.18.1
 gmsh>=4.11.0            # STEP/IGES import (CAD kernel)
+potpourri3d>=0.0.8      # geodesic heat-method distance field (Mesh Surface mode)
 
 # dev / test only
 pytest>=8.0.0           # tested 9.1.1
