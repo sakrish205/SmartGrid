@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 import logging
 import numpy as np
+import trimesh as _trimesh
 
 _log = logging.getLogger(__name__)
 from app.mesh.preprocessor import MeshData
@@ -96,13 +97,23 @@ def generate_route(
         direction=direction,
     )
 
+    # Slice only the region faces per plane — avoids scanning all F_total faces N times.
+    # Vertices are shared (no copy); face normals are preserved.
+    full_mesh = mesh_data.trimesh_mesh
+    sub_mesh  = _trimesh.Trimesh(
+        vertices=full_mesh.vertices,
+        faces=full_mesh.faces[region_face_indices],
+        process=False,
+    )
+    sub_all = np.arange(len(sub_mesh.faces), dtype=np.int64)
+
     all_passes: list[PaintPass] = []
     pass_id = 0
 
     for plane_index, (plane_normal, plane_origin, slice_pos) in enumerate(planes):
         segments = _slicer.slice_region(
-            mesh_data.trimesh_mesh,
-            region_face_indices,
+            sub_mesh,
+            sub_all,
             plane_normal,
             plane_origin,
             region_id=region_id,
