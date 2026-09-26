@@ -149,13 +149,11 @@ def slice_region(
         axis, sign = outward
         region_mask = (mesh.face_normals[face_ids, axis] * sign) > -0.25
     else:
-        # Combined/arbitrary region: hemisphere filter from mean normal of selected faces.
-        mean_n = mesh.face_normals[region_face_indices].mean(axis=0)
-        n = np.linalg.norm(mean_n)
-        if n > 1e-9:
-            region_mask = mesh.face_normals[face_ids] @ (mean_n / n) >= -0.25
-        else:
-            region_mask = np.isin(face_ids, region_face_indices)
+        # Combined/arbitrary region: strict membership — only segments touching
+        # a face the user actually selected.  The hemisphere filter was too
+        # permissive (cos -0.25 ≈ 105°) and caused paths to fall outside the
+        # selected region on complex curved meshes.
+        region_mask = np.isin(face_ids, region_face_indices)
 
     filtered = segments[region_mask]
     filtered_face_ids = face_ids[region_mask]
