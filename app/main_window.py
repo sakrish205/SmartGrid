@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QRadioButton, QButtonGroup,
     QLabel, QScrollArea, QFrame,
     QComboBox, QDoubleSpinBox, QTextBrowser,
+    QTableWidget, QTableWidgetItem, QHeaderView,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QEvent, QTimer, QUrl
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QDesktopServices
@@ -176,6 +177,77 @@ class _OlpExportDialog(QDialog):
             mode,
             self._speed_spin.value() if mode == 'custom' else None,
         )
+
+
+# ---------------------------------------------------------------------------
+# Orientation report
+# ---------------------------------------------------------------------------
+
+def _build_orientation_report(routes: list, robot_profile) -> dict:
+    """Return orientation issue summary for pre-export validation."""
+    total_wpt = 0
+    total_exceeded = 0
+    max_dev_deg = 0.0
+    passes_with_issues = []
+
+    for route in routes:
+        for p in route.passes:
+            if p.normals is None or len(p.normals) < 2:
+                total_wpt += len(p.points)
+                continue
+            total_wpt += len(p.points)
+            dots = np.einsum('ij,ij->i', p.normals[:-1], p.normals[1:])
+            dots = np.clip(dots, -1.0, 1.0)
+            degs = np.degrees(np.arccos(dots))
+            exceeded = degs > robot_profile.max_orientation_change_deg
+            count = int(exceeded.sum())
+            if count:
+                max_d = float(degs[exceeded].max())
+                max_dev_deg = max(max_dev_deg, max_d)
+                total_exceeded += count
+                passes_with_issues.append((p.id, p.region_id, count, round(max_d, 1)))
+
+    return {
+        'total_waypoints': total_wpt,
+        'total_exceeded': total_exceeded,
+        'max_deviation_deg': round(max_dev_deg, 1),
+        'passes_with_issues': passes_with_issues,
+        'limit_deg': robot_profile.max_orientation_change_deg,
+    }
+
+
+class OrientationReportDialog(QDialog):
+    """Pre-export validation: shows orientation-exceeded waypoints per pass."""
+
+    def __init__(self, report: dict, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle('Orientation Validation Report')
+        self.setMinimumSize(520, 360)
+
+        vl = QVBoxLayout(self)
+
+        summary = (
+            f"<b>{report['total_exceeded']}</b> waypoint(s) exceed the orientation limit "
+            f"({report['limit_deg']}°).  "
+            f"Max deviation: <b>{report['max_deviation_deg']}°</b>."
+        )
+        vl.addWidget(QLabel(summary))
+
+        table = QTableWidget(len(report['passes_with_issues']), 4)
+        table.setHorizontalHeaderLabels(['Pass ID', 'Region', 'Exceeded', 'Max Δ (°)'])
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        for row, (pid, region, count, max_d) in enumerate(report['passes_with_issues']):
+            for col, val in enumerate([str(pid), region, str(count), str(max_d)]):
+                table.setItem(row, col, QTableWidgetItem(val))
+        vl.addWidget(table)
+
+        vl.addWidget(QLabel('Proceed with export despite orientation issues?'))
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.button(QDialogButtonBox.Ok).setText('Proceed with Export')
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        vl.addWidget(btns)
 
 
 # ---------------------------------------------------------------------------
@@ -1483,6 +1555,14 @@ with JSON / CSV / OLP export.</p>
         if not self._current_routes:
             QMessageBox.warning(self, 'Nothing to export', 'Generate a path first.')
             return
+
+        profile = get_active_profile()
+        if profile:
+            report = _build_orientation_report(self._current_routes, profile)
+            if report['total_exceeded'] > 0:
+                rdlg = OrientationReportDialog(report, self)
+                if rdlg.exec() != QDialog.DialogCode.Accepted:
+                    return
 
         dlg = _OlpExportDialog(self._OLP_FORMATS, parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
