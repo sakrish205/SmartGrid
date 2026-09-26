@@ -106,8 +106,8 @@ _LARGE_BTN_CSS = (
 _TOGGLE_CSS = (
     'QPushButton{'
     '  background:#ffffff;border:1px solid #c0c0c0;border-radius:0px;'
-    '  padding:2px 6px;font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;'
-    '  min-height:20px;'
+    '  padding:2px 3px;font-size:10px;font-family:"Segoe UI",Arial;color:#1f1f1f;'
+    '  min-height:20px;min-width:40px;max-width:56px;'
     '}'
     'QPushButton:hover{background:#e5e5e5;border-color:#888;}'
     'QPushButton:checked{background:#0078d4;border-color:#005a9e;color:#ffffff;}'
@@ -405,6 +405,7 @@ class SmartRibbon(QWidget):
 
         self._select_btn = QPushButton('Select Faces')
         self._select_btn.setCheckable(True)
+        self._select_btn.setMaximumWidth(110)
         self._select_btn.setStyleSheet(
             'QPushButton{background:#fff;border:1px solid #c0c0c0;border-radius:0px;'
             '  padding:2px 6px;font-size:11px;font-family:"Segoe UI",Arial;color:#1f1f1f;'
@@ -418,10 +419,12 @@ class SmartRibbon(QWidget):
         row2.addWidget(self._none_btn)
         row2.addSpacing(4)
         row2.addWidget(self._select_btn)
+        row2.addStretch()
 
         vl.addLayout(row1)
         vl.addLayout(row2)
         g.add_layout(vl)
+        g.setMaximumWidth(360)
         return g
 
     # ── Parameters ────────────────────────────────────────────────────────
@@ -657,13 +660,8 @@ class SmartRibbon(QWidget):
         for c in (self._grid_check, self._arrows_check):
             c.setStyleSheet(_CHK_CSS)
 
-        vs_btn = _small_btn('Settings', _make_icon('settings', 16))
-        vs_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        vs_btn.clicked.connect(self.view_settings_req)
-
         vl.addWidget(self._grid_check)
         vl.addWidget(self._arrows_check)
-        vl.addWidget(vs_btn)
         g.add_layout(vl)
         return g
 
