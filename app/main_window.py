@@ -25,6 +25,7 @@ from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QDesktopServices
 from app.path.path_model import PaintRoute, GenerationParams
 from app.ui.ribbon import SmartRibbon
 from app.export.json_export import export_route_json
+from app.robot.robot_profile import get_active_profile, load_profiles
 from app.export.csv_export import export_route_csv
 from app.export.olp_export import export_robodk, export_vc, export_delmia_apt, export_gcode
 from app.ui.view_settings_dialog import ViewSettingsDialog, DEFAULTS as _COLOR_DEFAULTS
@@ -200,6 +201,7 @@ def _offset_route_by_standoff(route: 'PaintRoute', mesh, standoff_mm: float) -> 
             points=_offset_pts(p.points),
             is_forward=p.is_forward, sub_index=p.sub_index,
             slice_position=p.slice_position,
+            normals=p.normals,  # surface normals unchanged by standoff offset
         ))
     new_conns = []
     for c in route.connections:
@@ -543,6 +545,11 @@ class MainWindow(QMainWindow):
         export_menu.addAction('Export CSV...',  self._export_csv)
         export_menu.addAction('Export OLP...',  self._export_olp)
 
+        self._robots_menu = mb.addMenu('Robots')
+        self._robots_menu.addAction('Manage Robots…', self._open_robot_manager)
+        self._robots_menu.addSeparator()
+        self._refresh_robots_menu()
+
         help_menu = mb.addMenu('Help')
         help_menu.addAction('How to Use SmartGrid...', self._show_help)
         help_menu.addSeparator()
@@ -550,6 +557,45 @@ class MainWindow(QMainWindow):
             lambda: QDesktopServices.openUrl(QUrl('https://github.com/sakrish205/SmartGrid')))
         help_menu.addSeparator()
         help_menu.addAction('About SmartGrid...', self._show_about)
+
+    # ------------------------------------------------------------------
+    # Robot profile helpers
+    # ------------------------------------------------------------------
+
+    def _refresh_robots_menu(self) -> None:
+        """Repopulate the Robots menu with current profiles (called after manager closes)."""
+        # Remove old profile actions (keep 'Manage Robots…' + separator = first 2 actions)
+        actions = self._robots_menu.actions()
+        for act in actions[2:]:
+            self._robots_menu.removeAction(act)
+
+        profiles, active = load_profiles()
+        if not profiles:
+            no_act = QAction('(no profiles)', self)
+            no_act.setEnabled(False)
+            self._robots_menu.addAction(no_act)
+            return
+
+        for p in profiles:
+            act = QAction(p.name, self, checkable=True)
+            act.setChecked(p.name == active)
+            act.triggered.connect(lambda checked, name=p.name: self._set_active_robot(name))
+            self._robots_menu.addAction(act)
+
+    def _set_active_robot(self, name: str) -> None:
+        from app.robot.robot_profile import set_active_profile
+        set_active_profile(name)
+        self._refresh_robots_menu()
+        self.statusBar().showMessage(f'Active robot: {name}')
+
+    def _open_robot_manager(self) -> None:
+        from app.robot.robot_manager_dialog import RobotManagerDialog
+        dlg = RobotManagerDialog(self)
+        dlg.exec()
+        self._refresh_robots_menu()
+        active = get_active_profile()
+        if active:
+            self.statusBar().showMessage(f'Active robot: {active.name}')
 
     # ------------------------------------------------------------------
     # View helpers

@@ -41,6 +41,7 @@ class PaintPass:
     is_forward: bool      # True = first stitched direction, False = reversed
     sub_index: int        # 0 = primary chain, >0 = additional chain at same level (holes)
     slice_position: float # coordinate along slice axis, for debugging
+    normals: np.ndarray | None = None  # (N, 3) per-waypoint surface normals; None for non-geodesic modes
 
 
 @dataclass

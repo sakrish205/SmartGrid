@@ -374,7 +374,8 @@ def generate_conform_route(
                 if np.linalg.norm(_p.points[-1] - _cur) < np.linalg.norm(_p.points[0] - _cur):
                     _p = PaintPass(id=_p.id, region_id=_p.region_id, direction=_p.direction,
                                    points=_p.points[::-1].copy(), is_forward=not _p.is_forward,
-                                   sub_index=_p.sub_index, slice_position=_p.slice_position)
+                                   sub_index=_p.sub_index, slice_position=_p.slice_position,
+                                   normals=_p.normals[::-1].copy() if _p.normals is not None else None)
                 _sorted.append(_p)
                 _cur = _p.points[-1]
         else:
