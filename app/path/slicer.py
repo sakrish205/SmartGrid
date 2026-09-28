@@ -178,6 +178,23 @@ def slice_region(
             keep   = mids >= cutoff if sign > 0 else mids <= cutoff
             if keep.sum() > 0:
                 filtered = filtered[keep]
+                mids     = mids[keep]
+
+        # Outward-reach cap: the outward-normal threshold above is deliberately
+        # permissive (keeps transition faces so e.g. LEFT's top edge isn't
+        # dropped), but on a surface that curves smoothly with no >80mm gap to
+        # split on (e.g. TOP blending into the side walls), that same filter
+        # can follow the curve arbitrarily far past the region's real extent.
+        # Cap how far past the outward-most point in THIS plane's cluster is
+        # kept — the region's own top/bottom-of-cap boundary, not a hard
+        # distance from the mesh as a whole.
+        _MAX_OUTWARD_SPAN_MM = 150.0  # ponytail: ~1.5x a 100mm pitch; tune if regions need a deeper cap
+        if len(mids) > 0:
+            extreme = mids.max() if sign > 0 else mids.min()
+            within_span = (extreme - mids <= _MAX_OUTWARD_SPAN_MM) if sign > 0 \
+                          else (mids - extreme <= _MAX_OUTWARD_SPAN_MM)
+            if within_span.sum() > 0:
+                filtered = filtered[within_span]
 
     if len(filtered) == 0:
         return None
