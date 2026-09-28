@@ -94,6 +94,7 @@ def generate_route(
         mesh_data.up_axis,
         spray_width_mm,
         direction=direction,
+        fwd_axis=mesh_data.fwd_axis,
     )
 
     all_passes: list[PaintPass] = []
@@ -107,6 +108,8 @@ def generate_route(
             plane_origin,
             region_id=region_id,
             up_axis=mesh_data.up_axis,
+            fwd_axis=mesh_data.fwd_axis,
+            right_axis=mesh_data.right_axis,
         )
         if segments is None:
             continue
