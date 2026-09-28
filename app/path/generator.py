@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import defaultdict
 import logging
 import numpy as np
-import trimesh as _trimesh
 
 _log = logging.getLogger(__name__)
 from app.mesh.preprocessor import MeshData
@@ -97,23 +96,15 @@ def generate_route(
         direction=direction,
     )
 
-    # Slice only the region faces per plane — avoids scanning all F_total faces N times.
-    # Vertices are shared (no copy); face normals are preserved.
-    full_mesh = mesh_data.trimesh_mesh
-    sub_mesh  = _trimesh.Trimesh(
-        vertices=full_mesh.vertices,
-        faces=full_mesh.faces[region_face_indices],
-        process=False,
-    )
-    sub_all = np.arange(len(sub_mesh.faces), dtype=np.int64)
-
     all_passes: list[PaintPass] = []
     pass_id = 0
 
+    outward = _slicer._outward_sign(region_id, mesh_data.up_axis)
+
     for plane_index, (plane_normal, plane_origin, slice_pos) in enumerate(planes):
         segments = _slicer.slice_region(
-            sub_mesh,
-            sub_all,
+            mesh_data.trimesh_mesh,
+            region_face_indices,
             plane_normal,
             plane_origin,
             region_id=region_id,
@@ -122,7 +113,22 @@ def generate_route(
         if segments is None:
             continue
 
-        polylines = _stitcher.stitch_segments(segments)
+        if outward is not None:
+            # Named region: project to a single straight line at the outermost depth.
+            # This gives uniform, robot-friendly passes regardless of surface curvature.
+            depth_axis, sign = outward
+            slice_axis = int(np.argmax(np.abs(plane_normal)))
+            width_axis = 3 - depth_axis - slice_axis  # the remaining axis
+            pts_all = segments.reshape(-1, 3)
+            depth = float(pts_all[:, depth_axis].min() if sign < 0
+                          else pts_all[:, depth_axis].max())
+            w_min = float(pts_all[:, width_axis].min())
+            w_max = float(pts_all[:, width_axis].max())
+            p0 = np.zeros(3); p0[slice_axis] = slice_pos; p0[depth_axis] = depth; p0[width_axis] = w_min
+            p1 = p0.copy(); p1[width_axis] = w_max
+            polylines = [np.array([p0, p1])]
+        else:
+            polylines = _stitcher.stitch_segments(segments)
         if not polylines:
             continue
 
