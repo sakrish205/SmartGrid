@@ -18,8 +18,6 @@ class MeshData:
     bbox_extents: np.ndarray      # (3,) per-axis lengths
     up_axis: int                  # 0=X, 1=Y, 2=Z set by user at load time
     pyvista_mesh: pv.PolyData     # pre-converted, stored once
-    fwd_axis: int | None = None   # detected by regions.classify_regions(); None until then
-    right_axis: int | None = None
 
 
 def preprocess(mesh: trimesh.Trimesh, source_path: str, up_axis: int = 2) -> MeshData:

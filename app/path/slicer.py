@@ -8,7 +8,6 @@ def compute_slice_config(
     region_id: str,
     up_axis: int,
     mean_face_normal: np.ndarray | None = None,
-    fwd_axis: int | None = None,
 ) -> dict:
     """Return plane_normal and slice_axis for the given region and up-axis.
 
@@ -18,15 +17,8 @@ def compute_slice_config(
 
     For arbitrary selections ('selection'), the dominant normal axis of the
     selected faces determines which branch applies.
-
-    `fwd_axis` should come from `mesh_data.fwd_axis` (set by
-    `regions.classify_regions`, which auto-detects it per mesh) so FRONT/REAR
-    slicing agrees with how FRONT/REAR faces were actually selected. Falls
-    back to the `(up_axis+1)%3` guess when not yet detected (e.g. no region
-    classified this session).
     """
-    if fwd_axis is None:
-        fwd_axis = (up_axis + 1) % 3
+    fwd_axis = (up_axis + 1) % 3
 
     if region_id in ('TOP', 'BOTTOM'):
         slice_axis = fwd_axis
@@ -52,7 +44,6 @@ def compute_slice_planes(
     up_axis: int,
     spray_width_mm: float,
     direction: str = 'horizontal',
-    fwd_axis: int | None = None,
 ) -> list[tuple[np.ndarray, np.ndarray, float]]:
     """Return list of (plane_normal, plane_origin, position) tuples.
 
@@ -65,7 +56,7 @@ def compute_slice_planes(
     if len(region_face_indices) == 0:
         return []
     mean_face_normal = np.abs(mesh.face_normals[region_face_indices]).mean(axis=0)
-    cfg = compute_slice_config(region_id, up_axis, mean_face_normal=mean_face_normal, fwd_axis=fwd_axis)
+    cfg = compute_slice_config(region_id, up_axis, mean_face_normal=mean_face_normal)
     plane_normal: np.ndarray = cfg['plane_normal']
     slice_axis: int          = cfg['slice_axis']
     if direction == 'vertical':
@@ -99,23 +90,10 @@ def compute_slice_planes(
     return planes
 
 
-def _outward_sign(
-    region_id: str,
-    up_axis: int,
-    fwd_axis: int | None = None,
-    right_axis: int | None = None,
-) -> tuple[int, int] | None:
-    """Return (axis_index, sign) for the outward-facing normal of a named region.
-
-    `fwd_axis`/`right_axis` should come from `mesh_data` (auto-detected by
-    `regions.classify_regions`) so LEFT/RIGHT here means the same faces the
-    classifier put in LEFT/RIGHT. Falls back to the `(up_axis+1)%3`/`(up_axis+2)%3`
-    guess when not yet detected.
-    """
-    if fwd_axis is None:
-        fwd_axis = (up_axis + 1) % 3
-    if right_axis is None:
-        right_axis = (up_axis + 2) % 3
+def _outward_sign(region_id: str, up_axis: int) -> tuple[int, int] | None:
+    """Return (axis_index, sign) for the outward-facing normal of a named region."""
+    fwd_axis   = (up_axis + 1) % 3
+    right_axis = (up_axis + 2) % 3
     table = {
         'TOP':    (up_axis,    +1),
         'BOTTOM': (up_axis,    -1),
@@ -134,8 +112,6 @@ def slice_region(
     plane_origin: np.ndarray,
     region_id: str = '',
     up_axis: int = 2,
-    fwd_axis: int | None = None,
-    right_axis: int | None = None,
 ) -> np.ndarray | None:
     """Intersect mesh with a plane; return only segments from the selected region.
 
@@ -168,7 +144,7 @@ def slice_region(
     # adjacent region (e.g. top-leaning faces assigned to TOP instead of FRONT) are
     # valid geometry but would be silently dropped. The outward-normal threshold
     # (> -0.25) already handles back-face exclusion for solid meshes.
-    outward = _outward_sign(region_id, up_axis, fwd_axis=fwd_axis, right_axis=right_axis)
+    outward = _outward_sign(region_id, up_axis)
     if outward is not None:
         axis, sign = outward
         region_mask = (mesh.face_normals[face_ids, axis] * sign) > -0.25
