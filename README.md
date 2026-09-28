@@ -12,8 +12,54 @@ SmartGrid solves the **manufacturing process-planning problem** of generating sy
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green)](https://pypi.org/project/PySide6/)
-[![Version](https://img.shields.io/badge/version-1.5-informational)]()
+[![Version](https://img.shields.io/badge/version-1.5.3-informational)]()
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+
+---
+
+## Bug Fixes (v1.5.3)
+
+### Mesh Surface — missing coverage at the top of curved side regions — `generator.py`
+
+**Problem:** On a side region (LEFT/RIGHT/FRONT/REAR) with a curved top edge, Mesh Surface passes stopped short of the top — the upper planes returned zero or near-zero segments even though the mesh clearly extended further.
+
+**Root cause:** `generate_route()` built a `sub_mesh` containing only the faces the classifier had assigned to that region, then sliced that instead of the full mesh. Near a curved top edge the classifier assigns faces to whichever adjacent region (e.g. TOP) their normal is closer to — these transition faces are valid geometry but were entirely absent from the sub_mesh, so the outward-normal filter in `slicer.py` (see Mesh Surface, step 4 below) had nothing left to catch at those planes.
+
+```python
+# Before — sub_mesh built from only the classifier-assigned faces
+sub_mesh = trimesh.Trimesh(vertices=full_mesh.vertices,
+                            faces=full_mesh.faces[region_face_indices], process=False)
+segments = slice_region(sub_mesh, sub_all, plane_normal, plane_origin, region_id, up_axis)
+
+# After — slice the full mesh; transition faces are present for the
+# outward-normal filter to include
+segments = slice_region(mesh_data.trimesh_mesh, region_face_indices,
+                         plane_normal, plane_origin, region_id, up_axis)
+```
+
+Measured on a 3.18M-face bumper model: full-mesh slicing across 9 planes takes 1.30s (runs in a background thread — no UI freeze) versus 0.63s for the strict sub-mesh, in exchange for restoring coverage all the way to the top of the region.
+
+---
+
+### Waypoint interval defaulted to unresampled raw points — `ribbon.py`
+
+**Problem:** With "Custom" interval unchecked, `get_waypoint_spacing_mm()` returned `0.0`, which skips the resampling step entirely — passes kept whatever uneven point spacing came straight out of the mesh triangulation.
+
+**Fix:** Default to `spray_width_mm / 5` instead of `0.0`, so every pass gets evenly-spaced waypoints scaled to the selected pitch without needing to touch "Custom". Checking "Custom" still overrides with the user's exact entered value, unchanged.
+
+```python
+# Before
+def get_waypoint_spacing_mm(self) -> float:
+    return self._wpt_interval_spin.value() if self._custom_check.isChecked() else 0.0
+
+# After
+def get_waypoint_spacing_mm(self) -> float:
+    if self._custom_check.isChecked():
+        return self._wpt_interval_spin.value()
+    return self.get_spray_width_mm() / 5.0
+```
+
+Since `get_spray_width_mm()` already converts through the active unit, the pitch/5 default stays correct in mm, inches, or any other selected unit.
 
 ---
 
