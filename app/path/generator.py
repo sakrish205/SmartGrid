@@ -96,11 +96,6 @@ def generate_route(
         direction=direction,
     )
 
-    # Named regions (LEFT/RIGHT/etc.) need only the primary pass per level —
-    # the full-mesh slice produces short fragments from curved transition faces.
-    _outward = _slicer._outward_sign(region_id, mesh_data.up_axis)
-    _max_sub = 1 if _outward is not None else _MAX_SUB_PER_LEVEL
-
     all_passes: list[PaintPass] = []
     pass_id = 0
 
@@ -125,7 +120,7 @@ def generate_route(
         polylines = _filter_polylines(polylines, spray_width_mm)
 
         # Cap fragments per level: too many means edge/corner noise on complex meshes
-        polylines = polylines[:_max_sub]
+        polylines = polylines[:_MAX_SUB_PER_LEVEL]
 
         # Direction alternates by plane index, not by total pass count,
         # so holes/sub-passes don't disrupt the pattern.
