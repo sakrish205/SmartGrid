@@ -839,8 +839,11 @@ class SmartRibbon(QWidget):
         return self._custom_check.isChecked()
 
     def get_waypoint_spacing_mm(self) -> float:
-        """0.0 = disabled (no resampling); spinner value when Custom is checked."""
-        return self._wpt_interval_spin.value() if self._custom_check.isChecked() else 0.0
+        """Custom spin value when Custom is checked; otherwise pitch/5 for a
+        uniform default spacing that scales with the selected spray width."""
+        if self._custom_check.isChecked():
+            return self._wpt_interval_spin.value()
+        return self.get_spray_width_mm() / 5.0
 
     # ------------------------------------------------------------------
     # Public state setters (called by MainWindow)
