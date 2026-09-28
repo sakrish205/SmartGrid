@@ -24,6 +24,40 @@ _log = logging.getLogger(__name__)
 _RDP_EPSILON = 0.3
 
 
+def _find_seed_vertices(
+    sub_mesh: trimesh.Trimesh,
+    sweep_axis: int,
+    step: float,
+) -> np.ndarray:
+    """Vertices within step/4 of each connected component's own minimum
+    coordinate along sweep_axis.
+
+    A region's sub-mesh is often fragmented into many disconnected pieces
+    (ribs, separate panels the classifier grouped together). Heat can't
+    propagate across a disconnection, so seeding only near the mesh's
+    global minimum leaves every other component with no seed at all —
+    those pieces never reach the target iso-distance and are silently
+    missing from the output. Seeding every component near its own local
+    minimum guarantees each one gets a valid distance field.
+    compute_distance_multisource already accepts an arbitrary-length seed
+    list, so this is a drop-in replacement.
+    """
+    coords = sub_mesh.vertices[:, sweep_axis]
+    labels = trimesh.graph.connected_component_labels(
+        sub_mesh.edges_unique, node_count=len(sub_mesh.vertices))
+
+    seeds = []
+    for label in np.unique(labels):
+        comp_idx = np.where(labels == label)[0]
+        comp_coords = coords[comp_idx]
+        threshold = comp_coords.min() + step * 0.25
+        local = comp_idx[comp_coords <= threshold]
+        if len(local) == 0:
+            local = comp_idx[[int(np.argmin(comp_coords))]]
+        seeds.append(local)
+    return np.concatenate(seeds)
+
+
 def _isocontour(
     mesh: trimesh.Trimesh,
     dist: np.ndarray,          # per-vertex scalar (geodesic distance)
@@ -66,19 +100,6 @@ def _isocontour(
         return None
     return np.array(segments, dtype=float)   # (K, 2, 3)
 
-
-def _find_seed_vertices(
-    sub_mesh: trimesh.Trimesh,
-    sweep_axis: int,
-    step: float,
-) -> np.ndarray:
-    """Vertices within step/4 of the minimum coordinate along sweep_axis."""
-    coords = sub_mesh.vertices[:, sweep_axis]
-    threshold = coords.min() + step * 0.25
-    idx = np.where(coords <= threshold)[0]
-    if len(idx) == 0:
-        idx = np.array([int(np.argmin(coords))])
-    return idx
 
 
 def _per_point_normals(
