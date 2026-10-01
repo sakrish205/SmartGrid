@@ -41,6 +41,34 @@ Measured on a 3.18M-face bumper model: full-mesh slicing across 9 planes takes 1
 
 ---
 
+### Geodesic generator skipped disconnected mesh components — `geodesic_generator.py`
+
+**Problem:** On meshes with disconnected components (e.g. a bumper with separate mounting flanges), the heat-method geodesic generator seeded only the global minimum vertex. Components whose local minimum was far from the global minimum received zero heat and produced no passes — those surface areas were simply skipped.
+
+**Root cause:** `_find_seed_vertices()` found the single vertex with the smallest coordinate along the sweep axis across the entire sub-mesh, then seeded only that vertex. Any component whose lowest vertex was above the global minimum got no seed and was invisible to the heat propagation.
+
+```python
+# Before — one seed for the whole mesh
+threshold = coords.min() + step * 0.25
+return np.where(coords <= threshold)[0]
+
+# After — one seed per connected component
+labels = trimesh.graph.connected_component_labels(
+    sub_mesh.edges_unique, node_count=len(sub_mesh.vertices))
+seeds = []
+for label in np.unique(labels):
+    comp_idx = np.where(labels == label)[0]
+    comp_coords = coords[comp_idx]
+    threshold = comp_coords.min() + step * 0.25
+    local = comp_idx[comp_coords <= threshold]
+    seeds.append(local if len(local) > 0 else comp_idx[[int(np.argmin(comp_coords))]])
+return np.concatenate(seeds)
+```
+
+Measured on the RIGHT bumper region (175 k faces, 2 disconnected components): pass count went from 2 (0.8 mm total coverage) to 1,050 (2,611.7 mm), restoring full surface coverage on all components.
+
+---
+
 ### Waypoint interval defaulted to unresampled raw points — `ribbon.py`
 
 **Problem:** With "Custom" interval unchecked, `get_waypoint_spacing_mm()` returned `0.0`, which skips the resampling step entirely — passes kept whatever uneven point spacing came straight out of the mesh triangulation.
