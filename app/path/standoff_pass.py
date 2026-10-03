@@ -69,6 +69,7 @@ def first_pass_line(
     Prints a warning and uses the longest segment if the intersection is
     disconnected (e.g. a hole in the panel).
     """
+    print(f'[first_pass_line] outer_face_ids={len(outer_face_ids)} / {len(mesh.faces)} total faces')
     sub = mesh.submesh([outer_face_ids], append=True)
 
     if direction == 'horizontal':
@@ -95,6 +96,7 @@ def first_pass_line(
     plane_nrm[axis]  = 1.0
     plane_orig       = np.zeros(3)
     plane_orig[axis] = plane_pos
+    print(f'[first_pass_line] axis={axis}  lo={lo:.1f}  hi={hi:.1f}  plane_pos={plane_pos:.1f}')
 
     lines = trimesh.intersections.mesh_plane(sub, plane_nrm, plane_orig)
 
@@ -105,10 +107,10 @@ def first_pass_line(
         )
 
     chains = _chain_segments(lines)
+    chain_lens = [len(c) for c in chains]
+    print(f'[first_pass_line] chains={len(chains)}  lengths={chain_lens}')
     if len(chains) > 1:
-        lengths = [len(c) for c in chains]
-        print(f"first_pass_line: {len(chains)} disconnected segments "
-              f"(lengths {lengths}); using longest")
+        print(f'[first_pass_line] disconnected — using longest chain ({max(chain_lens)} pts)')
         chains = [max(chains, key=len)]
 
     line_pts            = chains[0]
