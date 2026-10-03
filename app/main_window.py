@@ -357,6 +357,11 @@ class _PathWorker(QThread):
         import logging as _logging
         if self._exp_straighten:
             _log = _logging.getLogger(__name__)
+            if self._standoff_mm <= 0.0:
+                self.error.emit(
+                    'Set standoff > 0 mm to use the straightened first-pass preview.'
+                )
+                return
             try:
                 from app.path.outer_skin    import get_outer_skin_faces
                 from app.path.standoff_pass import first_pass_line
@@ -365,13 +370,13 @@ class _PathWorker(QThread):
                 outer_ids = get_outer_skin_faces(mesh)
                 gun_pts   = first_pass_line(
                     mesh, outer_ids,
-                    standoff_mm=self._standoff_mm if self._standoff_mm > 0 else 100.0,
+                    standoff_mm=self._standoff_mm,
                     pitch_mm=self._spray_mm,
                     direction=self._direction,
                 )
                 corners   = straighten_pass(
                     mesh, gun_pts,
-                    standoff_mm=self._standoff_mm if self._standoff_mm > 0 else 100.0,
+                    standoff_mm=self._standoff_mm,
                 )
                 pp    = PaintPass(id=0, region_id='outer_skin_preview',
                                   direction=self._direction, points=corners,
