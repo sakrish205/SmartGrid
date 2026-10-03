@@ -379,11 +379,16 @@ class _PathWorker(QThread):
                     mesh, gun_pts,
                     standoff_mm=self._standoff_mm,
                 )
+                total_len = float(np.linalg.norm(np.diff(corners, axis=0), axis=1).sum())
                 pp    = PaintPass(id=0, region_id='outer_skin_preview',
                                   direction=self._direction, points=corners,
                                   is_forward=True, sub_index=0, slice_position=0.0)
                 route = PaintRoute(region_id='outer_skin_preview',
-                                   passes=[pp], connections=[])
+                                   passes=[pp], connections=[],
+                                   unit='mm',
+                                   spacing_mm=self._spray_mm,
+                                   total_passes=1,
+                                   total_length_mm=total_len)
                 self.finished.emit([route])
                 return
             except Exception as exc:
