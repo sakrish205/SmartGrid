@@ -329,8 +329,9 @@ class _LoadWorker(QThread):
 
 
 class _PathWorker(QThread):
-    finished = Signal(object)
-    error    = Signal(str)
+    finished     = Signal(object)
+    error        = Signal(str)
+    exp_warning  = Signal(str)   # emitted when experimental path fails but fallback succeeds
 
     def __init__(
         self,
@@ -389,6 +390,10 @@ class _PathWorker(QThread):
                 _log.warning(
                     'experimental mesh-surface straighten failed, falling back '
                     'to standard pipeline: %s\n%s', exc, traceback.format_exc()
+                )
+                self.exp_warning.emit(
+                    f'Straightened preview failed: {exc}. '
+                    f'Showing standard output instead.'
                 )
         try:
             mesh = self._mesh_data.trimesh_mesh
@@ -1213,7 +1218,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(msg)
         worker = _PathWorker(self._model.data, pairs, spray_mm,
                              waypoint_spacing_mm=wpt_mm,
-                             standoff_mm=self._ribbon.get_standoff_mm(),
+                             standoff_mm=self._ribbon.get_params_standoff_mm(),
                              direction=self._ribbon.get_direction(),
                              robot_profile=profile,
                              exp_straighten=self._ribbon.get_exp_mesh_straighten())
@@ -1223,6 +1228,9 @@ class MainWindow(QMainWindow):
         self._viewer.show_bbox(True)
         worker.finished.connect(self._on_route_ready)
         worker.error.connect(self._on_route_error)
+        worker.exp_warning.connect(
+            lambda msg: QMessageBox.warning(self, 'Straightened Preview', msg)
+        )
         self._worker = worker
         worker.start()
 

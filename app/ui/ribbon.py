@@ -462,6 +462,23 @@ class SmartRibbon(QWidget):
             'Typical values: 80–150 mm for automotive surfaces.')
         pitch_hl.addWidget(self._pitch_spin)
 
+        standoff_p_hl = QHBoxLayout()
+        standoff_p_hl.setSpacing(4)
+        standoff_p_hl.addWidget(_row_label('Standoff'))
+        self._params_standoff_spin = QDoubleSpinBox()
+        self._params_standoff_spin.setRange(150.0, 300.0)
+        self._params_standoff_spin.setDecimals(1)
+        self._params_standoff_spin.setSingleStep(10.0)
+        self._params_standoff_spin.setValue(250.0)
+        self._params_standoff_spin.setSuffix('  mm')
+        self._params_standoff_spin.setMinimumWidth(90)
+        self._params_standoff_spin.setMaximumWidth(110)
+        self._params_standoff_spin.setStyleSheet(_SPIN_CSS)
+        self._params_standoff_spin.setToolTip(
+            'Gun-to-surface standoff for the Mesh Surface straightened preview.\n'
+            'Typical automotive range: 200–270 mm.')
+        standoff_p_hl.addWidget(self._params_standoff_spin)
+
         dir_hl = QHBoxLayout()
         dir_hl.setSpacing(8)
         dir_hl.addWidget(_row_label('Direction'))
@@ -479,6 +496,7 @@ class SmartRibbon(QWidget):
 
         vl.addLayout(unit_hl)
         vl.addLayout(pitch_hl)
+        vl.addLayout(standoff_p_hl)
         vl.addLayout(dir_hl)
         g.add_layout(vl)
         return g
@@ -805,6 +823,13 @@ class SmartRibbon(QWidget):
         self._standoff_spin.setSuffix(f'  {new_unit}')
         self._standoff_spin.blockSignals(False)
 
+        ps_val = self._params_standoff_spin.value() * ratio
+        self._params_standoff_spin.blockSignals(True)
+        self._params_standoff_spin.setRange(150.0 * ratio, 300.0 * ratio)
+        self._params_standoff_spin.setValue(ps_val)
+        self._params_standoff_spin.setSuffix(f'  {new_unit}')
+        self._params_standoff_spin.blockSignals(False)
+
         self._current_unit = new_unit
         self.grid_changed.emit()
 
@@ -834,6 +859,9 @@ class SmartRibbon(QWidget):
 
     def get_standoff_mm(self) -> float:
         return self._standoff_spin.value() * UNIT_TO_MM.get(self._current_unit, 1.0)
+
+    def get_params_standoff_mm(self) -> float:
+        return self._params_standoff_spin.value() * UNIT_TO_MM.get(self._current_unit, 1.0)
 
     def get_face_grid_submode(self) -> str:
         """'shadow' | 'mesh_standoff'"""
