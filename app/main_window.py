@@ -23,7 +23,7 @@ from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QDesktopServices
 
 # Heavy imports (trimesh, pyvista, pyvistaqt) are deferred to first use
 # so the window appears before the 2-3 s cold-start load completes.
-from app.path.path_model import PaintRoute, GenerationParams
+from app.path.path_model import PaintRoute, PaintPass, GenerationParams
 from app.ui.ribbon import SmartRibbon
 from app.export.json_export import export_route_json
 from app.robot.robot_profile import get_active_profile, load_profiles
@@ -341,6 +341,7 @@ class _PathWorker(QThread):
         standoff_mm: float = 0.0,
         direction: str = 'horizontal',
         robot_profile=None,   # RobotProfile | None — triggers geodesic when set
+        exp_straighten: bool = False,
     ) -> None:
         super().__init__()
         self._mesh_data        = mesh_data
@@ -350,8 +351,40 @@ class _PathWorker(QThread):
         self._standoff_mm      = standoff_mm
         self._direction        = direction
         self._robot_profile    = robot_profile
+        self._exp_straighten   = exp_straighten
 
     def run(self) -> None:
+        import logging as _logging
+        if self._exp_straighten:
+            _log = _logging.getLogger(__name__)
+            try:
+                from app.path.outer_skin    import get_outer_skin_faces
+                from app.path.standoff_pass import first_pass_line
+                from app.path.straighten    import straighten_pass
+                mesh      = self._mesh_data.trimesh_mesh
+                outer_ids = get_outer_skin_faces(mesh)
+                gun_pts   = first_pass_line(
+                    mesh, outer_ids,
+                    standoff_mm=self._standoff_mm if self._standoff_mm > 0 else 100.0,
+                    pitch_mm=self._spray_mm,
+                    direction=self._direction,
+                )
+                corners   = straighten_pass(
+                    mesh, gun_pts,
+                    standoff_mm=self._standoff_mm if self._standoff_mm > 0 else 100.0,
+                )
+                pp    = PaintPass(id=0, region_id='outer_skin_preview',
+                                  direction=self._direction, points=corners,
+                                  is_forward=True, sub_index=0, slice_position=0.0)
+                route = PaintRoute(region_id='outer_skin_preview',
+                                   passes=[pp], connections=[])
+                self.finished.emit([route])
+                return
+            except Exception as exc:
+                _log.warning(
+                    'experimental mesh-surface straighten failed, falling back '
+                    'to standard pipeline: %s\n%s', exc, traceback.format_exc()
+                )
         try:
             mesh = self._mesh_data.trimesh_mesh
             routes = []
@@ -1177,7 +1210,8 @@ class MainWindow(QMainWindow):
                              waypoint_spacing_mm=wpt_mm,
                              standoff_mm=self._ribbon.get_standoff_mm(),
                              direction=self._ribbon.get_direction(),
-                             robot_profile=profile)
+                             robot_profile=profile,
+                             exp_straighten=self._ribbon.get_exp_mesh_straighten())
         self._face_grid_planes_cache = None
         self._adaptive_grid_cache    = None
         self._viewer.clear_face_grid_planes()

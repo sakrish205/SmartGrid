@@ -571,7 +571,25 @@ class SmartRibbon(QWidget):
         self._fg_subpanel.setVisible(False)
         hl.addWidget(self._fg_subpanel)
 
+        # Mesh Surface experimental sub-panel — hidden until Mesh Surface selected
+        ms_vl = QVBoxLayout()
+        ms_vl.setSpacing(2)
+        ms_vl.setContentsMargins(2, 0, 0, 0)
+        self._exp_mesh_straighten_cb = QCheckBox('⚠ straightened first pass [preview]')
+        self._exp_mesh_straighten_cb.setChecked(False)
+        self._exp_mesh_straighten_cb.setToolTip(
+            'Experimental: replaces Mesh Surface output with the new\n'
+            'outer-skin → first pass → straightened segments pipeline.\n'
+            'One straightened pass only.  Falls back to standard on error.')
+        self._exp_mesh_straighten_cb.setStyleSheet('font-style: italic; color: #888;')
+        ms_vl.addWidget(self._exp_mesh_straighten_cb)
+        self._mesh_subpanel = QWidget()
+        self._mesh_subpanel.setLayout(ms_vl)
+        self._mesh_subpanel.setVisible(False)
+        hl.addWidget(self._mesh_subpanel)
+
         self._face_grid_radio.toggled.connect(self._on_target_changed)
+        self._mesh_radio.toggled.connect(self._on_target_changed)
         g.add_layout(hl)
         return g
 
@@ -823,7 +841,11 @@ class SmartRibbon(QWidget):
 
     def _on_target_changed(self) -> None:
         self._fg_subpanel.setVisible(self._face_grid_radio.isChecked())
+        self._mesh_subpanel.setVisible(self._mesh_radio.isChecked())
         self.updateGeometry()
+
+    def get_exp_mesh_straighten(self) -> bool:
+        return self._exp_mesh_straighten_cb.isChecked()
 
     def is_direction_flipped(self) -> bool:
         return self._ccw_radio.isChecked()
