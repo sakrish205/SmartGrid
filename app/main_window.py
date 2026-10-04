@@ -255,25 +255,37 @@ class OrientationReportDialog(QDialog):
 # ---------------------------------------------------------------------------
 
 def _offset_route_by_standoff(route: 'PaintRoute', mesh, standoff_mm: float) -> 'PaintRoute':
-    """Shift every waypoint outward along the nearest mesh face normal."""
+    """Shift every waypoint outward along the nearest mesh face normal.
+
+    Also populates PaintPass.normals and PaintPass.tangent for Mesh Surface passes
+    that don't already carry them.  TCP frame math from Noether createTransform.
+    """
     import trimesh.proximity as _prox
     from app.path.path_model import PaintPass, Connection, PaintRoute as _PR
+    from app.path.local_normals import build_tcp_frames
 
-    def _offset_pts(pts: np.ndarray) -> np.ndarray:
+    def _offset_pts(pts: np.ndarray):
         if len(pts) == 0:
-            return pts
+            return pts, None
         _, _, face_ids = _prox.closest_point(mesh, pts)
         normals = mesh.face_normals[face_ids]
-        return pts + normals * standoff_mm
+        return pts + normals * standoff_mm, normals
 
     new_passes = []
     for p in route.passes:
+        new_pts, normals_arr = _offset_pts(p.points)
+        # Carry existing normals/tangent (e.g. from Conform); populate for Mesh Surface
+        out_normals = p.normals if p.normals is not None else normals_arr
+        out_tangent = p.tangent
+        if out_tangent is None and out_normals is not None and len(new_pts) >= 2:
+            out_tangent = build_tcp_frames(new_pts, out_normals)
         new_passes.append(PaintPass(
             id=p.id, region_id=p.region_id, direction=p.direction,
-            points=_offset_pts(p.points),
+            points=new_pts,
             is_forward=p.is_forward, sub_index=p.sub_index,
             slice_position=p.slice_position,
-            normals=p.normals,  # surface normals unchanged by standoff offset
+            normals=out_normals,
+            tangent=out_tangent,
         ))
     new_conns = []
     for c in route.connections:

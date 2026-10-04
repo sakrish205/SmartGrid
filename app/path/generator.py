@@ -3,14 +3,15 @@ from __future__ import annotations
 from collections import defaultdict
 import logging
 import numpy as np
+import trimesh
 
 _log = logging.getLogger(__name__)
 from app.mesh.preprocessor import MeshData
 from app.path.path_model import PaintPass, PaintRoute
-from app.path import slicer as _slicer
 from app.path import stitcher as _stitcher
 from app.path import connector as _connector
 from app.path.resampler import rdp_simplify, resample_arc, prune_collinear
+from app.path.face_grid_generator import _compute_surface_basis, _get_basis_faces
 
 _RDP_EPSILON       = 0.3   # mm — remove micro-jaggies from triangle discretisation
 _MIN_PASS_FRACTION = 0.10  # drop passes shorter than 10% of spray_width_mm …
@@ -87,28 +88,54 @@ def generate_route(
     if len(region_face_indices) == 0:
         raise ValueError(f"Region '{region_id}' has no classified triangles.")
 
-    planes = _slicer.compute_slice_planes(
-        mesh_data.trimesh_mesh,
-        region_face_indices,
-        region_id,
-        mesh_data.up_axis,
-        spray_width_mm,
-        direction=direction,
-    )
+    # Surface-basis planes (like Conform) give correct arc-length spacing on tilted
+    # surfaces.  Adapted from Noether PlaneSlicerRasterPlanner::planImpl: cut direction
+    # perpendicular to mesh surface normal, spaced along step_vec.
+    mesh = mesh_data.trimesh_mesh
+    basis_faces = _get_basis_faces(region_id, region_face_indices, mesh, mesh_data.up_axis)
+    mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, mesh_data.up_axis)
+    if direction == 'vertical':
+        pass_vec, step_vec = step_vec, pass_vec
+
+    all_verts = mesh.vertices[mesh.faces[region_face_indices].ravel()]
+    step_min = float((all_verts @ step_vec).min()) - 0.001
+    step_max = float((all_verts @ step_vec).max()) + 0.001
+
+    _step = spray_width_mm * 0.85
+    span = step_max - step_min
+    if span <= _step:
+        step_positions = [(step_min + step_max) / 2.0]
+    else:
+        first = step_min + _step / 2.0
+        step_positions = list(np.arange(first, step_max, _step))
 
     all_passes: list[PaintPass] = []
     pass_id = 0
 
-    for plane_index, (plane_normal, plane_origin, slice_pos) in enumerate(planes):
-        segments = _slicer.slice_region(
-            mesh_data.trimesh_mesh,
-            region_face_indices,
-            plane_normal,
-            plane_origin,
-            region_id=region_id,
-            up_axis=mesh_data.up_axis,
+    for plane_index, step_pos in enumerate(step_positions):
+        slice_pos = step_pos
+        plane_origin = step_pos * step_vec
+        result = trimesh.intersections.mesh_plane(
+            mesh,
+            plane_normal=step_vec,
+            plane_origin=plane_origin,
+            return_faces=True,
         )
-        if segments is None:
+        if result is None:
+            continue
+        raw_segs, seg_face_ids = result
+        if raw_segs is None or len(raw_segs) == 0:
+            continue
+
+        # Keep segments from faces pointing toward the spray direction (mean_n)
+        face_mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
+        segments = raw_segs[face_mask]
+        if len(segments) == 0:
+            continue
+
+        seg_lens = np.linalg.norm(segments[:, 1, :] - segments[:, 0, :], axis=1)
+        segments = segments[seg_lens > 1e-12]
+        if len(segments) == 0:
             continue
 
         polylines = _stitcher.stitch_segments(segments)
@@ -197,10 +224,7 @@ def generate_route(
         if len(p.points) >= 2
     )
 
-    normals = mesh_data.face_normals[region_face_indices]
-    mean_n = normals.mean(axis=0)
-    norm = np.linalg.norm(mean_n)
-    spray_normal = mean_n / norm if norm > 1e-9 else mean_n
+    spray_normal = mean_n  # already a unit vector from _compute_surface_basis
 
     return PaintRoute(
         region_id=region_id,

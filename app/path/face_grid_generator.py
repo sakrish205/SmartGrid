@@ -14,6 +14,7 @@ import trimesh
 from app.path.path_model import PaintPass, Connection, PaintRoute
 from app.path.resampler import resample_arc, rdp_simplify, prune_collinear
 from app.path.stitcher import stitch_segments as _stitch_segs
+from app.path.local_normals import interpolate_normals, build_tcp_frames
 
 
 def _axes(up_axis: int) -> tuple[int, int, int]:
@@ -337,12 +338,21 @@ def generate_conform_route(
             pts = rdp_simplify(pts, _RDP_EPS)
             if len(pts) < 2:
                 continue
-            # Uniform standoff along mean surface normal — no per-point snap
+            # Per-waypoint standoff via local face normals.
+            # Adapted from BF offsetObjectivePoint: pt += H * local_normal
+            local_n = interpolate_normals(pts, mesh)
             if standoff_mm > 0.0:
-                pts = pts + standoff_mm * mean_n
+                pts = pts + standoff_mm * local_n
             if waypoint_spacing_mm > 0 and len(pts) >= 2:
                 pts = resample_arc(pts, waypoint_spacing_mm)
+                local_n = interpolate_normals(pts, mesh)
             pts = prune_collinear(pts)
+            if len(pts) < 2:
+                continue
+            if len(local_n) != len(pts):
+                local_n = interpolate_normals(pts, mesh)
+            # TCP frame: Z=normal, X=corrected tangent — from Noether createTransform
+            tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
                 id=pass_id,
                 region_id=region,
@@ -351,6 +361,8 @@ def generate_conform_route(
                 is_forward=is_forward,
                 sub_index=sub_idx,
                 slice_position=float(step_pos),
+                normals=local_n,
+                tangent=tcp_tangent,
             ))
             pass_id += 1
 
