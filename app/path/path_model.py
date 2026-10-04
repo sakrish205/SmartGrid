@@ -41,7 +41,10 @@ class PaintPass:
     is_forward: bool      # True = first stitched direction, False = reversed
     sub_index: int        # 0 = primary chain, >0 = additional chain at same level (holes)
     slice_position: float # coordinate along slice axis, for debugging
-    normals: np.ndarray | None = None  # (N, 3) per-waypoint surface normals; None for non-geodesic modes
+    normals: np.ndarray | None = None   # (N, 3) per-waypoint surface normals (Z-axis of TCP frame)
+    tangent: np.ndarray | None = None   # (N, 3) per-waypoint corrected path tangent (X-axis of TCP frame)
+    # Adapted from Noether createTransform: B = cross(N, T_raw), tangent = cross(B, N)
+    standoff_deviation_mm: float | None = None  # max |actual_dist_to_surface - nominal_standoff| for this pass
 
 
 @dataclass
