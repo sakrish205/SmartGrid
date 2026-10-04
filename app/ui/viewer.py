@@ -642,6 +642,21 @@ class MeshViewer(QWidget):
                         )
                         self._actors[f'norm_{ri}_{paint_pass.id}'] = actor
 
+                    if paint_pass.tangent is not None and len(paint_pass.tangent) == len(paint_pass.points):
+                        # TCP X-axis (corrected tangent) arrows, stride-10 to avoid clutter.
+                        # Adapted from Noether createTransform: tangent = cross(B, N)
+                        stride = max(1, len(paint_pass.points) // 10)
+                        idx = np.arange(0, len(paint_pass.points), stride)
+                        t_starts = paint_pass.points[idx]
+                        t_ends   = t_starts + paint_pass.tangent[idx] * (arrow_len * 0.35)
+                        t_segs   = np.stack([t_starts, t_ends], axis=1)
+                        actor = self.plotter.add_mesh(
+                            _make_multiline(list(t_segs)),
+                            color='#FF4081', line_width=2.0,
+                            render_lines_as_tubes=False, reset_camera=False,
+                        )
+                        self._actors[f'tcpf_{ri}_{paint_pass.id}'] = actor
+
             for color, pt_list in buckets.items():
                 actor = self.plotter.add_mesh(
                     _make_multiline(pt_list), color=color,
@@ -741,7 +756,7 @@ class MeshViewer(QWidget):
 
     def clear_route(self) -> None:
         keys = [k for k in self._actors
-                if k.startswith(('pass_', 'conn_', 'arr_', 'wpt_', 'norm_'))]
+                if k.startswith(('pass_', 'conn_', 'arr_', 'wpt_', 'norm_', 'tcpf_'))]
         for k in keys:
             self.plotter.remove_actor(self._actors.pop(k))
         self.plotter.render()
