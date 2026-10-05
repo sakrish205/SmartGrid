@@ -157,10 +157,14 @@ def generate_route(
             if len(polyline) < 2:
                 continue
             pts = polyline if is_forward else polyline[::-1].copy()
-            # Smooth micro-jaggies from mesh triangulation, then resample uniformly
+            # Smooth micro-jaggies from mesh triangulation, then resample uniformly.
+            # Use a fallback spacing when none set so curved surface intersections
+            # keep enough points to follow the arc after standoff offset.
+            # ponytail: fallback = 40% of spray width; reduce if dense coverage needed
             pts = rdp_simplify(pts, _RDP_EPSILON)
-            if waypoint_spacing_mm > 0 and len(pts) >= 2:
-                pts = resample_arc(pts, waypoint_spacing_mm)
+            _spacing = waypoint_spacing_mm if waypoint_spacing_mm > 0 else spray_width_mm * 0.4
+            if len(pts) >= 2:
+                pts = resample_arc(pts, _spacing)
             pts = prune_collinear(pts)
             all_passes.append(PaintPass(
                 id=pass_id,

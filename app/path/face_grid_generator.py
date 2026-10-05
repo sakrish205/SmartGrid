@@ -340,17 +340,21 @@ def generate_conform_route(
                 continue
             # Per-waypoint standoff via local face normals.
             # Adapted from BF offsetObjectivePoint: pt += H * local_normal
-            local_n = interpolate_normals(pts, mesh)
+            local_n = interpolate_normals(pts, mesh)       # call 1: at surface
             if standoff_mm > 0.0:
                 pts = pts + standoff_mm * local_n
             if waypoint_spacing_mm > 0 and len(pts) >= 2:
                 pts = resample_arc(pts, waypoint_spacing_mm)
-                local_n = interpolate_normals(pts, mesh)
-            pts = prune_collinear(pts)
-            if len(pts) < 2:
-                continue
-            if len(local_n) != len(pts):
-                local_n = interpolate_normals(pts, mesh)
+                pts = prune_collinear(pts)
+                if len(pts) < 2:
+                    continue
+                local_n = interpolate_normals(pts, mesh)   # call 2: after resample
+            else:
+                pts = prune_collinear(pts)
+                if len(pts) < 2:
+                    continue
+                if len(local_n) != len(pts):
+                    local_n = interpolate_normals(pts, mesh)
             # TCP frame: Z=normal, X=corrected tangent — from Noether createTransform
             tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
