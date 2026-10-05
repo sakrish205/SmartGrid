@@ -364,12 +364,12 @@ def generate_conform_route(
             _sorted.extend(_grp)
     all_passes = _sorted
 
-    # Apply standoff now — surface pts and normals are finalised, ordering is done.
-    # Connections are built after so air-moves link the offset positions.
+    # Apply standoff along mean_n (same as BBox/Adaptive) — per-waypoint normals are
+    # for TCP orientation only; using them for offset on curved surfaces scatters
+    # waypoints up to 90° off when face normals diverge from the spray direction.
     if standoff_mm > 0.0:
         for _p in all_passes:
-            if _p.normals is not None:
-                _p.points = _p.points + standoff_mm * _p.normals
+            _p.points = _p.points + standoff_mm * mean_n
 
     connections = _connector.connect_passes(
         all_passes, spray_width_mm=spray_width_mm, waypoint_spacing_mm=waypoint_spacing_mm,
