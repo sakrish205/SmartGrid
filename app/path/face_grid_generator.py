@@ -18,6 +18,23 @@ from app.path.local_normals import interpolate_normals, build_tcp_frames
 from app.path import connector as _connector
 
 
+def _batch_normals_tangents(passes: list, mesh, mean_n: np.ndarray) -> None:
+    """One BVH call for all waypoints; assign normals + tangent back per pass."""
+    if not passes:
+        return
+    counts  = [len(p.points) for p in passes]
+    all_pts = np.vstack([p.points for p in passes])
+    all_n   = interpolate_normals(all_pts, mesh)
+    flip    = all_n @ mean_n < 0
+    all_n[flip] = -all_n[flip]
+    idx = 0
+    for p, n_pts in zip(passes, counts):
+        local_n   = all_n[idx:idx + n_pts]
+        p.normals = local_n
+        p.tangent = build_tcp_frames(p.points, local_n)
+        idx += n_pts
+
+
 def _axes(up_axis: int) -> tuple[int, int, int]:
     fwd   = (up_axis + 1) % 3
     right = (up_axis + 2) % 3
@@ -175,10 +192,6 @@ def generate_face_grid_route(
         if waypoint_spacing_mm > 0:
             pts = resample_arc(pts, waypoint_spacing_mm)
 
-        local_n = interpolate_normals(pts, mesh)
-        flip = local_n @ mean_n < 0
-        local_n[flip] = -local_n[flip]
-        tcp_tangent = build_tcp_frames(pts, local_n)
         all_passes.append(PaintPass(
             id=pass_id,
             region_id=region,
@@ -187,9 +200,9 @@ def generate_face_grid_route(
             is_forward=is_forward,
             sub_index=0,
             slice_position=float(step_pos),
-            normals=local_n,
-            tangent=tcp_tangent,
         ))
+
+    _batch_normals_tangents(all_passes, mesh, mean_n)
 
     connections: list[Connection] = []
     for i in range(len(all_passes) - 1):
@@ -320,18 +333,10 @@ def generate_conform_route(
             if len(pts) < 2:
                 continue
 
-            # Surface normals at slice location (standoff applied after ordering).
-            # BVH may return a back-face normal near region boundaries — flip any
-            # that point away from mean_n so standoff always lifts outward.
-            local_n = interpolate_normals(pts, mesh)
-            flip = local_n @ mean_n < 0
-            local_n[flip] = -local_n[flip]
-            tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
                 id=pass_id, region_id=region, direction=direction,
                 points=pts, is_forward=is_forward, sub_index=sub_idx,
                 slice_position=float(step_pos),
-                normals=local_n, tangent=tcp_tangent,
             ))
             pass_id += 1
 
@@ -355,14 +360,16 @@ def generate_conform_route(
                 if np.linalg.norm(_p.points[-1] - _cur) < np.linalg.norm(_p.points[0] - _cur):
                     _p = PaintPass(id=_p.id, region_id=_p.region_id, direction=_p.direction,
                                    points=_p.points[::-1].copy(), is_forward=not _p.is_forward,
-                                   sub_index=_p.sub_index, slice_position=_p.slice_position,
-                                   normals=_p.normals[::-1].copy() if _p.normals is not None else None,
-                                   tangent=_p.tangent[::-1].copy() if _p.tangent is not None else None)
+                                   sub_index=_p.sub_index, slice_position=_p.slice_position)
                 _sorted.append(_p)
                 _cur = _p.points[-1]
         else:
             _sorted.extend(_grp)
     all_passes = _sorted
+
+    # Batch normals after TSP ordering — one BVH call covers all waypoints,
+    # and points are already in final order so no reversal needed.
+    _batch_normals_tangents(all_passes, mesh, mean_n)
 
     # Apply standoff along mean_n (same as BBox/Adaptive) — per-waypoint normals are
     # for TCP orientation only; using them for offset on curved surfaces scatters
@@ -476,33 +483,29 @@ def generate_adaptive_grid_route(
     if direction == 'horizontal':
         for i, s in enumerate(h_steps):
             is_forward = ((i + direction_offset) % 2 == 0)
-            pts = grid_pts[i].copy()          # (n_v, 3)
+            pts = grid_pts[i].copy()
             if not is_forward:
                 pts = pts[::-1].copy()
             pts = _resample_anchored(pts, waypoint_spacing_mm)
-            local_n     = interpolate_normals(pts, mesh)
-            tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
                 id=i, region_id=region, direction=direction,
                 points=pts, is_forward=is_forward, sub_index=0,
                 slice_position=float(s),
-                normals=local_n, tangent=tcp_tangent,
             ))
     else:  # vertical
         for j, p in enumerate(v_steps):
             is_forward = ((j + direction_offset) % 2 == 0)
-            pts = grid_pts[:, j].copy()       # (n_h, 3)
+            pts = grid_pts[:, j].copy()
             if not is_forward:
                 pts = pts[::-1].copy()
             pts = _resample_anchored(pts, waypoint_spacing_mm)
-            local_n     = interpolate_normals(pts, mesh)
-            tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
                 id=j, region_id=region, direction=direction,
                 points=pts, is_forward=is_forward, sub_index=0,
                 slice_position=float(p),
-                normals=local_n, tangent=tcp_tangent,
             ))
+
+    _batch_normals_tangents(all_passes, mesh, mean_n)
 
     connections: list[Connection] = []
     for i in range(len(all_passes) - 1):

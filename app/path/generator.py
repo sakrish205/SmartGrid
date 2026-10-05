@@ -169,10 +169,6 @@ def generate_route(
             pts = prune_collinear(pts)
             if len(pts) < 2:
                 continue
-            local_n = interpolate_normals(pts, mesh)
-            flip = local_n @ mean_n < 0
-            local_n[flip] = -local_n[flip]
-            tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
                 id=pass_id,
                 region_id=region_id,
@@ -181,8 +177,6 @@ def generate_route(
                 is_forward=is_forward,
                 sub_index=sub_idx,
                 slice_position=float(slice_pos),
-                normals=local_n,
-                tangent=tcp_tangent,
             ))
             pass_id += 1
 
@@ -208,14 +202,16 @@ def generate_route(
                 if np.linalg.norm(_p.points[-1] - _cur) < np.linalg.norm(_p.points[0] - _cur):
                     _p = PaintPass(id=_p.id, region_id=_p.region_id, direction=_p.direction,
                                    points=_p.points[::-1].copy(), is_forward=not _p.is_forward,
-                                   sub_index=_p.sub_index, slice_position=_p.slice_position,
-                                   normals=_p.normals[::-1].copy() if _p.normals is not None else None,
-                                   tangent=_p.tangent[::-1].copy() if _p.tangent is not None else None)
+                                   sub_index=_p.sub_index, slice_position=_p.slice_position)
                 _ordered.append(_p)
                 _cur = _p.points[-1]
             _group = _ordered
         _sorted_passes.extend(_group)
     all_passes = _sorted_passes
+
+    # Batch normals after TSP ordering — one BVH call for all waypoints.
+    from app.path.face_grid_generator import _batch_normals_tangents
+    _batch_normals_tangents(all_passes, mesh, mean_n)
 
     if not all_passes:
         _log.warning(
