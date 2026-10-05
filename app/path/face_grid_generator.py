@@ -392,12 +392,8 @@ def generate_conform_route(
             if len(pts) < 2:
                 continue
 
-            # Conform-only: per-waypoint standoff (BF offsetObjectivePoint)
-            local_n = interpolate_normals(pts, mesh)
-            if standoff_mm > 0.0:
-                pts     = pts + standoff_mm * local_n
-                local_n = interpolate_normals(pts, mesh)
-
+            # Surface normals at slice location (standoff applied after ordering)
+            local_n     = interpolate_normals(pts, mesh)
             tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
                 id=pass_id, region_id=region, direction=direction,
@@ -434,6 +430,13 @@ def generate_conform_route(
         else:
             _sorted.extend(_grp)
     all_passes = _sorted
+
+    # Apply standoff now — surface pts and normals are finalised, ordering is done.
+    # Connections are built after so air-moves link the offset positions.
+    if standoff_mm > 0.0:
+        for _p in all_passes:
+            if _p.normals is not None:
+                _p.points = _p.points + standoff_mm * _p.normals
 
     connections = _connector.connect_passes(
         all_passes, spray_width_mm=spray_width_mm, waypoint_spacing_mm=waypoint_spacing_mm,
