@@ -260,14 +260,15 @@ def _offset_route_by_standoff(route: 'PaintRoute', mesh, standoff_mm: float) -> 
     Also populates PaintPass.normals and PaintPass.tangent for Mesh Surface passes
     that don't already carry them.  TCP frame math from Noether createTransform.
     """
-    import trimesh.proximity as _prox
     from app.path.path_model import PaintPass, Connection, PaintRoute as _PR
-    from app.path.local_normals import build_tcp_frames
+    from app.path.local_normals import build_tcp_frames, _query_for
+
+    _query = _query_for(mesh)   # build BVH once; reused for all passes
 
     def _offset_pts(pts: np.ndarray):
         if len(pts) == 0:
             return pts, None
-        _, _, face_ids = _prox.closest_point(mesh, pts)
+        _, _, face_ids = _query.on_surface(pts)
         normals = mesh.face_normals[face_ids]
         return pts + normals * standoff_mm, normals
 

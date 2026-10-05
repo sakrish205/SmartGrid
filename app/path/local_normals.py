@@ -13,13 +13,20 @@ import trimesh
 import trimesh.proximity as _prox
 
 
+def _query_for(mesh: trimesh.Trimesh) -> _prox.ProximityQuery:
+    """Return a cached ProximityQuery for mesh (builds BVH once per mesh object)."""
+    if not hasattr(mesh, '_sg_prox_query'):
+        mesh._sg_prox_query = _prox.ProximityQuery(mesh)
+    return mesh._sg_prox_query
+
+
 def interpolate_normals(pts: np.ndarray, mesh: trimesh.Trimesh) -> np.ndarray:
     """Return (N, 3) surface normals at the closest mesh face for each point in pts.
 
     Uses face normals of the nearest triangle (same approach as BF offsetObjectivePoint
     which takes the normal from the sliced surface point directly).
     """
-    _, _, tri_ids = _prox.closest_point(mesh, pts)
+    _, _, tri_ids = _query_for(mesh).on_surface(pts)
     return mesh.face_normals[tri_ids].copy()
 
 
