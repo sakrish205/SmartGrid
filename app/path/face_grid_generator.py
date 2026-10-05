@@ -393,10 +393,10 @@ def generate_conform_route(
                 continue
 
             # Conform-only: per-waypoint standoff (BF offsetObjectivePoint)
-            # Normal at standoff point == surface normal — no re-query needed.
             local_n = interpolate_normals(pts, mesh)
             if standoff_mm > 0.0:
-                pts = pts + standoff_mm * local_n
+                pts     = pts + standoff_mm * local_n
+                local_n = interpolate_normals(pts, mesh)
 
             tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
