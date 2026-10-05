@@ -699,6 +699,8 @@ class MeshViewer(QWidget):
                     color=self._colors['connector'],
                     line_width=3, render_lines_as_tubes=False, reset_camera=False,
                 )
+                actor.GetMapper().SetResolveCoincidentTopologyToPolygonOffset()
+                actor.GetMapper().SetRelativeCoincidentTopologyLineOffsetParameters(-1, -1)
                 self._actors[f'conn_{ri}'] = actor
 
             conn_wpt_segs = [c.points for c in route.connections
