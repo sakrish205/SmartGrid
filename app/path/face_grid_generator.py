@@ -228,6 +228,56 @@ _MAX_ANGLE_DEV  = 65.0   # degrees
 _MAX_SUB_LEVEL  = 6
 
 
+def _plane_segments_fast(
+    sub_verts: np.ndarray,    # (V', 3) compact vertex positions
+    sub_faces: np.ndarray,    # (F, 3) compact face indices
+    vert_dots: np.ndarray,    # (V',) precomputed dot(v, step_vec)
+    step_pos: float,
+    fwd_mask: np.ndarray,     # (F,) bool — forward-facing faces only
+) -> np.ndarray:
+    """Vectorized plane–mesh intersection with precomputed vertex projections.
+
+    Returns (M, 2, 3) segment array (no Python loops over faces).
+    Adapted from BF getSamplePoints plane-slicing logic.
+    """
+    d = vert_dots[sub_faces] - step_pos   # (F, 3) signed distance per vertex
+    pos = d > 0
+    # crossing & forward-facing
+    cross = pos.any(axis=1) & (~pos).any(axis=1) & fwd_mask
+    if not cross.any():
+        return np.empty((0, 2, 3), dtype=float)
+
+    cf  = sub_faces[cross]       # (M, 3)
+    cd  = d[cross]               # (M, 3)
+    cv  = sub_verts[cf]          # (M, 3, 3)
+
+    # Edges 0-1, 1-2, 2-0
+    ei  = np.array([0, 1, 2])
+    ej  = np.array([1, 2, 0])
+    di  = cd[:, ei]              # (M, 3) start-vertex distances
+    dj  = cd[:, ej]              # (M, 3) end-vertex distances
+    edge_cross = (di > 0) != (dj > 0)   # (M, 3)
+
+    # Interpolate all edges; non-crossing ones are garbage but masked out
+    denom     = di - dj
+    safe_den  = np.where(np.abs(denom) > 1e-12, denom, 1.0)
+    t         = np.where(np.abs(denom) > 1e-12, di / safe_den, 0.5).clip(0.0, 1.0)
+    vi        = cv[:, ei]        # (M, 3, 3)
+    vj        = cv[:, ej]
+    edge_pts  = vi + t[:, :, None] * (vj - vi)   # (M, 3, 3)
+
+    # Pick the two crossing edges per face via argsort (False < True → last 2 = True)
+    cross_idx = edge_cross.argsort(axis=1)[:, -2:]   # (M, 2)
+    row       = np.arange(len(cf))
+    pts_a     = edge_pts[row, cross_idx[:, 0]]       # (M, 3)
+    pts_b     = edge_pts[row, cross_idx[:, 1]]       # (M, 3)
+
+    segs = np.stack([pts_a, pts_b], axis=1)          # (M, 2, 3)
+    # Drop degenerate segments
+    lens = np.linalg.norm(segs[:, 1] - segs[:, 0], axis=1)
+    return segs[lens > 1e-12]
+
+
 
 
 def _filter_chains(chains: list[np.ndarray], spray_width_mm: float) -> list[np.ndarray]:
@@ -294,34 +344,25 @@ def generate_conform_route(
         first = step_min + _step / 2.0
         step_positions = list(np.arange(first, step_max, _step))
 
-    # Build slice sub-mesh once: only the forward-facing region faces.
-    # mesh_plane on the full mesh is O(all faces) × N planes — expensive.
-    # Sub-mesh limits work to the region and eliminates the per-plane normal filter.
-    region_fwd_mask = mesh.face_normals[face_indices] @ mean_n >= 0.0
-    region_fwd_ids  = face_indices[region_fwd_mask]
-    slice_mesh = trimesh.Trimesh(
-        vertices=mesh.vertices,
-        faces=mesh.faces[region_fwd_ids],
-        process=False,
-    )
+    # Build compact sub-mesh from ALL region faces (not just forward-facing —
+    # forward filter applied per-plane after slicing to preserve coverage on
+    # curved surfaces).  Compact vertices so mesh_plane projects V_region
+    # vertices instead of V_full every call.
+    sub_faces_orig = mesh.faces[face_indices]                                  # (F, 3) orig vids
+    used_vids, compact_fidx = np.unique(sub_faces_orig.ravel(), return_inverse=True)
+    sub_verts  = mesh.vertices[used_vids]                                      # (V', 3) compact
+    sub_faces  = compact_fidx.reshape(-1, 3)                                   # (F, 3) compact
+    # Precompute vertex projections onto step_vec — used every plane call
+    vert_dots  = sub_verts @ step_vec                                          # (V',) once
+    # Forward-face mask for each region face — applied per-plane after slicing
+    fwd_mask   = (mesh.face_normals[face_indices] @ mean_n >= 0.0)            # (F,) once
 
     all_passes: list[PaintPass] = []
     pass_id = 0
 
     for plane_index, step_pos in enumerate(step_positions):
-        # Cutting plane: normal = step_vec, origin = step_pos along step_vec
-        segments = trimesh.intersections.mesh_plane(
-            slice_mesh,
-            plane_normal=step_vec,
-            plane_origin=step_pos * step_vec,
-        )
+        segments = _plane_segments_fast(sub_verts, sub_faces, vert_dots, step_pos, fwd_mask)
         if segments is None or len(segments) == 0:
-            continue
-
-        # Remove degenerate segments
-        lens = np.linalg.norm(segments[:, 1, :] - segments[:, 0, :], axis=1)
-        segments = segments[lens > 1e-12]
-        if len(segments) == 0:
             continue
 
         chains = _stitch_segs(segments)
