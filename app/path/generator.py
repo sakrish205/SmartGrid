@@ -12,6 +12,7 @@ from app.path import stitcher as _stitcher
 from app.path import connector as _connector
 from app.path.resampler import rdp_simplify, resample_arc, prune_collinear
 from app.path.face_grid_generator import _compute_surface_basis, _get_basis_faces
+from app.path.local_normals import interpolate_normals, build_tcp_frames
 
 _RDP_EPSILON       = 0.3   # mm — remove micro-jaggies from triangle discretisation
 _MIN_PASS_FRACTION = 0.10  # drop passes shorter than 10% of spray_width_mm …
@@ -166,6 +167,10 @@ def generate_route(
             if len(pts) >= 2:
                 pts = resample_arc(pts, _spacing)
             pts = prune_collinear(pts)
+            if len(pts) < 2:
+                continue
+            local_n     = interpolate_normals(pts, mesh)
+            tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
                 id=pass_id,
                 region_id=region_id,
@@ -174,6 +179,8 @@ def generate_route(
                 is_forward=is_forward,
                 sub_index=sub_idx,
                 slice_position=float(slice_pos),
+                normals=local_n,
+                tangent=tcp_tangent,
             ))
             pass_id += 1
 

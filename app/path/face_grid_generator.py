@@ -15,6 +15,7 @@ from app.path.path_model import PaintPass, Connection, PaintRoute
 from app.path.resampler import resample_arc, rdp_simplify, prune_collinear
 from app.path.stitcher import stitch_segments as _stitch_segs
 from app.path.local_normals import interpolate_normals, build_tcp_frames
+from app.path import connector as _connector
 
 
 def _axes(up_axis: int) -> tuple[int, int, int]:
@@ -174,6 +175,8 @@ def generate_face_grid_route(
         if waypoint_spacing_mm > 0:
             pts = resample_arc(pts, waypoint_spacing_mm)
 
+        local_n     = interpolate_normals(pts, mesh)
+        tcp_tangent = build_tcp_frames(pts, local_n)
         all_passes.append(PaintPass(
             id=pass_id,
             region_id=region,
@@ -182,6 +185,8 @@ def generate_face_grid_route(
             is_forward=is_forward,
             sub_index=0,
             slice_position=float(step_pos),
+            normals=local_n,
+            tangent=tcp_tangent,
         ))
 
     connections: list[Connection] = []
@@ -315,13 +320,11 @@ def generate_conform_route(
     standoff_mm: float = 0.0,
     direction: str = 'horizontal',
 ) -> PaintRoute:
-    """Conform toolpath: tilted-basis cutting planes + trimesh intersection.
+    """Conform: Mesh Surface slicing logic + per-waypoint standoff + TCP frames.
 
-    Uses Adaptive's mean-normal basis so planes are perpendicular to the
-    surface step direction (correct arc-length spacing on tilted surfaces).
-    Intersects the actual mesh (like Mesh Surface) for exact path geometry.
-    Standoff applied uniformly via mean_n — no per-waypoint nearest-face snap.
-    Face set: classifier-assigned faces only (no full-mesh forward-face leakage).
+    Reuses the same trimesh.intersections.mesh_plane loop as generate_route
+    (Mesh Surface), then lifts each waypoint along its local surface normal
+    by standoff_mm and stores per-waypoint normals + TCP tangent frames.
     """
     if len(face_indices) == 0:
         raise ValueError(f"Conform: region '{region}' has no faces.")
@@ -331,11 +334,9 @@ def generate_conform_route(
     if direction == 'vertical':
         pass_vec, step_vec = step_vec, pass_vec
 
-    # Step extent from all assigned faces; basis_faces only used for mean_n/basis above.
     all_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
     step_min = float((all_verts @ step_vec).min()) - 0.001
     step_max = float((all_verts @ step_vec).max()) + 0.001
-
     _step = spray_width_mm * 0.85
     span = step_max - step_min
     if span <= _step:
@@ -344,70 +345,69 @@ def generate_conform_route(
         first = step_min + _step / 2.0
         step_positions = list(np.arange(first, step_max, _step))
 
-    # Build compact sub-mesh from ALL region faces (not just forward-facing —
-    # forward filter applied per-plane after slicing to preserve coverage on
-    # curved surfaces).  Compact vertices so mesh_plane projects V_region
-    # vertices instead of V_full every call.
-    sub_faces_orig = mesh.faces[face_indices]                                  # (F, 3) orig vids
-    used_vids, compact_fidx = np.unique(sub_faces_orig.ravel(), return_inverse=True)
-    sub_verts  = mesh.vertices[used_vids]                                      # (V', 3) compact
-    sub_faces  = compact_fidx.reshape(-1, 3)                                   # (F, 3) compact
-    # Precompute vertex projections onto step_vec — used every plane call
-    vert_dots  = sub_verts @ step_vec                                          # (V',) once
-    # Forward-face mask for each region face — applied per-plane after slicing
-    fwd_mask   = (mesh.face_normals[face_indices] @ mean_n >= 0.0)            # (F,) once
-
     all_passes: list[PaintPass] = []
     pass_id = 0
 
     for plane_index, step_pos in enumerate(step_positions):
-        segments = _plane_segments_fast(sub_verts, sub_faces, vert_dots, step_pos, fwd_mask)
-        if segments is None or len(segments) == 0:
+        result = trimesh.intersections.mesh_plane(
+            mesh,
+            plane_normal=step_vec,
+            plane_origin=step_pos * step_vec,
+            return_faces=True,
+        )
+        if result is None:
+            continue
+        raw_segs, seg_face_ids = result
+        if raw_segs is None or len(raw_segs) == 0:
             continue
 
-        chains = _stitch_segs(segments)
-        chains = _filter_chains(chains, spray_width_mm)
+        face_mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
+        segments  = raw_segs[face_mask]
+        if len(segments) == 0:
+            continue
+
+        seg_lens = np.linalg.norm(segments[:, 1] - segments[:, 0], axis=1)
+        segments  = segments[seg_lens > 1e-12]
+        if len(segments) == 0:
+            continue
+
+        polylines = _stitch_segs(segments)
+        if not polylines:
+            continue
+
+        from app.path.generator import _filter_polylines
+        polylines = _filter_polylines(polylines, spray_width_mm)[:_MAX_SUB_LEVEL]
 
         is_forward = (plane_index % 2 == 0) if direction_offset == 0 else (plane_index % 2 == 1)
 
-        for sub_idx, chain in enumerate(chains):
-            pts = chain if is_forward else chain[::-1].copy()
+        for sub_idx, poly in enumerate(polylines):
+            if len(poly) < 2:
+                continue
+            pts = poly if is_forward else poly[::-1].copy()
             pts = rdp_simplify(pts, _RDP_EPS)
+            _sp = waypoint_spacing_mm if waypoint_spacing_mm > 0 else spray_width_mm * 0.4
+            if len(pts) >= 2:
+                pts = resample_arc(pts, _sp)
+            pts = prune_collinear(pts)
             if len(pts) < 2:
                 continue
-            # Per-waypoint standoff via local face normals.
-            # Adapted from BF offsetObjectivePoint: pt += H * local_normal
-            local_n = interpolate_normals(pts, mesh)       # call 1: at surface
+
+            # Conform-only: per-waypoint standoff (BF offsetObjectivePoint)
+            local_n = interpolate_normals(pts, mesh)
             if standoff_mm > 0.0:
-                pts = pts + standoff_mm * local_n
-            if waypoint_spacing_mm > 0 and len(pts) >= 2:
-                pts = resample_arc(pts, waypoint_spacing_mm)
-                pts = prune_collinear(pts)
-                if len(pts) < 2:
-                    continue
-                local_n = interpolate_normals(pts, mesh)   # call 2: after resample
-            else:
-                pts = prune_collinear(pts)
-                if len(pts) < 2:
-                    continue
-                if len(local_n) != len(pts):
-                    local_n = interpolate_normals(pts, mesh)
-            # TCP frame: Z=normal, X=corrected tangent — from Noether createTransform
+                pts     = pts + standoff_mm * local_n
+                local_n = interpolate_normals(pts, mesh)
+
             tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
-                id=pass_id,
-                region_id=region,
-                direction=direction,
-                points=pts,
-                is_forward=is_forward,
-                sub_index=sub_idx,
+                id=pass_id, region_id=region, direction=direction,
+                points=pts, is_forward=is_forward, sub_index=sub_idx,
                 slice_position=float(step_pos),
-                normals=local_n,
-                tangent=tcp_tangent,
+                normals=local_n, tangent=tcp_tangent,
             ))
             pass_id += 1
 
-    # TSP-lite: sort by slice position, greedy nearest-neighbour within each level
+    # Same TSP-lite ordering as generate_route
     from collections import defaultdict
     _lmap: dict[float, list] = defaultdict(list)
     for _p in all_passes:
@@ -435,35 +435,18 @@ def generate_conform_route(
             _sorted.extend(_grp)
     all_passes = _sorted
 
-    connections: list[Connection] = []
-    for i in range(len(all_passes) - 1):
-        conn_pts = np.array([
-            all_passes[i].points[-1].copy(),
-            all_passes[i + 1].points[0].copy(),
-        ], dtype=float)
-        if waypoint_spacing_mm > 0:
-            conn_pts = resample_arc(conn_pts, waypoint_spacing_mm)
-        connections.append(Connection(
-            id=i,
-            from_pass_id=all_passes[i].id,
-            to_pass_id=all_passes[i + 1].id,
-            points=conn_pts,
-            is_air_move=False,
-        ))
+    connections = _connector.connect_passes(
+        all_passes, spray_width_mm=spray_width_mm, waypoint_spacing_mm=waypoint_spacing_mm,
+    )
 
     total_length = sum(
         float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1)))
         for p in all_passes if len(p.points) >= 2
     )
-
     return PaintRoute(
-        region_id=region,
-        passes=all_passes,
-        connections=connections,
-        unit='mm',
-        spacing_mm=spray_width_mm,
-        total_passes=len(all_passes),
-        total_length_mm=total_length,
+        region_id=region, passes=all_passes, connections=connections,
+        unit='mm', spacing_mm=spray_width_mm,
+        total_passes=len(all_passes), total_length_mm=total_length,
         spray_normal=mean_n.copy(),
     )
 
@@ -561,10 +544,13 @@ def generate_adaptive_grid_route(
             if not is_forward:
                 pts = pts[::-1].copy()
             pts = _resample_anchored(pts, waypoint_spacing_mm)
+            local_n     = interpolate_normals(pts, mesh)
+            tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
                 id=i, region_id=region, direction=direction,
                 points=pts, is_forward=is_forward, sub_index=0,
                 slice_position=float(s),
+                normals=local_n, tangent=tcp_tangent,
             ))
     else:  # vertical
         for j, p in enumerate(v_steps):
@@ -573,10 +559,13 @@ def generate_adaptive_grid_route(
             if not is_forward:
                 pts = pts[::-1].copy()
             pts = _resample_anchored(pts, waypoint_spacing_mm)
+            local_n     = interpolate_normals(pts, mesh)
+            tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
                 id=j, region_id=region, direction=direction,
                 points=pts, is_forward=is_forward, sub_index=0,
                 slice_position=float(p),
+                normals=local_n, tangent=tcp_tangent,
             ))
 
     connections: list[Connection] = []
