@@ -120,10 +120,10 @@ def _compute_dynamic_speeds(points: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 class _OlpExportDialog(QDialog):
-    def __init__(self, formats: dict, parent=None) -> None:
+    def __init__(self, formats: dict, profile_speed_mmpm: float | None = None, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle('Export OLP')
-        self.setFixedWidth(360)
+        self.setFixedWidth(380)
 
         vl = QVBoxLayout(self)
         vl.setSpacing(8)
@@ -137,16 +137,27 @@ class _OlpExportDialog(QDialog):
 
         max_s = int(_SPEED_CURVE['max_mmpm'])
         min_s = int(_SPEED_CURVE['min_mmpm'])
-        self._auto_radio   = QRadioButton(
+        self._auto_radio    = QRadioButton(
             f'Auto  ({min_s}–{max_s} mm/min)  — varies with path curvature')
-        self._custom_radio = QRadioButton('Custom')
-        self._auto_radio.setChecked(True)
+        self._profile_radio = QRadioButton(
+            f'From robot profile  ({int(profile_speed_mmpm)} mm/min)'
+            if profile_speed_mmpm else 'From robot profile  (no profile active)')
+        self._custom_radio  = QRadioButton('Custom')
+
+        self._profile_radio.setEnabled(profile_speed_mmpm is not None)
+        self._profile_speed = profile_speed_mmpm or 0.0
+
+        # default: profile speed when available, else auto
+        if profile_speed_mmpm:
+            self._profile_radio.setChecked(True)
+        else:
+            self._auto_radio.setChecked(True)
 
         self._speed_spin = QDoubleSpinBox()
         self._speed_spin.setRange(1.0, 100_000.0)
         self._speed_spin.setDecimals(0)
         self._speed_spin.setSingleStep(100.0)
-        self._speed_spin.setValue(1000.0)
+        self._speed_spin.setValue(profile_speed_mmpm or 1000.0)
         self._speed_spin.setSuffix('  mm/min')
         self._speed_spin.setMinimumWidth(120)
         self._speed_spin.setEnabled(False)
@@ -159,6 +170,7 @@ class _OlpExportDialog(QDialog):
         self._custom_radio.toggled.connect(self._speed_spin.setEnabled)
 
         vl.addWidget(self._auto_radio)
+        vl.addWidget(self._profile_radio)
         vl.addLayout(custom_row)
 
         btns = QDialogButtonBox(
@@ -171,7 +183,12 @@ class _OlpExportDialog(QDialog):
 
     def values(self):
         """Returns (fmt_label: str, speed_mode: str, custom_speed: float | None)."""
-        mode = 'custom' if self._custom_radio.isChecked() else 'auto'
+        if self._profile_radio.isChecked():
+            mode = 'profile'
+        elif self._custom_radio.isChecked():
+            mode = 'custom'
+        else:
+            mode = 'auto'
         return (
             self._fmt_combo.currentText(),
             mode,
@@ -693,6 +710,9 @@ class MainWindow(QMainWindow):
         from app.robot.robot_profile import set_active_profile
         set_active_profile(name)
         self._refresh_robots_menu()
+        profile = get_active_profile()
+        if profile:
+            self._ribbon.set_standoff_mm(profile.standoff_optimal_mm)
         self.statusBar().showMessage(f'Active robot: {name}')
 
     def _open_robot_manager(self) -> None:
@@ -702,6 +722,7 @@ class MainWindow(QMainWindow):
         self._refresh_robots_menu()
         active = get_active_profile()
         if active:
+            self._ribbon.set_standoff_mm(active.standoff_optimal_mm)
             self.statusBar().showMessage(f'Active robot: {active.name}')
 
     # ------------------------------------------------------------------
@@ -1577,7 +1598,8 @@ with JSON / CSV / OLP export.</p>
                 if rdlg.exec() != QDialog.DialogCode.Accepted:
                     return
 
-        dlg = _OlpExportDialog(self._OLP_FORMATS, parent=self)
+        profile_speed = (profile.tcp_spray_speed_mmps * 60.0) if profile else None
+        dlg = _OlpExportDialog(self._OLP_FORMATS, profile_speed_mmpm=profile_speed, parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -1598,12 +1620,17 @@ with JSON / CSV / OLP export.</p>
                 for p in route.passes
             }
         else:
-            speeds_map = None
+            speeds_map = None   # fixed speed — resolved per-pass in exporters via params
 
         # Params with correct fixed speed for metadata / custom mode
         params = self._last_params
         if params is not None:
-            fixed = custom_speed if speed_mode == 'custom' else _SPEED_CURVE['max_mmpm']
+            if speed_mode == 'custom':
+                fixed = custom_speed
+            elif speed_mode == 'profile' and profile_speed:
+                fixed = profile_speed
+            else:
+                fixed = _SPEED_CURVE['max_mmpm']
             params = _dc_replace(params, paint_speed_mmpm=fixed)
 
         self.statusBar().showMessage('Exporting OLP...')

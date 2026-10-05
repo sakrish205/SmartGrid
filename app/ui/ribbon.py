@@ -817,6 +817,11 @@ class SmartRibbon(QWidget):
     def get_standoff_mm(self) -> float:
         return self._standoff_spin.value() * UNIT_TO_MM.get(self._current_unit, 1.0)
 
+    def set_standoff_mm(self, mm: float) -> None:
+        """Set standoff from a robot profile value (converts mm → current display unit)."""
+        factor = UNIT_TO_MM.get(self._current_unit, 1.0)
+        self._standoff_spin.setValue(mm / factor)
+
     def get_face_grid_submode(self) -> str:
         """'shadow' | 'mesh_standoff'"""
         return 'mesh_standoff' if self._fg_mesh_radio.isChecked() else 'shadow'

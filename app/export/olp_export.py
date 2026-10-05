@@ -47,6 +47,14 @@ def _get_normal(route: 'PaintRoute', p, pt_idx: int) -> tuple[float, float, floa
     return round(float(n[0]), 6), round(float(n[1]), 6), round(float(n[2]), 6)
 
 
+def _get_tangent(p, pt_idx: int) -> tuple[float, float, float] | None:
+    """Per-waypoint TCP X-axis (corrected path tangent). None when not computed."""
+    if p.tangent is not None and pt_idx < len(p.tangent):
+        t = p.tangent[pt_idx]
+        return round(float(t[0]), 6), round(float(t[1]), 6), round(float(t[2]), 6)
+    return None
+
+
 def export_robodk(
     routes: list[PaintRoute],
     filepath: str,
@@ -81,10 +89,12 @@ def export_vc(
 ) -> None:
     """CSV for Visual Components import script.
 
-    Header: seq_id,X,Y,Z,NX,NY,NZ,Trigger,speed_mmpm
-    Passes = Trigger ON; connectors = Trigger OFF (no NX/NY/NZ on connectors).
+    Header: seq_id,X,Y,Z,NX,NY,NZ,TX,TY,TZ,Trigger,speed_mmpm
+    TX/TY/TZ = TCP X-axis (corrected path tangent) from Noether createTransform.
+    Empty when normals/tangent not computed (e.g. BBox mode).
+    Passes = Trigger ON; connectors = Trigger OFF.
     """
-    _FIELDS = ['seq_id', 'X', 'Y', 'Z', 'NX', 'NY', 'NZ', 'Trigger', 'speed_mmpm']
+    _FIELDS = ['seq_id', 'X', 'Y', 'Z', 'NX', 'NY', 'NZ', 'TX', 'TY', 'TZ', 'Trigger', 'speed_mmpm']
     fixed = params.paint_speed_mmpm if params else 1000.0
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=_FIELDS)
@@ -96,12 +106,15 @@ def export_vc(
                 speeds = _pass_speeds(p, speeds_map, fixed)
                 for i, pt in enumerate(p.points):
                     nx, ny, nz = _get_normal(route, p, i)
+                    tang = _get_tangent(p, i)
+                    tx, ty, tz = tang if tang else ('', '', '')
                     writer.writerow({
                         'seq_id': seq,
                         'X': round(float(pt[0]), 4),
                         'Y': round(float(pt[1]), 4),
                         'Z': round(float(pt[2]), 4),
                         'NX': nx, 'NY': ny, 'NZ': nz,
+                        'TX': tx, 'TY': ty, 'TZ': tz,
                         'Trigger': 'ON',
                         'speed_mmpm': round(float(speeds[i]), 1),
                     })
@@ -115,6 +128,7 @@ def export_vc(
                             'Y': round(float(pt[1]), 4),
                             'Z': round(float(pt[2]), 4),
                             'NX': '', 'NY': '', 'NZ': '',
+                            'TX': '', 'TY': '', 'TZ': '',
                             'Trigger': 'OFF',
                             'speed_mmpm': '',
                         })
@@ -159,7 +173,13 @@ def export_delmia_apt(
                     x = round(float(pt[0]), 4)
                     y = round(float(pt[1]), 4)
                     z = round(float(pt[2]), 4)
-                    f.write(f'GOTO/{x},{y},{z},{-nx},{-ny},{-nz}\n')
+                    tang = _get_tangent(p, i)
+                    if tang:
+                        tx, ty, tz = tang
+                        # TCP frame: Z=-normal (tool axis), X=tangent (path dir) — post-processor hint
+                        f.write(f'GOTO/{x},{y},{z},{-nx},{-ny},{-nz} $$ TX={tx},{ty},{tz}\n')
+                    else:
+                        f.write(f'GOTO/{x},{y},{z},{-nx},{-ny},{-nz}\n')
                 f.write('SPINDL/OFF\n')
 
                 conn = conn_by_from.get(p.id)
