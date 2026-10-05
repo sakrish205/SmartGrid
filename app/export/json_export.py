@@ -91,6 +91,7 @@ def export_route_json(
             ),
             "direction":            params.direction,
             "sweep":                params.sweep,
+            "paint_speed_mmpm":     params.paint_speed_mmpm if params.paint_speed_mmpm else "default",
         }
 
     data = {

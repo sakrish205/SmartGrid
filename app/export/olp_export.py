@@ -61,24 +61,30 @@ def export_robodk(
     params: GenerationParams | None = None,
     speeds_map: dict[int, np.ndarray] | None = None,
 ) -> None:
-    """6-col (auto) or 7-col (speed) CSV — drag-drop into RoboDK via Utilities > Import Curve.
+    """6-col or 7-col CSV — drag-drop into RoboDK via Utilities > Import Curve.
 
-    Passes only (Trigger ON).  No header row — RoboDK rejects files with one.
+    No header row — RoboDK rejects non-numeric lines.
+    6-col: X,Y,Z,NX,NY,NZ  (when no speeds_map)
+    7-col: X,Y,Z,NX,NY,NZ,speed_mmpm  (when speeds_map provided)
     NX/NY/NZ = outward surface normal; RoboDK uses it as the curve approach direction.
     """
+    fixed = params.paint_speed_mmpm if params and params.paint_speed_mmpm else 1000.0
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        # No header — RoboDK Import Curve rejects non-numeric lines; always 6-col
         writer = csv.writer(f)
         for route in routes:
             for p in route.passes:
+                speeds = _pass_speeds(p, speeds_map, fixed)
                 for i, pt in enumerate(p.points):
                     nx, ny, nz = _get_normal(route, p, i)
-                    writer.writerow([
+                    row = [
                         round(float(pt[0]), 4),
                         round(float(pt[1]), 4),
                         round(float(pt[2]), 4),
                         nx, ny, nz,
-                    ])
+                    ]
+                    if speeds_map is not None:
+                        row.append(round(float(speeds[i]), 1))
+                    writer.writerow(row)
 
 
 def export_vc(

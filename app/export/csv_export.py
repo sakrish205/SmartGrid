@@ -42,6 +42,7 @@ _FIELDS = [
     'X', 'Y', 'Z',  # TCP position in mm (4 decimal places)
     'NX', 'NY', 'NZ',  # TCP Z-axis: outward surface normal (gun approach = -N)
     'TX', 'TY', 'TZ',  # TCP X-axis: corrected path tangent (Noether createTransform)
+    'speed_mmpm',    # TCP spray speed in mm/min; blank for connector moves
     'length_mm',     # segment total length — written on pt_idx=0 only
     'region',        # face region label
     'is_forward',    # True/False for passes; blank for connections
@@ -82,6 +83,7 @@ def export_route_csv(
     routes: list[PaintRoute],
     filepath: str,
     params: GenerationParams | None = None,
+    speeds_map: dict | None = None,
 ) -> None:
     """Export routes to neutral CSV.
 
@@ -97,6 +99,8 @@ def export_route_csv(
 
         seq_id = 0
 
+        fixed_speed = (params.paint_speed_mmpm if params and params.paint_speed_mmpm else 1000.0)
+
         for route in routes:
             sn = route.spray_normal  # fallback when per-waypoint normals absent
 
@@ -107,6 +111,8 @@ def export_route_csv(
                     round(float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1))), 3)
                     if len(p.points) >= 2 else 0.0
                 )
+                pass_speeds = (speeds_map[p.id] if speeds_map and p.id in speeds_map
+                               else np.full(len(p.points), fixed_speed))
                 for i, pt in enumerate(p.points):
                     # Per-waypoint normal (Conform/Mesh Surface); falls back to route normal
                     if p.normals is not None and i < len(p.normals):
@@ -133,6 +139,7 @@ def export_route_csv(
                         'Z': round(float(pt[2]), 4),
                         'NX': nx, 'NY': ny, 'NZ': nz,
                         'TX': tx, 'TY': ty, 'TZ': tz,
+                        'speed_mmpm': round(float(pass_speeds[i]), 1),
                         'length_mm':  seg_len if i == 0 else '',
                         'region':     route.region_id,
                         'is_forward': p.is_forward,
@@ -157,6 +164,7 @@ def export_route_csv(
                             'Z': round(float(pt[2]), 4),
                             'NX': '', 'NY': '', 'NZ': '',
                             'TX': '', 'TY': '', 'TZ': '',
+                            'speed_mmpm': '',
                             'length_mm':  c_len if i == 0 else '',
                             'region':     route.region_id,
                             'is_forward': '',
