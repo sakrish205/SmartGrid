@@ -82,167 +82,18 @@ def generate_route(
     region_id: str,
     region_face_indices: np.ndarray,
     spray_width_mm: float,
-    waypoint_spacing_mm: float = 0.0,   # 0 = keep raw slicer points
+    waypoint_spacing_mm: float = 0.0,
     direction: str = 'horizontal',
 ) -> PaintRoute:
-    """Main entry point: given a face selection, return a complete PaintRoute."""
-    if len(region_face_indices) == 0:
-        raise ValueError(f"Region '{region_id}' has no classified triangles.")
-
-    # Surface-basis planes (like Conform) give correct arc-length spacing on tilted
-    # surfaces.  Adapted from Noether PlaneSlicerRasterPlanner::planImpl: cut direction
-    # perpendicular to mesh surface normal, spaced along step_vec.
-    mesh = mesh_data.trimesh_mesh
-    basis_faces = _get_basis_faces(region_id, region_face_indices, mesh, mesh_data.up_axis)
-    mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, mesh_data.up_axis)
-    if direction == 'vertical':
-        pass_vec, step_vec = step_vec, pass_vec
-
-    all_verts = mesh.vertices[mesh.faces[region_face_indices].ravel()]
-    step_min = float((all_verts @ step_vec).min()) - 0.001
-    step_max = float((all_verts @ step_vec).max()) + 0.001
-
-    _step = spray_width_mm * 0.85
-    span = step_max - step_min
-    if span <= _step:
-        step_positions = [(step_min + step_max) / 2.0]
-    else:
-        first = step_min + _step / 2.0
-        step_positions = list(np.arange(first, step_max, _step))
-
-    all_passes: list[PaintPass] = []
-    pass_id = 0
-
-    for plane_index, step_pos in enumerate(step_positions):
-        slice_pos = step_pos
-        plane_origin = step_pos * step_vec
-        result = trimesh.intersections.mesh_plane(
-            mesh,
-            plane_normal=step_vec,
-            plane_origin=plane_origin,
-            return_faces=True,
-        )
-        if result is None:
-            continue
-        raw_segs, seg_face_ids = result
-        if raw_segs is None or len(raw_segs) == 0:
-            continue
-
-        # Keep segments from faces pointing toward the spray direction (mean_n)
-        face_mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
-        segments = raw_segs[face_mask]
-        if len(segments) == 0:
-            continue
-
-        seg_lens = np.linalg.norm(segments[:, 1, :] - segments[:, 0, :], axis=1)
-        segments = segments[seg_lens > 1e-12]
-        if len(segments) == 0:
-            continue
-
-        polylines = _stitcher.stitch_segments(segments)
-        if not polylines:
-            continue
-
-        # Drop corner clips, diagonal fragments, and sort by arc length
-        # (_filter_polylines handles sorting internally)
-        polylines = _filter_polylines(polylines, spray_width_mm)
-
-        # Cap fragments per level: too many means edge/corner noise on complex meshes
-        polylines = polylines[:_MAX_SUB_PER_LEVEL]
-
-        # Direction alternates by plane index, not by total pass count,
-        # so holes/sub-passes don't disrupt the pattern.
-        is_forward = (plane_index % 2 == 0)
-
-        for sub_idx, polyline in enumerate(polylines):
-            if len(polyline) < 2:
-                continue
-            pts = polyline if is_forward else polyline[::-1].copy()
-            # Smooth micro-jaggies from mesh triangulation, then resample uniformly.
-            # Use a fallback spacing when none set so curved surface intersections
-            # keep enough points to follow the arc after standoff offset.
-            # ponytail: fallback = 40% of spray width; reduce if dense coverage needed
-            pts = rdp_simplify(pts, _RDP_EPSILON)
-            _spacing = waypoint_spacing_mm if waypoint_spacing_mm > 0 else spray_width_mm * 0.4
-            if len(pts) >= 2:
-                pts = resample_arc(pts, _spacing)
-            pts = prune_collinear(pts)
-            if len(pts) < 2:
-                continue
-            all_passes.append(PaintPass(
-                id=pass_id,
-                region_id=region_id,
-                direction=direction,
-                points=pts,
-                is_forward=is_forward,
-                sub_index=sub_idx,
-                slice_position=float(slice_pos),
-            ))
-            pass_id += 1
-
-    # TSP-lite: group passes by slice level; within each level pick the sub-pass
-    # whose nearest endpoint is closest to the current tool position (greedy).
-    _level_map: dict[float, list[PaintPass]] = defaultdict(list)
-    for _p in all_passes:
-        _level_map[round(_p.slice_position, 4)].append(_p)
-
-    _sorted_passes: list[PaintPass] = []
-    for _pos in sorted(_level_map.keys()):
-        _group = _level_map[_pos]
-        if len(_group) > 1:
-            _cur = _sorted_passes[-1].points[-1] if _sorted_passes else _group[0].points[0]
-            _rem = list(_group)
-            _ordered: list[PaintPass] = []
-            while _rem:
-                _i = min(range(len(_rem)), key=lambda i: min(
-                    np.linalg.norm(_rem[i].points[0] - _cur),
-                    np.linalg.norm(_rem[i].points[-1] - _cur),
-                ))
-                _p = _rem.pop(_i)
-                if np.linalg.norm(_p.points[-1] - _cur) < np.linalg.norm(_p.points[0] - _cur):
-                    _p = PaintPass(id=_p.id, region_id=_p.region_id, direction=_p.direction,
-                                   points=_p.points[::-1].copy(), is_forward=not _p.is_forward,
-                                   sub_index=_p.sub_index, slice_position=_p.slice_position)
-                _ordered.append(_p)
-                _cur = _p.points[-1]
-            _group = _ordered
-        _sorted_passes.extend(_group)
-    all_passes = _sorted_passes
-
-    # Batch normals after TSP ordering — one BVH call for all waypoints.
-    from app.path.face_grid_generator import _batch_normals_tangents
-    _batch_normals_tangents(all_passes, mesh, mean_n)
-
-    if not all_passes:
-        _log.warning(
-            "generate_route: region '%s' produced 0 passes — "
-            "all slice planes missed the geometry. "
-            "Try reducing spray_width_mm or check the up_axis setting.",
-            region_id,
-        )
-
-    # Connect ALL passes in execution order (sub-index passes are real passes, not orphans)
-    connections = _connector.connect_passes(
-        all_passes,
+    """Mesh Surface: delegates to Conform logic with standoff=0."""
+    from app.path.face_grid_generator import generate_conform_route
+    return generate_conform_route(
+        region=region_id,
+        face_indices=region_face_indices,
+        mesh=mesh_data.trimesh_mesh,
+        up_axis=mesh_data.up_axis,
         spray_width_mm=spray_width_mm,
         waypoint_spacing_mm=waypoint_spacing_mm,
-    )
-
-    total_length = sum(
-        float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1)))
-        for p in all_passes
-        if len(p.points) >= 2
-    )
-
-    spray_normal = mean_n  # already a unit vector from _compute_surface_basis
-
-    return PaintRoute(
-        region_id=region_id,
-        passes=all_passes,
-        connections=connections,
-        unit='mm',
-        spacing_mm=spray_width_mm,
-        total_passes=len(all_passes),
-        total_length_mm=total_length,
-        spray_normal=spray_normal,
+        standoff_mm=0.0,
+        direction=direction,
     )
