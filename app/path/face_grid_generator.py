@@ -294,32 +294,28 @@ def generate_conform_route(
         first = step_min + _step / 2.0
         step_positions = list(np.arange(first, step_max, _step))
 
+    # Build slice sub-mesh once: only the forward-facing region faces.
+    # mesh_plane on the full mesh is O(all faces) × N planes — expensive.
+    # Sub-mesh limits work to the region and eliminates the per-plane normal filter.
+    region_fwd_mask = mesh.face_normals[face_indices] @ mean_n >= 0.0
+    region_fwd_ids  = face_indices[region_fwd_mask]
+    slice_mesh = trimesh.Trimesh(
+        vertices=mesh.vertices,
+        faces=mesh.faces[region_fwd_ids],
+        process=False,
+    )
+
     all_passes: list[PaintPass] = []
     pass_id = 0
 
     for plane_index, step_pos in enumerate(step_positions):
         # Cutting plane: normal = step_vec, origin = step_pos along step_vec
-        plane_origin = step_pos * step_vec
-        result = trimesh.intersections.mesh_plane(
-            mesh,
+        segments = trimesh.intersections.mesh_plane(
+            slice_mesh,
             plane_normal=step_vec,
-            plane_origin=plane_origin,
-            return_faces=True,
+            plane_origin=step_pos * step_vec,
         )
-        if result is None:
-            continue
-        segments, seg_face_ids = result
         if segments is None or len(segments) == 0:
-            continue
-
-        # Keep segments from faces that face toward the spray direction.
-        # Using face_normals dot mean_n instead of region assignment so that
-        # transition faces (e.g. top-leaning faces classified as TOP rather
-        # than FRONT) are included — the classifier assigns each face to one
-        # region only, which would drop valid boundary geometry.
-        mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
-        segments = segments[mask]
-        if len(segments) == 0:
             continue
 
         # Remove degenerate segments
