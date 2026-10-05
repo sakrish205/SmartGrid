@@ -175,7 +175,9 @@ def generate_face_grid_route(
         if waypoint_spacing_mm > 0:
             pts = resample_arc(pts, waypoint_spacing_mm)
 
-        local_n     = interpolate_normals(pts, mesh)
+        local_n = interpolate_normals(pts, mesh)
+        flip = local_n @ mean_n < 0
+        local_n[flip] = -local_n[flip]
         tcp_tangent = build_tcp_frames(pts, local_n)
         all_passes.append(PaintPass(
             id=pass_id,
@@ -233,80 +235,6 @@ _MAX_ANGLE_DEV  = 65.0   # degrees
 _MAX_SUB_LEVEL  = 6
 
 
-def _plane_segments_fast(
-    sub_verts: np.ndarray,    # (V', 3) compact vertex positions
-    sub_faces: np.ndarray,    # (F, 3) compact face indices
-    vert_dots: np.ndarray,    # (V',) precomputed dot(v, step_vec)
-    step_pos: float,
-    fwd_mask: np.ndarray,     # (F,) bool — forward-facing faces only
-) -> np.ndarray:
-    """Vectorized plane–mesh intersection with precomputed vertex projections.
-
-    Returns (M, 2, 3) segment array (no Python loops over faces).
-    Adapted from BF getSamplePoints plane-slicing logic.
-    """
-    d = vert_dots[sub_faces] - step_pos   # (F, 3) signed distance per vertex
-    pos = d > 0
-    # crossing & forward-facing
-    cross = pos.any(axis=1) & (~pos).any(axis=1) & fwd_mask
-    if not cross.any():
-        return np.empty((0, 2, 3), dtype=float)
-
-    cf  = sub_faces[cross]       # (M, 3)
-    cd  = d[cross]               # (M, 3)
-    cv  = sub_verts[cf]          # (M, 3, 3)
-
-    # Edges 0-1, 1-2, 2-0
-    ei  = np.array([0, 1, 2])
-    ej  = np.array([1, 2, 0])
-    di  = cd[:, ei]              # (M, 3) start-vertex distances
-    dj  = cd[:, ej]              # (M, 3) end-vertex distances
-    edge_cross = (di > 0) != (dj > 0)   # (M, 3)
-
-    # Interpolate all edges; non-crossing ones are garbage but masked out
-    denom     = di - dj
-    safe_den  = np.where(np.abs(denom) > 1e-12, denom, 1.0)
-    t         = np.where(np.abs(denom) > 1e-12, di / safe_den, 0.5).clip(0.0, 1.0)
-    vi        = cv[:, ei]        # (M, 3, 3)
-    vj        = cv[:, ej]
-    edge_pts  = vi + t[:, :, None] * (vj - vi)   # (M, 3, 3)
-
-    # Pick the two crossing edges per face via argsort (False < True → last 2 = True)
-    cross_idx = edge_cross.argsort(axis=1)[:, -2:]   # (M, 2)
-    row       = np.arange(len(cf))
-    pts_a     = edge_pts[row, cross_idx[:, 0]]       # (M, 3)
-    pts_b     = edge_pts[row, cross_idx[:, 1]]       # (M, 3)
-
-    segs = np.stack([pts_a, pts_b], axis=1)          # (M, 2, 3)
-    # Drop degenerate segments
-    lens = np.linalg.norm(segs[:, 1] - segs[:, 0], axis=1)
-    return segs[lens > 1e-12]
-
-
-
-
-def _filter_chains(chains: list[np.ndarray], spray_width_mm: float) -> list[np.ndarray]:
-    if not chains:
-        return chains
-    lengths = [float(np.sum(np.linalg.norm(np.diff(c, axis=0), axis=1))) for c in chains]
-    order = sorted(range(len(chains)), key=lambda i: lengths[i], reverse=True)
-    chains = [chains[i] for i in order]
-    lengths = [lengths[i] for i in order]
-    min_len = max(spray_width_mm * _MIN_PASS_FRAC, _MIN_PASS_ABS)
-    cos_lim = np.cos(np.radians(_MAX_ANGLE_DEV))
-    pdir = chains[0][-1] - chains[0][0]
-    pn = np.linalg.norm(pdir)
-    primary_dir = pdir / pn if pn > 1e-9 else np.array([1., 0., 0.])
-    kept = [chains[0]]
-    for c, arc in zip(chains[1:], lengths[1:]):
-        if arc < min_len:
-            continue
-        d = c[-1] - c[0]
-        dn = np.linalg.norm(d)
-        if dn > 1e-9 and abs(np.dot(d / dn, primary_dir)) < cos_lim:
-            continue
-        kept.append(c)
-    return kept[:_MAX_SUB_LEVEL]
 
 
 def generate_conform_route(
@@ -378,7 +306,7 @@ def generate_conform_route(
         from app.path.generator import _filter_polylines
         polylines = _filter_polylines(polylines, spray_width_mm)[:_MAX_SUB_LEVEL]
 
-        is_forward = (plane_index % 2 == 0) if direction_offset == 0 else (plane_index % 2 == 1)
+        is_forward = (plane_index + direction_offset) % 2 == 0
 
         for sub_idx, poly in enumerate(polylines):
             if len(poly) < 2:
@@ -392,8 +320,12 @@ def generate_conform_route(
             if len(pts) < 2:
                 continue
 
-            # Surface normals at slice location (standoff applied after ordering)
-            local_n     = interpolate_normals(pts, mesh)
+            # Surface normals at slice location (standoff applied after ordering).
+            # BVH may return a back-face normal near region boundaries — flip any
+            # that point away from mean_n so standoff always lifts outward.
+            local_n = interpolate_normals(pts, mesh)
+            flip = local_n @ mean_n < 0
+            local_n[flip] = -local_n[flip]
             tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
                 id=pass_id, region_id=region, direction=direction,
@@ -424,7 +356,8 @@ def generate_conform_route(
                     _p = PaintPass(id=_p.id, region_id=_p.region_id, direction=_p.direction,
                                    points=_p.points[::-1].copy(), is_forward=not _p.is_forward,
                                    sub_index=_p.sub_index, slice_position=_p.slice_position,
-                                   normals=_p.normals[::-1].copy() if _p.normals is not None else None)
+                                   normals=_p.normals[::-1].copy() if _p.normals is not None else None,
+                                   tangent=_p.tangent[::-1].copy() if _p.tangent is not None else None)
                 _sorted.append(_p)
                 _cur = _p.points[-1]
         else:

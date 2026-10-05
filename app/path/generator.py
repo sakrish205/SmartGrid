@@ -169,7 +169,9 @@ def generate_route(
             pts = prune_collinear(pts)
             if len(pts) < 2:
                 continue
-            local_n     = interpolate_normals(pts, mesh)
+            local_n = interpolate_normals(pts, mesh)
+            flip = local_n @ mean_n < 0
+            local_n[flip] = -local_n[flip]
             tcp_tangent = build_tcp_frames(pts, local_n)
             all_passes.append(PaintPass(
                 id=pass_id,
@@ -207,7 +209,8 @@ def generate_route(
                     _p = PaintPass(id=_p.id, region_id=_p.region_id, direction=_p.direction,
                                    points=_p.points[::-1].copy(), is_forward=not _p.is_forward,
                                    sub_index=_p.sub_index, slice_position=_p.slice_position,
-                                   normals=_p.normals[::-1].copy() if _p.normals is not None else None)
+                                   normals=_p.normals[::-1].copy() if _p.normals is not None else None,
+                                   tangent=_p.tangent[::-1].copy() if _p.tangent is not None else None)
                 _ordered.append(_p)
                 _cur = _p.points[-1]
             _group = _ordered
