@@ -11,9 +11,10 @@ Structure:
       ├── execution_sequence[]  — ordered [{type, id}] for robot program
       ├── passes[]
       │   ├── id, region_id, is_forward, length_mm
-      │   ├── surface_normal   [NX, NY, NZ]  — same as route spray_normal
       │   ├── start / end      [X, Y, Z]
-      │   └── tcp_waypoints[]  [[X,Y,Z], …]  — all path points (raw or resampled)
+      │   ├── tcp_waypoints[]  [[X,Y,Z], …]  — positions (raw or resampled)
+      │   ├── normals[]        [[NX,NY,NZ], …]  — per-waypoint outward surface normal
+      │   └── tangents[]       [[TX,TY,TZ], …]  — TCP X-axis (omitted if not computed)
       └── connections[]
           ├── id, from_pass_id, to_pass_id, length_mm
           ├── start / end
@@ -21,6 +22,7 @@ Structure:
 
 OLP mapping:
   NX/NY/NZ = outward surface normal; gun approach = -N; OLP computes W/P/R.
+  TX/TY/TZ = corrected path tangent (TCP X-axis, Noether createTransform).
   passes     → Trigger ON  (spray gun firing)
   connections → Trigger OFF (air travel)
 """
@@ -34,13 +36,17 @@ from app.path.path_model import PaintRoute, GenerationParams
 _OLP_CONVENTION = {
     "unit":              "mm",
     "normal_convention": "outward surface normal — gun approach direction = -NX/-NY/-NZ",
-    "tool_frame":        "Z = -spray_normal  |  X = pass travel direction  |  Y = cross(Z,X)",
-    "Trigger_ON":        "spray gun firing (pass moves)",
-    "Trigger_OFF":       "air travel (connection moves)",
+    "tool_frame": (
+        "Z = -NX/-NY/-NZ (into surface)  |  "
+        "X = TX/TY/TZ (corrected path tangent, Noether createTransform)  |  "
+        "Y = cross(Z, X)"
+    ),
+    "Trigger_ON":  "spray gun firing (pass moves)",
+    "Trigger_OFF": "air travel (connection moves)",
     "mapping": {
         "RoboDK_drag_drop": "X Y Z NX NY NZ  (6-col curve import, Utilities > Import Curve)",
-        "VisualComponents": "seq_id + X Y Z NX NY NZ + Trigger  (import script)",
-        "DELMIA":           "seq_id + X Y Z NX NY NZ + Trigger  (APT macro)",
+        "VisualComponents": "seq_id + X Y Z NX NY NZ TX TY TZ + Trigger + speed_mmpm",
+        "DELMIA_APT":       "GOTO/X,Y,Z,-NX,-NY,-NZ with $$ TX= comment per waypoint",
     },
 }
 
@@ -135,17 +141,24 @@ def _route_to_dict(route: PaintRoute, route_index: int) -> dict:
 def _pass_to_dict(p, spray_normal: list) -> dict:
     length = float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1))) if len(p.points) >= 2 else 0.0
     pts = [[round(v, 4) for v in row] for row in p.points.tolist()]
-    return {
-        "id":             p.id,
-        "Trigger":        "ON",
-        "region_id":      p.region_id,
-        "is_forward":     p.is_forward,
-        "length_mm":      round(length, 3),
-        "surface_normal": spray_normal,
-        "start":          pts[0] if pts else [],
-        "end":            pts[-1] if pts else [],
-        "tcp_waypoints":  pts,
+    if p.normals is not None and len(p.normals) == len(p.points):
+        normals = [[round(float(v), 6) for v in row] for row in p.normals.tolist()]
+    else:
+        normals = [spray_normal] * len(pts)
+    d = {
+        "id":            p.id,
+        "Trigger":       "ON",
+        "region_id":     p.region_id,
+        "is_forward":    p.is_forward,
+        "length_mm":     round(length, 3),
+        "start":         pts[0] if pts else [],
+        "end":           pts[-1] if pts else [],
+        "tcp_waypoints": pts,
+        "normals":       normals,
     }
+    if p.tangent is not None and len(p.tangent) == len(p.points):
+        d["tangents"] = [[round(float(v), 6) for v in row] for row in p.tangent.tolist()]
+    return d
 
 
 def _conn_to_dict(c) -> dict:

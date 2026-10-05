@@ -40,7 +40,8 @@ _FIELDS = [
     'pass_id',       # pass or connection id
     'pt_idx',        # point index within the segment
     'X', 'Y', 'Z',  # TCP position in mm (4 decimal places)
-    'NX', 'NY', 'NZ',  # outward surface normal unit vector (6 dp)
+    'NX', 'NY', 'NZ',  # TCP Z-axis: outward surface normal (gun approach = -N)
+    'TX', 'TY', 'TZ',  # TCP X-axis: corrected path tangent (Noether createTransform)
     'length_mm',     # segment total length — written on pt_idx=0 only
     'region',        # face region label
     'is_forward',    # True/False for passes; blank for connections
@@ -64,8 +65,9 @@ def _write_metadata(f, params: GenerationParams) -> None:
         '#',
         '# OLP tool frame convention:',
         '#   NX/NY/NZ = outward surface normal  (gun approach direction = -NX/-NY/-NZ)',
+        '#   TX/TY/TZ = corrected path tangent  (TCP X-axis; empty if not computed)',
         '#   Tool Z   = -NX/-NY/-NZ             (points INTO surface)',
-        '#   Tool X   = pass travel direction   (derive from consecutive XYZ rows)',
+        '#   Tool X   = TX/TY/TZ               (Noether createTransform)',
         '#   Tool Y   = cross(Tool_Z, Tool_X)   (right-hand rule)',
         '#',
         '# OLP mapping:',
@@ -96,10 +98,7 @@ def export_route_csv(
         seq_id = 0
 
         for route in routes:
-            sn = route.spray_normal
-            nx = round(float(sn[0]), 6)
-            ny = round(float(sn[1]), 6)
-            nz = round(float(sn[2]), 6)
+            sn = route.spray_normal  # fallback when per-waypoint normals absent
 
             conn_by_from = {c.from_pass_id: c for c in route.connections}
 
@@ -109,6 +108,20 @@ def export_route_csv(
                     if len(p.points) >= 2 else 0.0
                 )
                 for i, pt in enumerate(p.points):
+                    # Per-waypoint normal (Conform/Mesh Surface); falls back to route normal
+                    if p.normals is not None and i < len(p.normals):
+                        n = p.normals[i]
+                    else:
+                        n = sn
+                    nx = round(float(n[0]), 6)
+                    ny = round(float(n[1]), 6)
+                    nz = round(float(n[2]), 6)
+                    # Per-waypoint corrected tangent (TCP X-axis) — empty if not computed
+                    if p.tangent is not None and i < len(p.tangent):
+                        t = p.tangent[i]
+                        tx, ty, tz = round(float(t[0]), 6), round(float(t[1]), 6), round(float(t[2]), 6)
+                    else:
+                        tx, ty, tz = '', '', ''
                     writer.writerow({
                         'seq_id':       seq_id,
                         'Trigger':      'ON',
@@ -118,9 +131,8 @@ def export_route_csv(
                         'X': round(float(pt[0]), 4),
                         'Y': round(float(pt[1]), 4),
                         'Z': round(float(pt[2]), 4),
-                        'NX': nx,
-                        'NY': ny,
-                        'NZ': nz,
+                        'NX': nx, 'NY': ny, 'NZ': nz,
+                        'TX': tx, 'TY': ty, 'TZ': tz,
                         'length_mm':  seg_len if i == 0 else '',
                         'region':     route.region_id,
                         'is_forward': p.is_forward,
@@ -144,6 +156,7 @@ def export_route_csv(
                             'Y': round(float(pt[1]), 4),
                             'Z': round(float(pt[2]), 4),
                             'NX': '', 'NY': '', 'NZ': '',
+                            'TX': '', 'TY': '', 'TZ': '',
                             'length_mm':  c_len if i == 0 else '',
                             'region':     route.region_id,
                             'is_forward': '',
