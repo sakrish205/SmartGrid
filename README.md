@@ -12,8 +12,80 @@ SmartGrid solves the **manufacturing process-planning problem** of generating sy
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green)](https://pypi.org/project/PySide6/)
-[![Version](https://img.shields.io/badge/version-1.5.3-informational)]()
+[![Version](https://img.shields.io/badge/version-1.6.0-informational)]()
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+
+---
+
+## Improvements (v1.6 — Noether TCP Frames)
+
+### Per-waypoint TCP frames — all four path modes — `face_grid_generator.py`, `local_normals.py`
+
+All four path modes now compute a full TCP (Tool Centre Point) frame at every waypoint:
+
+- `PaintPass.normals` — (N, 3) outward surface normal per waypoint (Z-axis of the TCP frame; gun approach direction = −N)
+- `PaintPass.tangent` — (N, 3) corrected path tangent per waypoint (X-axis of the TCP frame; derived via Noether `createTransform`)
+
+**TCP frame convention** — adapted from the Noether `createTransform` algorithm:
+```
+Z  = surface normal (outward)       → gun approach direction
+X  = corrected tangent              → cross(cross(N, T_raw), N) → lies in surface plane
+Y  = binormal                       → cross(Z, X)               → right-hand rule
+```
+
+Both fields are exported in all formats: CSV (TX/TY/TZ columns), Visual Components CSV, and DELMIA APT (`GOTO` comment).
+
+---
+
+### Mesh Surface rewired to Conform — `generator.py`
+
+Mesh Surface (`generate_route`) previously ran its own axis-aligned plane-slicing pipeline. It has been replaced with a 10-line delegation to `generate_conform_route` with `standoff_mm=0`:
+
+```python
+def generate_route(...) -> PaintRoute:
+    from app.path.face_grid_generator import generate_conform_route
+    return generate_conform_route(
+        region=region_id, face_indices=region_face_indices,
+        mesh=mesh_data.trimesh_mesh, up_axis=mesh_data.up_axis,
+        spray_width_mm=spray_width_mm, waypoint_spacing_mm=waypoint_spacing_mm,
+        standoff_mm=0.0, direction=direction,
+    )
+```
+
+This removes ~160 lines, eliminates the quality gap between the two modes, and cuts generation time from 65+ seconds to under 9 seconds on complex bumper geometry by using tilted (mean-normal basis) cutting planes instead of world-axis-aligned ones.
+
+---
+
+### Conform standoff — uniform `mean_n` shift — `face_grid_generator.py`
+
+Standoff in Conform mode was previously applied by re-querying the BVH after offsetting each waypoint, which caused chaotic spiky paths at large standoff values (250 mm+): offset points near region boundaries snap to wrong/back-face triangles, and on curved surfaces face normals diverge up to 90° from `mean_n`, creating positional errors equal to the full standoff distance.
+
+**Fix:** standoff is now a single uniform vector shift along `mean_n` (same mechanism as BBox and Adaptive), applied after TSP ordering:
+
+```python
+if standoff_mm > 0.0:
+    for _p in all_passes:
+        _p.points = _p.points + standoff_mm * mean_n
+```
+
+Per-waypoint normals are still computed for TCP orientation — they are not used for the standoff position.
+
+---
+
+### Batch BVH — one proximity call per route — `face_grid_generator.py`
+
+Previously `interpolate_normals` was called once per pass (N separate BVH traversals). A new `_batch_normals_tangents` helper vstacks all pass waypoints, makes one BVH call for the entire route, then slices the result back per pass:
+
+```python
+def _batch_normals_tangents(passes, mesh, mean_n):
+    all_pts = np.vstack([p.points for p in passes])
+    all_n   = interpolate_normals(all_pts, mesh)
+    flip    = all_n @ mean_n < 0        # hemisphere guard
+    all_n[flip] = -all_n[flip]
+    # slice back per pass ...
+```
+
+A hemisphere guard (`flip = local_n @ mean_n < 0`) prevents back-face normals from BVH near region boundaries from being written into the TCP frame.
 
 ---
 
@@ -462,7 +534,7 @@ SmartGrid provides four toolpath generation modes for different workpiece geomet
 | **Boundary Box** | None — bbox only | Flat plane (floats on curves) | Instant | Flat panels, sheet metal |
 | **Face Grid — Adaptive** | Normal stats only | Tilted plane, per-row depth tracking | Fast | Bonnets, doors, gently curved panels |
 | **Face Grid — Conform** | Trimesh plane intersection | On-surface, tilted cutting planes | Medium | Blended edges, compound curves |
-| **Mesh Surface** | Trimesh plane intersection | On-surface, axis-aligned cutting planes | Slower | Complex surfaces, parts with holes |
+| **Mesh Surface** | Trimesh plane intersection | On-surface, tilted cutting planes (delegates to Conform, standoff=0) | Medium | Complex surfaces, parts with holes |
 
 All four modes produce the same output format (`PaintRoute` / `PaintPass`), support multi-region selection, and export identically.
 
@@ -583,43 +655,26 @@ for plane_idx, step_pos in enumerate(step_positions):
 
 ### Mesh Surface
 
-The most geometrically faithful mode. Axis-aligned cutting planes intersect the mesh and paths are filtered to exactly the classifier-assigned face set. Every waypoint lies on the actual mesh surface.
+Delegates to Face Grid — Conform with `standoff_mm=0`. Uses the same tilted mean-normal basis, trimesh plane intersections, hemisphere filter, segment stitching, RDP simplification, and TSP-lite pass ordering as Conform — with no standoff offset applied. Every waypoint lies on the actual mesh surface.
 
-**How it works:**
-
-1. The slice axis is determined by region and up-axis: TOP/BOTTOM use the forward axis; side faces (FRONT/REAR/LEFT/RIGHT) use the up axis. Cutting planes are always axis-aligned (world coordinates).
-2. Plane positions are spaced at `pitch` intervals from the region's own bounding box along the slice axis, extended ±0.001 mm to ensure boundary triangles are caught.
-3. Each `trimesh.intersections.mesh_plane` call returns all segments where the plane cuts the mesh, plus the source face ID of each segment.
-4. An outward-face filter is applied via `_outward_sign(region_id, up_axis)`: for regions with a known outward axis (FRONT/REAR/LEFT/RIGHT/TOP/BOTTOM), a face-normal dot-product threshold replaces the classifier membership test — segments whose source face normal does not point outward are dropped. This forward-hemisphere approach includes boundary and transition faces that the classifier assigns to adjacent regions, giving complete coverage. A subsequent largest-gap cluster analysis on segment heights drops any internal ribs or supports that survived the normal filter.
-5. Remaining segments are stitched into ordered polylines by a graph-walk on quantised endpoints. Multiple chains per level represent holes (e.g. sunroof cutouts) — they become separate sub-passes, not connected across the gap.
-6. Sub-passes shorter than `max(pitch × 10%, 5 mm)` or whose direction deviates more than 65° from the primary pass are dropped as corner fragments.
-7. RDP simplification (ε = 0.3 mm) removes discretisation jaggies. Up to 6 sub-passes per slice level are kept.
-8. Boustrophedon ordering by plane index — even planes forward, odd planes reversed. Holes within a level do not disrupt the serpentine pattern.
+**How it works:** identical to [Face Grid — Conform](#face-grid--conform) above, with `standoff_mm=0.0` forced. See that section for the full algorithm description.
 
 ```python
-# core: generator.py — generate_route  +  slicer.py
-for plane_idx, step_pos in enumerate(step_positions):
-    segments, face_ids = trimesh.intersections.mesh_plane(
-        mesh, plane_normal=step_normal,
-        plane_origin=origin, return_faces=True)
-    # Primary filter: forward-hemisphere normal check (slicer.py — slice_region)
-    # _outward_sign() returns the axis and sign for the selected region;
-    # segments are kept when face_normals[face_id, axis] * sign > -0.25
-    segments = slice_region(mesh, region_faces, plane_normal, origin, region_id, up_axis)
-    # slice_region also runs a largest-gap cluster check to drop internal ribs
-    polylines = stitcher.stitch(segments)              # graph-walk → chains
-    polylines = _filter_polylines(polylines, pitch)    # drop corner fragments
-    pts = rdp_simplify(pts, eps=0.3)                   # RDP ε = 0.3 mm
-    is_forward = (plane_idx % 2 == 0)                  # boustrophedon
+# generator.py — generate_route
+def generate_route(mesh_data, region_id, region_face_indices,
+                   spray_width_mm, waypoint_spacing_mm=0.0, direction='horizontal'):
+    from app.path.face_grid_generator import generate_conform_route
+    return generate_conform_route(
+        region=region_id, face_indices=region_face_indices,
+        mesh=mesh_data.trimesh_mesh, up_axis=mesh_data.up_axis,
+        spray_width_mm=spray_width_mm, waypoint_spacing_mm=waypoint_spacing_mm,
+        standoff_mm=0.0, direction=direction,
+    )
 ```
 
-> **Triangle–plane intersection** — via [Trimesh](https://trimesh.org/) (Dawson-Haggerty et al.). Standard computational geometry.  
-> **RDP simplification** — Ramer, U. (1972). *CGIP 1(3)*. Douglas & Peucker (1973). *Cartographica 10(2)*.  
-> **Boustrophedon traversal** — Choset, H. (2000). *Coverage of Known Spaces*. Autonomous Robots, 9(3), 247–253.
-
-**Strengths:** Most accurate surface tracking — paths follow the mesh in both axes. Handles holes and cutouts correctly. Per-point standoff via nearest mesh-face normal.  
-**Limitation:** Slowest mode (one mesh intersection per pass). On tilted surfaces, world-axis step spacing slightly overestimates true arc-length distance.  
-**Best for:** complex curved surfaces, parts with holes or cutouts, and any surface where path accuracy is more important than generation speed.
+**Strengths:** Surface-accurate paths, correct arc-length step spacing, handles holes and discontinuities. Substantially faster than the previous axis-aligned implementation (under 9 s vs 65+ s on dense bumper geometry).  
+**Limitation:** No standoff — the spray gun touches the surface. Use Conform mode when standoff is required.  
+**Best for:** complex curved surfaces and parts with holes or cutouts where the gun should follow the surface exactly at zero offset.
 
 ---
 
@@ -690,7 +745,7 @@ Normal selection depends on the path mode:
 | Boundary Box | Face-axis unit vector |
 | Face Grid — Adaptive | Mean face normal |
 | Face Grid — Conform | Mean face normal (uniform shift along `mean_n`) |
-| Mesh Surface | Nearest mesh-face normal (per-point, via trimesh proximity) |
+| Mesh Surface | No standoff — delegates to Conform with `standoff_mm=0` |
 
 Default standoff is `0`.
 
@@ -774,7 +829,7 @@ Speed is written into every OLP export format:
 | DELMIA APT | `FEDRAT/value,MMPM` written only when speed changes (auto), or once per pass block (custom) |
 | G-code | `G1 F{speed} X Y Z` on the first or any changed-speed waypoint; bare `G1 X Y Z` otherwise |
 | RoboDK CSV | Not written — always 6-col; use DELMIA APT or G-code for per-waypoint speed |
-| Visual Components CSV | `speed_mmpm` column on every spray pass row; blank on connectors |
+| Visual Components CSV | `speed_mmpm` + `TX/TY/TZ` columns on every spray pass row; blank on connectors |
 | JSON / neutral CSV | Stored in `GenerationParams.paint_speed_mmpm` |
 
 Connector (air) moves are always written as rapid/travel — speed control applies to spray passes only.
@@ -848,7 +903,7 @@ Structured toolpath (schema version `2.0`) containing:
 - **`olp_convention` block** — machine-readable tool-frame mapping: Z = −spray_normal (into surface), X = pass travel direction, Y = cross(Z, X); includes quick-reference import paths for RoboDK / Visual Components / DELMIA
 - **Routes and regions** — one route per selected region
 - **Spray passes** — each with `is_forward` flag, arc `length_mm`, `slice_position`, and `sub_index` (for multi-chain levels with holes)
-- **3D waypoints** with outward surface normals
+- **3D waypoints** with per-waypoint outward surface normals (`NX/NY/NZ`) and corrected path tangent (`TX/TY/TZ`) — the full TCP frame
 - **Connections / transit moves**
 - **`execution_sequence` array** — ordered list of `{type, id, Trigger}` giving the exact robot program playback order
 
@@ -864,7 +919,8 @@ One row per trajectory point:
 | `pass_id` | Pass or connection number |
 | `pt_idx` | Point index within segment |
 | `X`, `Y`, `Z` | TCP position in mm |
-| `NX`, `NY`, `NZ` | Outward surface normal unit vector |
+| `NX`, `NY`, `NZ` | Outward surface normal unit vector (TCP Z-axis; gun approach = −N) |
+| `TX`, `TY`, `TZ` | Corrected path tangent (TCP X-axis; Noether `createTransform`); empty on BBox |
 | `length_mm` | Segment total length (first point only) |
 | `region` | Face region label |
 | `is_forward` | `True` / `False` for passes; blank for connections |
@@ -877,10 +933,10 @@ Four robot-OLP formats are exported via **Export OLP**:
 6-column CSV, no header row: `X,Y,Z,NX,NY,NZ` — spray passes only. Drag-drop into RoboDK via *Utilities › Import Curve*. No header or comment lines — RoboDK Import Curve rejects any non-numeric line. `NX/NY/NZ` = outward surface normal (RoboDK uses it as the curve approach direction). Per-waypoint speed is not written here; use DELMIA APT or G-code if speed data is required.
 
 #### Visual Components
-CSV with header `seq_id,X,Y,Z,NX,NY,NZ,Trigger,speed_mmpm` (no comment lines before the header). Spray passes have `Trigger=ON` with normals and speed; connector moves are interleaved with `Trigger=OFF`, blank normals, and blank speed — preserving the full execution sequence in one file.
+CSV with header `seq_id,X,Y,Z,NX,NY,NZ,TX,TY,TZ,Trigger,speed_mmpm` (no comment lines before the header). `TX/TY/TZ` = TCP X-axis (Noether `createTransform`); empty when normals not computed (BBox mode). Spray passes have `Trigger=ON` with normals, tangent, and speed; connector moves are interleaved with `Trigger=OFF`, blank normals/tangent, and blank speed — preserving the full execution sequence in one file.
 
 #### DELMIA APT
-APT text file. Spray passes use `GOTO/X,Y,Z,I,J,K` where `I,J,K` = tool Z axis = `-spray_normal` (points into the surface). Connector moves use `RAPID/X,Y,Z`. `FEDRAT/value,MMPM` is written only when speed changes (auto mode) or once per pass (custom mode); spray gun written as `SPINDL/ON` and `SPINDL/OFF`.
+APT text file. Spray passes use `GOTO/X,Y,Z,I,J,K` where `I,J,K` = tool Z axis = `-spray_normal` (points into the surface). When per-waypoint tangent is available (Conform/Adaptive/Mesh Surface), an inline comment `$$ TX=tx,ty,tz` follows each `GOTO` line, providing the full TCP frame for post-processor use. Connector moves use `RAPID/X,Y,Z`. `FEDRAT/value,MMPM` is written only when speed changes (auto mode) or once per pass (custom mode); spray gun written as `SPINDL/ON` and `SPINDL/OFF`.
 
 #### G-code (CNC / Robot)
 Standard G-code `.nc` file compatible with CNC and open robot controllers:
@@ -980,6 +1036,7 @@ Multi-body OBJ files are merged at load via `trimesh.load(force='mesh')`. STEP f
 - **Offline operation** — no cloud or paid API dependency
 - **Geometry-driven planning** — paths are generated from 3D workpiece geometry
 - **Multiple path strategies** — supports flat, curved, blended, and complex surfaces
+- **Per-waypoint TCP frames** — all modes output surface normals + corrected tangent (Noether `createTransform`) for direct robot import
 - **Controlled pitch, standoff, and spray speed**
 - **Collision detection** — hard collisions and near-misses flagged automatically after generation
 - **STEP / CAD import** — direct CAD file support via gmsh tessellation
@@ -1043,8 +1100,9 @@ SmartGrid/
 │   ├── path/
 │   │   ├── path_model.py      — PaintPass, Connection, PaintRoute, GenerationParams
 │   │   ├── bbox_generator.py
-│   │   ├── face_grid_generator.py
-│   │   ├── generator.py       — Mesh Surface orchestration
+│   │   ├── face_grid_generator.py — Adaptive, Conform, and _batch_normals_tangents
+│   │   ├── generator.py       — Mesh Surface: thin delegation to generate_conform_route
+│   │   ├── local_normals.py   — interpolate_normals, build_tcp_frames (Noether createTransform)
 │   │   ├── slicer.py
 │   │   ├── stitcher.py
 │   │   ├── connector.py
