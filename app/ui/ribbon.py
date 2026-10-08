@@ -878,6 +878,8 @@ class SmartRibbon(QWidget):
         self._gen_btn.setEnabled(not generating)
         self._clear_btn.setEnabled(not generating)
         self._gen_btn.setText('Generating…' if generating else 'Generate\nPath')
+        self._arrows_check.setEnabled(not generating)
+        self._grid_check.setEnabled(not generating)
 
     def set_path_exists(self, exists: bool) -> None:
         self._clear_btn.setEnabled(exists)

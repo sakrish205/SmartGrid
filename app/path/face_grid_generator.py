@@ -35,6 +35,13 @@ def _batch_normals_tangents(passes: list, mesh, mean_n: np.ndarray) -> None:
         idx += n_pts
 
 
+def compute_route_normals(route, mesh) -> None:
+    """Compute per-waypoint normals on demand; no-op if already computed or no passes."""
+    passes = [p for p in route.passes if p.normals is None and len(p.points) > 0]
+    if passes:
+        _batch_normals_tangents(passes, mesh, route.spray_normal)
+
+
 def _axes(up_axis: int) -> tuple[int, int, int]:
     fwd   = (up_axis + 1) % 3
     right = (up_axis + 2) % 3
@@ -202,8 +209,6 @@ def generate_face_grid_route(
             slice_position=float(step_pos),
         ))
 
-    _batch_normals_tangents(all_passes, mesh, mean_n)
-
     connections: list[Connection] = []
     for i in range(len(all_passes) - 1):
         conn_pts = np.array([
@@ -367,10 +372,6 @@ def generate_conform_route(
             _sorted.extend(_grp)
     all_passes = _sorted
 
-    # Batch normals after TSP ordering — one BVH call covers all waypoints,
-    # and points are already in final order so no reversal needed.
-    _batch_normals_tangents(all_passes, mesh, mean_n)
-
     # Apply standoff along mean_n (same as BBox/Adaptive) — per-waypoint normals are
     # for TCP orientation only; using them for offset on curved surfaces scatters
     # waypoints up to 90° off when face normals diverge from the spray direction.
@@ -504,8 +505,6 @@ def generate_adaptive_grid_route(
                 points=pts, is_forward=is_forward, sub_index=0,
                 slice_position=float(p),
             ))
-
-    _batch_normals_tangents(all_passes, mesh, mean_n)
 
     connections: list[Connection] = []
     for i in range(len(all_passes) - 1):
