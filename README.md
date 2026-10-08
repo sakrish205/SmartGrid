@@ -12,8 +12,94 @@ SmartGrid solves the **manufacturing process-planning problem** of generating sy
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green)](https://pypi.org/project/PySide6/)
-[![Version](https://img.shields.io/badge/version-1.6.0-informational)]()
+[![Version](https://img.shields.io/badge/version-1.7.0-informational)]()
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+
+---
+
+## Improvements (v1.7 — On-Demand Normals, Accurate Orientation, Mesh Penetration Fix)
+
+### Deferred normals — generation no longer blocks on BVH — `face_grid_generator.py`
+
+`_batch_normals_tangents` was called at generation time for all three mesh-based modes (Face Grid, Conform, Adaptive), running an expensive BVH proximity query across all waypoints before the path was shown. This has been removed from the generation path entirely.
+
+A new public function `compute_route_normals(route, mesh)` computes normals on demand, calling `_batch_normals_tangents` only for passes whose `normals` field is still `None`. Results are cached on each `PaintPass` — repeated calls are free.
+
+```python
+def compute_route_normals(route, mesh) -> None:
+    passes = [p for p in route.passes if p.normals is None and len(p.points) > 0]
+    if passes:
+        _batch_normals_tangents(passes, mesh, route.spray_normal)
+```
+
+**BBox is unaffected** — it never ran `_batch_normals_tangents`. For export, per-waypoint normals are computed before writing orientation columns; `route.spray_normal` serves as a fallback when normals have not been computed.
+
+---
+
+### Per-waypoint orientation arms — background worker — `main_window.py`, `viewer.py`
+
+When the **Arrows** checkbox is enabled, orientation arm direction now uses `paint_pass.normals[i]` (accurate per-point surface normal following the curved mesh) instead of the single constant `route.spray_normal`.
+
+To avoid freezing the UI during the BVH query, a `_NormalsWorker` QThread runs `compute_route_normals` in the background:
+
+```
+Arrows checkbox ON
+  → passes have normals=None
+  → _NormalsWorker spawned (background)
+  → status bar: "Computing orientations…"
+  → worker finishes → _on_normals_ready
+  → redraw with per-waypoint arms
+  → subsequent toggles: instant (cached)
+```
+
+`_add_pass_chevrons` gained two new parameters:
+
+| Parameter | Effect |
+|-----------|--------|
+| `normals` | Per-waypoint normals array — arm direction uses `normals[i]` when provided |
+| `spacing_mm` | Stride-based mark placement: one mark per `spacing_mm` of path (`stride = spacing_mm / avg_gap`), the same interval logic that the previous separate cyan needles used |
+
+Fallback when normals are None: constant `route.spray_normal` (instant, used by BBox and before normals are computed).
+
+---
+
+### Arrows and Grid locked during path generation — `ribbon.py`
+
+`set_generating` now also disables `_arrows_check` and `_grid_check` while generation is running. This prevents triggering a BVH redraw mid-flight and removes visual confusion.
+
+---
+
+### Orientation arms unified — cyan normal needles removed — `viewer.py`
+
+The separate cyan per-waypoint normal needles and pink tangent needles have been removed. Orientation information is now conveyed entirely by the pass-coloured arms:
+
+| Element | Colour | Meaning |
+|---------|--------|---------|
+| Blue arm | `pass_forward` | Spray direction on forward passes |
+| Red arm | `pass_reverse` | Spray direction on reverse passes |
+
+Both use per-waypoint surface normals when available (background-computed), falling back to `route.spray_normal` for BBox or before the worker completes. `norm_` and `tcpf_` actor key prefixes removed from `clear_route`.
+
+---
+
+### Adaptive — mesh penetration fix — `face_grid_generator.py`
+
+Adaptive passes are straight polylines through H×V grid intersection points. After uniform waypoint resampling (`_resample_anchored`), intermediate points between grid intersections lie on straight line segments — on a curved surface these segments can enter the mesh.
+
+A new `_clip_inside` post-processing step runs after all passes are built:
+
+```python
+def _clip_inside(passes, mesh, mean_n, standoff_mm) -> None:
+    all_pts = np.vstack([p.points for p in passes])
+    closest, _, tri_ids = _prox_query(mesh).on_surface(all_pts)
+    face_n  = mesh.face_normals[tri_ids]
+    signed  = np.einsum('ij,ij->i', all_pts - closest, face_n)
+    inside  = signed < 0
+    if inside.any():
+        all_pts[inside] = closest[inside] + standoff_mm * mean_n
+```
+
+Any waypoint with signed distance < 0 (inside the mesh) is projected to the closest surface point and pushed outward by `standoff_mm` along `mean_n`. The BVH is reused from the cached `ProximityQuery` built earlier in the same generation call — no extra build cost.
 
 ---
 
@@ -532,7 +618,7 @@ SmartGrid provides four toolpath generation modes for different workpiece geomet
 | Mode | Mesh query | Path accuracy | Speed | Best for |
 |---|---|---|---|---|
 | **Boundary Box** | None — bbox only | Flat plane (floats on curves) | Instant | Flat panels, sheet metal |
-| **Face Grid — Adaptive** | Normal stats only | Tilted plane, per-row depth tracking | Fast | Bonnets, doors, gently curved panels |
+| **Face Grid — Adaptive** | Normal stats + BVH clip | Tilted plane, per-row depth tracking; penetrating waypoints snapped to surface | Fast | Bonnets, doors, gently curved panels |
 | **Face Grid — Conform** | Trimesh plane intersection | On-surface, tilted cutting planes | Medium | Blended edges, compound curves |
 | **Mesh Surface** | Trimesh plane intersection | On-surface, tilted cutting planes (delegates to Conform, standoff=0) | Medium | Complex surfaces, parts with holes |
 
@@ -881,10 +967,10 @@ The integrated PyVista/VTK viewer provides visual validation of:
 - Workpiece mesh (light theme, Office-style UI)
 - Selected spray regions (highlighted bounding-box faces)
 - Pitch grid
-- Spray passes — forward (blue) / reverse (orange)
-- Hard collisions (red) / near-misses (orange)
-- Travel direction (chevron tick marks, perpendicular to the face normal for correct orientation on all faces)
-- Connectors (pink)
+- Spray passes — forward (blue) / reverse (red)
+- Hard collisions (red highlight) / near-misses (orange highlight)
+- Orientation arms — blue on forward passes, red on reverse passes; per-waypoint surface normal direction (background-computed BVH, falls back to route spray normal); one arm per spray-width interval
+- Connectors
 - Waypoints (gold dots)
 - Adaptive Face Grid: red curved surface grid and always-visible yellow grid intersection dots (mandatory export anchors)
 - Mesh rendering and display settings
@@ -1059,7 +1145,7 @@ SmartGrid currently focuses on **geometric toolpath generation**. It does not it
 - Paint-flow modelling
 - Complete robot-cell simulation
 
-The Adaptive Face Grid method can float on surfaces with significant curvature along the sweep direction because individual passes are straight.
+The Adaptive Face Grid method can float on surfaces with significant curvature along the sweep direction because individual passes are straight. Resampled intermediate waypoints that penetrate the mesh are clipped to the surface via `_clip_inside` (BVH proximity query), but the pass line itself remains straight between grid intersections — it does not follow the surface curvature along the sweep direction.
 
 Collision detection uses per-point ray casting (`mesh.contains`) — on very dense meshes with many flagged passes this can be slow. A signed-distance field approach would improve throughput for high-polygon models.
 
