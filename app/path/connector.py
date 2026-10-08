@@ -50,10 +50,6 @@ def connect_passes(
         if dist_to_end < dist_to_start:
             nxt.points = nxt.points[::-1].copy()
             nxt.is_forward = not nxt.is_forward
-            if nxt.normals is not None:
-                nxt.normals = nxt.normals[::-1].copy()
-            if nxt.tangent is not None:
-                nxt.tangent = nxt.tangent[::-1].copy()
 
         start_pt = nxt.points[0]
         pts = np.array([end_pt, start_pt], dtype=float)

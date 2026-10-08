@@ -161,7 +161,9 @@ def generate_face_grid_route(
     global_pass_max = float((all_verts @ pass_vec).max())
     global_depth    = float((verts @ mean_n).max())
 
-    _step = spray_width_mm * 0.85
+    _step     = spray_width_mm * 0.85
+    band_half = spray_width_mm * 2.0
+    step_proj = verts @ step_vec   # basis_faces only — for depth band sampling
 
     span = step_max - step_min
     if span <= _step:
@@ -170,15 +172,16 @@ def generate_face_grid_route(
         first = step_min + _step / 2.0
         step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
 
-    # Place all passes at global_depth + standoff (outermost safe position).
-    # _snap_to_outer_surface then pulls each resampled waypoint to its actual
-    # local outer surface + standoff — no per-row vertex sampling needed.
-    row_face_pos = global_depth + standoff_mm
-
     all_passes: list[PaintPass] = []
     for local_idx, step_pos in enumerate(step_positions):
         pass_id    = local_idx
         is_forward = ((pass_id + direction_offset) % 2 == 0)
+
+        in_band    = np.abs(step_proj - step_pos) <= band_half
+        band_verts = verts[in_band]
+        row_depth  = float((band_verts @ mean_n).max()) if len(band_verts) > 0 else global_depth
+
+        row_face_pos = row_depth + standoff_mm
         pt_a = row_face_pos * mean_n + global_pass_min * pass_vec + step_pos * step_vec
         pt_b = row_face_pos * mean_n + global_pass_max * pass_vec + step_pos * step_vec
 
@@ -199,7 +202,6 @@ def generate_face_grid_route(
             slice_position=float(step_pos),
         ))
 
-    _snap_to_outer_surface(all_passes, mesh, mean_n, standoff_mm)
     _batch_normals_tangents(all_passes, mesh, mean_n)
 
     connections: list[Connection] = []
@@ -248,56 +250,6 @@ _MAX_SUB_LEVEL  = 6
 
 
 
-def _snap_to_outer_surface(
-    passes: list,
-    mesh: trimesh.Trimesh,
-    mean_n: np.ndarray,
-    standoff_mm: float,
-    tol_mm: float = 2.0,
-) -> None:
-    """In-place: snap any waypoint not at standoff from the outermost shell.
-
-    Uses trimesh.proximity.closest_point for direction-independent detection —
-    handles curved surfaces where a single mean_n ray would miss.  For each
-    waypoint whose signed distance from the nearest surface differs from
-    standoff_mm by more than tol_mm, fires a ray along mean_n from outside to
-    find the true outer surface and places the waypoint there + standoff.
-    Fallback for ray misses (open edge, oblique face): snap to closest surface
-    point + standoff * mean_n.
-    """
-    if not passes:
-        return
-    counts  = [len(p.points) for p in passes]
-    all_pts = np.vstack([p.points for p in passes])
-
-    from trimesh import proximity
-    closest_pts, _, tri_ids = proximity.closest_point(mesh, all_pts)
-    face_norms = mesh.face_normals[tri_ids]
-    # proj: signed distance along local surface normal (negative = inside mesh)
-    proj = np.einsum('ij,ij->i', all_pts - closest_pts, face_norms)
-    needs_snap = np.abs(proj - standoff_mm) > tol_mm
-
-    if not needs_snap.any():
-        return
-
-    snap_pts    = all_pts[needs_snap]
-    ray_origins = snap_pts + 1000.0 * mean_n
-    ray_dirs    = np.tile(-mean_n, (len(snap_pts), 1))
-    locs, ridx, _ = mesh.ray.intersects_location(ray_origins, ray_dirs, multiple_hits=False)
-
-    snap_targets = closest_pts[needs_snap] + standoff_mm * mean_n  # fallback
-    if len(locs) > 0:
-        snap_targets[ridx] = locs + standoff_mm * mean_n
-
-    all_pts[needs_snap] = snap_targets
-    idx = 0
-    for p, n in zip(passes, counts):
-        p.points = all_pts[idx:idx + n].copy()
-        idx += n
-
-
-
-
 def generate_conform_route(
     region: str,
     face_indices: np.ndarray,
@@ -332,41 +284,27 @@ def generate_conform_route(
         step_positions = [(step_min + step_max) / 2.0]
     else:
         first = step_min + _step / 2.0
-        step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
-
-    # Build submesh from outer-shell faces only.
-    # Step 1: keep faces whose normal faces toward mean_n.
-    _fwd_idx = face_indices[mesh.face_normals[face_indices] @ mean_n >= 0.0]
-    if len(_fwd_idx) == 0:
-        _fwd_idx = face_indices
-    # Step 2: keep only faces that are the outermost surface at their centroid.
-    # Fire one ray per centroid from outside along mean_n; a face is outer if the
-    # first-hit depth matches its own centroid depth (inner ribs are occluded).
-    _c_orig = mesh.triangles_center[_fwd_idx] + 1000.0 * mean_n
-    _c_dirs = np.tile(-mean_n, (len(_fwd_idx), 1))
-    _clocs, _cidx, _ = mesh.ray.intersects_location(_c_orig, _c_dirs, multiple_hits=False)
-    _outer_mask = np.zeros(len(_fwd_idx), dtype=bool)
-    if len(_cidx) > 0:
-        _cent_d = (mesh.triangles_center[_fwd_idx][_cidx]) @ mean_n
-        _hit_d  = _clocs @ mean_n
-        _outer_mask[_cidx] = np.abs(_cent_d - _hit_d) < 2.0
-    _outer_faces = _fwd_idx[_outer_mask] if _outer_mask.any() else _fwd_idx
-    _outer_mesh = trimesh.Trimesh(
-        vertices=mesh.vertices,
-        faces=mesh.faces[_outer_faces],
-        process=False,
-    )
+        step_positions = list(np.arange(first, step_max, _step))
 
     all_passes: list[PaintPass] = []
     pass_id = 0
 
     for plane_index, step_pos in enumerate(step_positions):
-        segments = trimesh.intersections.mesh_plane(
-            _outer_mesh,
+        result = trimesh.intersections.mesh_plane(
+            mesh,
             plane_normal=step_vec,
             plane_origin=step_pos * step_vec,
+            return_faces=True,
         )
-        if segments is None or len(segments) == 0:
+        if result is None:
+            continue
+        raw_segs, seg_face_ids = result
+        if raw_segs is None or len(raw_segs) == 0:
+            continue
+
+        face_mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
+        segments  = raw_segs[face_mask]
+        if len(segments) == 0:
             continue
 
         seg_lens = np.linalg.norm(segments[:, 1] - segments[:, 0], axis=1)
@@ -429,23 +367,20 @@ def generate_conform_route(
             _sorted.extend(_grp)
     all_passes = _sorted
 
-    # Apply standoff along mean_n — per-waypoint normals are for TCP orientation only;
-    # using them for offset on curved surfaces scatters waypoints when face normals
-    # diverge from the spray direction.
+    # Batch normals after TSP ordering — one BVH call covers all waypoints,
+    # and points are already in final order so no reversal needed.
+    _batch_normals_tangents(all_passes, mesh, mean_n)
+
+    # Apply standoff along mean_n (same as BBox/Adaptive) — per-waypoint normals are
+    # for TCP orientation only; using them for offset on curved surfaces scatters
+    # waypoints up to 90° off when face normals diverge from the spray direction.
     if standoff_mm > 0.0:
         for _p in all_passes:
             _p.points = _p.points + standoff_mm * mean_n
 
-    # Universal safety net: snap any waypoint that ended up on an inner surface
-    # or inside the mesh to the outermost shell + standoff.
-    _snap_to_outer_surface(all_passes, mesh, mean_n, standoff_mm)
-
     connections = _connector.connect_passes(
         all_passes, spray_width_mm=spray_width_mm, waypoint_spacing_mm=waypoint_spacing_mm,
     )
-
-    # Normals computed last — after standoff, snap, and connector reversals are all settled.
-    _batch_normals_tangents(all_passes, mesh, mean_n)
 
     total_length = sum(
         float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1)))
@@ -481,16 +416,29 @@ def generate_adaptive_grid_route(
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
     # Always build in H-basis; direction swap handled when emitting passes.
 
+    # Use all faces that face generally toward mean_n (same hemisphere filter
+    # as the Conform/Mesh-Surface segment filter).  This prevents the
+    # single-assignment classifier from shrinking the extent: boundary faces
+    # (e.g. FRONT-leaning faces on the LEFT surface) are classified to an
+    # adjacent region and absent from face_indices, but they are still
+    # physically on the visible surface and must set the grid extent.
     fwd_face_ids = np.where(mesh.face_normals @ mean_n >= 0.0)[0]
     fwd_verts    = mesh.vertices[mesh.faces[fwd_face_ids].ravel()]
+    verts        = mesh.vertices[mesh.faces[basis_faces].ravel()]
     global_depth = float((fwd_verts @ mean_n).max())
 
+    # Extent and depth sampling from all forward-hemisphere faces.
     pass_min = float((fwd_verts @ pass_vec).min())
     pass_max = float((fwd_verts @ pass_vec).max())
     step_min = float((fwd_verts @ step_vec).min())
     step_max = float((fwd_verts @ step_vec).max())
 
-    _step = spray_width_mm * 0.85
+    # Projections for per-cell depth sampling — forward-hemisphere faces.
+    pass_proj = fwd_verts @ pass_vec
+    step_proj = fwd_verts @ step_vec
+
+    _step     = spray_width_mm * 0.85
+    band_half = spray_width_mm * 2.0
 
     def _positions(lo, hi):
         if hi - lo <= _step:
@@ -502,29 +450,22 @@ def generate_adaptive_grid_route(
     v_steps = _positions(pass_min, pass_max)   # cols  — along pass_vec
     n_h, n_v = len(h_steps), len(v_steps)
 
-    # Sample surface depth at every (row i, col j) grid intersection via ray casting.
-    # Ray from well outside the mesh along -mean_n → first hit = outermost surface.
-    # This is geometrically exact and immune to inner panels / ribs that would
-    # corrupt a vertex-max depth sample.
-    ray_offset = global_depth + 1000.0
-    _all_grid_origins = np.array([
-        ray_offset * mean_n + p * pass_vec + s * step_vec
-        for s in h_steps for p in v_steps
-    ], dtype=float)                                        # (n_h*n_v, 3)
-    _all_grid_dirs = np.tile(-mean_n, (n_h * n_v, 1))
-
-    _glocs, _gidx, _ = mesh.ray.intersects_location(
-        _all_grid_origins, _all_grid_dirs, multiple_hits=False,
-    )
-    _grid_depths = np.full(n_h * n_v, global_depth)       # fallback = max surface depth
-    if len(_glocs) > 0:
-        _grid_depths[_gidx] = _glocs @ mean_n
-
+    # Sample surface depth at every (row i, col j) grid intersection.
+    # Precompute the row mask once per H row to avoid O(N*M*V) fully recomputed work.
+    fwd_n     = fwd_verts @ mean_n   # depth projection for all forward-hemisphere verts
     grid_pts = np.empty((n_h, n_v, 3), dtype=float)
     for i, s in enumerate(h_steps):
+        in_row    = np.abs(step_proj - s) <= band_half
+        row_pass  = pass_proj[in_row]
+        row_n     = fwd_n[in_row] if in_row.any() else None
+        row_depth = float(row_n.max()) if row_n is not None else global_depth
         for j, p in enumerate(v_steps):
-            depth = _grid_depths[i * n_v + j] + standoff_mm
-            grid_pts[i, j] = depth * mean_n + p * pass_vec + s * step_vec
+            if row_n is not None:
+                in_col = np.abs(row_pass - p) <= band_half
+                depth  = float(row_n[in_col].max()) if in_col.any() else row_depth
+            else:
+                depth = global_depth
+            grid_pts[i, j] = (depth + standoff_mm) * mean_n + p * pass_vec + s * step_vec
 
     def _resample_anchored(pts: np.ndarray, spacing: float) -> np.ndarray:
         """Resample between each consecutive pair of grid intersection points,
@@ -563,10 +504,6 @@ def generate_adaptive_grid_route(
                 points=pts, is_forward=is_forward, sub_index=0,
                 slice_position=float(p),
             ))
-
-    # Universal safety net: ray-cast snaps any point that landed on an inner
-    # surface (can happen when grid rays miss at edges and use fallback depth).
-    _snap_to_outer_surface(all_passes, mesh, mean_n, standoff_mm)
 
     _batch_normals_tangents(all_passes, mesh, mean_n)
 

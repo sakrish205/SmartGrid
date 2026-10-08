@@ -23,37 +23,26 @@ def stitch_segments(
 
     n_segs = len(segments)
 
-    # --- Step 1: Quantize endpoints to an integer grid ---
-    # This turns floating-point proximity into exact key equality.
+    # --- Steps 1-2: Quantize + assign node IDs via np.unique (vectorized) ---
     scale = 1.0 / tolerance
     quant = (segments * scale).round().astype(np.int64)  # (N, 2, 3)
 
-    # --- Step 2: Build node map (quantized tuple -> node id) ---
-    point_to_node: dict[tuple, int] = {}
-    node_to_coord: list[np.ndarray] = []
-
-    def get_node(key: tuple, coord: np.ndarray) -> int:
-        if key not in point_to_node:
-            nid = len(point_to_node)
-            point_to_node[key] = nid
-            node_to_coord.append(coord)
-        return point_to_node[key]
-
-    seg_nodes: list[tuple[int, int]] = []
-    for i in range(n_segs):
-        key_a = tuple(quant[i, 0])
-        key_b = tuple(quant[i, 1])
-        node_a = get_node(key_a, segments[i, 0])
-        node_b = get_node(key_b, segments[i, 1])
-        seg_nodes.append((node_a, node_b))
+    all_keys   = quant.reshape(-1, 3)        # (2N, 3) int64
+    all_coords = segments.reshape(-1, 3)     # (2N, 3) float
+    _, node_ids = np.unique(all_keys, axis=0, return_inverse=True)   # (2N,)
+    _, first_occ = np.unique(node_ids, return_index=True)            # one coord per node
+    node_to_coord = all_coords[first_occ]                            # (n_nodes, 3)
+    seg_nodes_arr = node_ids.reshape(n_segs, 2)                      # (N, 2)
 
     # --- Step 3: Build adjacency list ---
     # adj[node] = list of (neighbour_node, segment_index)
     adj: dict[int, list[tuple[int, int]]] = defaultdict(list)
-    for seg_idx, (a, b) in enumerate(seg_nodes):
+    for seg_idx in range(n_segs):
+        a, b = int(seg_nodes_arr[seg_idx, 0]), int(seg_nodes_arr[seg_idx, 1])
         if a != b:  # skip zero-length after quantisation
             adj[a].append((b, seg_idx))
             adj[b].append((a, seg_idx))
+
 
     # --- Step 4: Find chain starts (degree-1 nodes = open endpoints) ---
     degree = {nid: len(neighbours) for nid, neighbours in adj.items()}
@@ -93,7 +82,7 @@ def stitch_segments(
     for seg_i in range(n_segs):
         if seg_i in visited_segs:
             continue
-        a, b = seg_nodes[seg_i]
+        a, b = int(seg_nodes_arr[seg_i, 0]), int(seg_nodes_arr[seg_i, 1])
         chain = [a]
         visited_segs.add(seg_i)
         current = b
@@ -116,7 +105,6 @@ def stitch_segments(
     # --- Step 7: Convert node-id chains back to float coordinates ---
     result: list[np.ndarray] = []
     for chain in chains:
-        pts = np.array([node_to_coord[nid] for nid in chain])
-        result.append(pts)
+        result.append(node_to_coord[np.array(chain)])
 
     return result

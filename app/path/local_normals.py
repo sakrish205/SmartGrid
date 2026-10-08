@@ -47,12 +47,10 @@ def build_tcp_frames(
     n = len(pts)
     tangents = np.empty_like(pts)
 
-    # finite-difference tangents: forward differences, last point repeats prev segment
-    for i in range(n - 1):
-        t = pts[i + 1] - pts[i]
-        norm = np.linalg.norm(t)
-        tangents[i] = t / norm if norm > 1e-9 else tangents[i - 1] if i > 0 else np.array([1., 0., 0.])
-    tangents[-1] = tangents[-2] if n > 1 else np.array([1., 0., 0.])
+    diffs = np.diff(pts, axis=0)                                   # (N-1, 3)
+    norms = np.linalg.norm(diffs, axis=1, keepdims=True).clip(1e-9)
+    tangents[:-1] = diffs / norms
+    tangents[-1]  = tangents[-2] if n > 1 else np.array([1., 0., 0.])
 
     N = normals / np.linalg.norm(normals, axis=1, keepdims=True).clip(1e-9)
     B = np.cross(N, tangents)
