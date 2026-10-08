@@ -14,7 +14,7 @@ import trimesh
 from app.path.path_model import PaintPass, Connection, PaintRoute
 from app.path.resampler import resample_arc, rdp_simplify, prune_collinear
 from app.path.stitcher import stitch_segments as _stitch_segs
-from app.path.local_normals import interpolate_normals, build_tcp_frames
+from app.path.local_normals import interpolate_normals, build_tcp_frames, _query_for as _prox_query
 from app.path import connector as _connector
 
 
@@ -40,6 +40,25 @@ def compute_route_normals(route, mesh) -> None:
     passes = [p for p in route.passes if p.normals is None and len(p.points) > 0]
     if passes:
         _batch_normals_tangents(passes, mesh, route.spray_normal)
+
+
+def _clip_inside(passes: list, mesh, mean_n: np.ndarray, standoff_mm: float) -> None:
+    """Push any waypoint that penetrates the mesh outward to surface + standoff."""
+    if not passes:
+        return
+    counts  = [len(p.points) for p in passes]
+    all_pts = np.vstack([p.points for p in passes])
+    closest, _, tri_ids = _prox_query(mesh).on_surface(all_pts)
+    face_n  = mesh.face_normals[tri_ids]
+    # signed distance along local face normal: negative → inside mesh
+    signed  = np.einsum('ij,ij->i', all_pts - closest, face_n)
+    inside  = signed < 0
+    if inside.any():
+        all_pts[inside] = closest[inside] + standoff_mm * mean_n
+    idx = 0
+    for p, n in zip(passes, counts):
+        p.points = all_pts[idx:idx + n].copy()
+        idx += n
 
 
 def _axes(up_axis: int) -> tuple[int, int, int]:
@@ -505,6 +524,8 @@ def generate_adaptive_grid_route(
                 points=pts, is_forward=is_forward, sub_index=0,
                 slice_position=float(p),
             ))
+
+    _clip_inside(all_passes, mesh, mean_n, standoff_mm)
 
     connections: list[Connection] = []
     for i in range(len(all_passes) - 1):
