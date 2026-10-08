@@ -1342,6 +1342,11 @@ class MainWindow(QMainWindow):
     def _refresh_route_display(self) -> None:
         if self._viewer is None or not self._current_routes:
             return
+        if self._ribbon.is_show_arrows() and self._model is not None:
+            from app.path.face_grid_generator import compute_route_normals
+            mesh = self._model.data.trimesh_mesh
+            for route in self._current_routes:
+                compute_route_normals(route, mesh)
         self._viewer.show_route(
             self._current_routes,
             show_arrows=self._ribbon.is_show_arrows(),

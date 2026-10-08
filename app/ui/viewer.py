@@ -632,6 +632,8 @@ class MeshViewer(QWidget):
                         dot_color=wpt_color,
                         dot_size=wpt_size,
                         indices=_chev_idx,
+                        normals=paint_pass.normals,
+                        spacing_mm=route.spacing_mm,
                     )
 
             for color, pt_list in buckets.items():
@@ -995,11 +997,14 @@ def _add_pass_chevrons(
     dot_color: str | None = None,
     dot_size: float = 8.0,
     indices: np.ndarray | None = None,
+    normals: np.ndarray | None = None,   # per-waypoint normals (N,3); overrides face_normal
+    spacing_mm: float = 0.0,             # used for stride when normals provided
 ) -> None:
-    """Draw surveying-style chevron tick marks (><) along a pass line.
+    """Draw orientation tick marks along a pass line.
 
-    indices: when provided, place chevrons at pts[indices] (custom/waypoint mode).
-             When None, arc-interpolate at ~150 mm intervals (default mode).
+    indices: place marks at pts[indices] (custom/waypoint mode).
+    normals: per-waypoint surface normals — used as arm direction + stride spacing.
+    When both None: arc-interpolate at ~150 mm intervals using face_normal.
     """
     pts = np.asarray(points, dtype=float)
     if len(pts) < 2:
@@ -1007,21 +1012,26 @@ def _add_pass_chevrons(
 
     tick_len = arrow_len * 0.4
 
+    # positions: list of (center, out_arm_or_None)
+    # out_arm_or_None: pre-resolved arm direction when normals available, else None
     positions: list[tuple] = []
 
     if indices is not None:
-        # Waypoint-anchored: chevron at each pts[i], direction from local segment.
+        # Waypoint-anchored: mark at each pts[i].
         for i in indices:
             i = int(i)
-            if i + 1 < len(pts):
-                seg_d = pts[i + 1] - pts[i]
-            else:
-                seg_d = pts[i] - pts[i - 1]
-            n = float(np.linalg.norm(seg_d))
-            if n > 1e-9:
-                positions.append((pts[i], seg_d / n))
+            n_dir = normals[i] if (normals is not None and i < len(normals)) else None
+            if i < len(pts):
+                positions.append((pts[i], n_dir))
+    elif normals is not None and spacing_mm > 0 and len(pts) >= 2:
+        # Stride-based using per-waypoint normals (same interval logic as surface normal needles).
+        avg_gap = float(np.linalg.norm(np.diff(pts, axis=0), axis=1).mean())
+        stride = max(1, round(spacing_mm / max(avg_gap, 0.1)))
+        for i in range(0, len(pts), stride):
+            n_dir = normals[i] if i < len(normals) else None
+            positions.append((pts[i], n_dir))
     else:
-        # Arc-interpolated: one chevron per ~150 mm of path length.
+        # Arc-interpolated: one mark per ~150 mm of path length.
         seg_lens = np.linalg.norm(np.diff(pts, axis=0), axis=1)
         total_len = seg_lens.sum()
         if total_len < 1e-9:
@@ -1037,37 +1047,32 @@ def _add_pass_chevrons(
             seg_dir = seg_d / sl
             while cum + sl >= next_pos:
                 t = next_pos - cum
-                positions.append((pts[i] + seg_dir * t, seg_dir))
+                positions.append((pts[i] + seg_dir * t, None))
                 next_pos += interval
             cum += sl
 
     if not positions:
-        positions = [(pts[len(pts) // 2], (pts[-1] - pts[0]) / max(np.linalg.norm(pts[-1] - pts[0]), 1e-9))]
+        positions = [(pts[len(pts) // 2], None)]
 
     # Build all orientation mark line pairs into one PolyData (fast — single actor)
     all_pts: list[np.ndarray] = []
     cells: list[int] = []
     idx = 0
 
-    # Surface normal unit vector — used for the outward (spray direction) arm.
+    # Fallback surface normal unit vector when no per-waypoint normal available.
     _fn = np.asarray(face_normal, dtype=float) if face_normal is not None else None
     _fn_norm = float(np.linalg.norm(_fn)) if _fn is not None else 0.0
     _fn_unit = _fn / _fn_norm if _fn_norm > 1e-9 else None
 
-    for center, seg_dir in positions:
-        # Arm 1: outward perpendicular to mesh — shows spray/tool direction (90° to surface)
-        if _fn_unit is not None:
+    for center, n_dir in positions:
+        if n_dir is not None:
+            nv = np.asarray(n_dir, dtype=float)
+            nv_n = float(np.linalg.norm(nv))
+            out_arm = nv / nv_n if nv_n > 1e-9 else (_fn_unit if _fn_unit is not None else np.array([0., 0., 1.]))
+        elif _fn_unit is not None:
             out_arm = _fn_unit
         else:
-            # No face normal: fall back to world-up perpendicular to travel direction
-            for ref in (np.array([0.,0.,1.]), np.array([0.,1.,0.]), np.array([1.,0.,0.])):
-                candidate = np.cross(seg_dir, ref)
-                pn = float(np.linalg.norm(candidate))
-                if pn > 0.15:
-                    out_arm = candidate / pn
-                    break
-            else:
-                out_arm = np.array([0., 0., 1.])
+            out_arm = np.array([0., 0., 1.])
 
         p1 = center + tick_len * out_arm        # points out of mesh — spray direction
         all_pts += [center.copy(), p1]
