@@ -7,6 +7,7 @@ from __future__ import annotations
 import numpy as np
 from app.path.path_model import PaintPass, Connection, PaintRoute
 from app.path.resampler import resample_arc, prune_collinear
+from app.path.local_normals import build_tcp_frames
 
 
 def generate_bbox_route(
@@ -118,6 +119,11 @@ def generate_bbox_route(
     spray_normal = np.zeros(3)
     spray_normal[face_axis] = float(face_sign)
 
+    for p in all_passes:
+        n = np.tile(spray_normal, (len(p.points), 1))
+        p.normals = n
+        p.tangent = build_tcp_frames(p.points, n)
+
     return PaintRoute(
         region_id=region,
         passes=all_passes,
@@ -172,6 +178,8 @@ def merge_routes(routes: list[PaintRoute]) -> PaintRoute:
                 id=new_id, region_id=p.region_id, direction=p.direction,
                 points=p.points.copy(), is_forward=p.is_forward,
                 sub_index=p.sub_index, slice_position=p.slice_position,
+                normals=p.normals.copy() if p.normals is not None else None,
+                tangent=p.tangent.copy() if p.tangent is not None else None,
             ))
         for c in route.connections:
             all_conns.append(Connection(
@@ -211,6 +219,8 @@ def _flip_route(route: PaintRoute) -> PaintRoute:
             id=p.id, region_id=p.region_id, direction=p.direction,
             points=p.points[::-1].copy(), is_forward=not p.is_forward,
             sub_index=p.sub_index, slice_position=p.slice_position,
+            normals=p.normals[::-1].copy() if p.normals is not None else None,
+            tangent=p.tangent[::-1].copy() if p.tangent is not None else None,
         )
         for p in reversed(route.passes)
     ]

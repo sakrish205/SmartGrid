@@ -161,9 +161,7 @@ def generate_face_grid_route(
     global_pass_max = float((all_verts @ pass_vec).max())
     global_depth    = float((verts @ mean_n).max())
 
-    _step     = spray_width_mm * 0.85
-    band_half = spray_width_mm * 2.0
-    step_proj = verts @ step_vec   # basis_faces only — for depth band sampling
+    _step = spray_width_mm * 0.85
 
     span = step_max - step_min
     if span <= _step:
@@ -172,14 +170,26 @@ def generate_face_grid_route(
         first = step_min + _step / 2.0
         step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
 
+    # Batch ray cast for all row depths — one ray per row at the pass mid-point.
+    # Geometrically exact; immune to inner-panel vertices corrupting a vertex-max sample.
+    _ray_offset  = global_depth + 1000.0
+    _pass_center = (global_pass_min + global_pass_max) / 2.0
+    _row_origins = np.array([
+        _ray_offset * mean_n + _pass_center * pass_vec + s * step_vec
+        for s in step_positions
+    ], dtype=float)
+    _row_dirs = np.tile(-mean_n, (len(step_positions), 1))
+    _rlocs, _ridx, _ = mesh.ray.intersects_location(_row_origins, _row_dirs, multiple_hits=False)
+    _row_depths = np.full(len(step_positions), global_depth)
+    if len(_rlocs) > 0:
+        _row_depths[_ridx] = _rlocs @ mean_n
+
     all_passes: list[PaintPass] = []
     for local_idx, step_pos in enumerate(step_positions):
         pass_id    = local_idx
         is_forward = ((pass_id + direction_offset) % 2 == 0)
 
-        in_band    = np.abs(step_proj - step_pos) <= band_half
-        band_verts = verts[in_band]
-        row_depth  = float((band_verts @ mean_n).max()) if len(band_verts) > 0 else global_depth
+        row_depth = float(_row_depths[local_idx])
 
         row_face_pos = row_depth + standoff_mm
         pt_a = row_face_pos * mean_n + global_pass_min * pass_vec + step_pos * step_vec
@@ -376,7 +386,7 @@ def generate_conform_route(
         step_positions = [(step_min + step_max) / 2.0]
     else:
         first = step_min + _step / 2.0
-        step_positions = list(np.arange(first, step_max, _step))
+        step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
 
     all_passes: list[PaintPass] = []
     pass_id = 0
@@ -464,13 +474,9 @@ def generate_conform_route(
             _sorted.extend(_grp)
     all_passes = _sorted
 
-    # Batch normals after TSP ordering — one BVH call covers all waypoints,
-    # and points are already in final order so no reversal needed.
-    _batch_normals_tangents(all_passes, mesh, mean_n)
-
-    # Apply standoff along mean_n (same as BBox/Adaptive) — per-waypoint normals are
-    # for TCP orientation only; using them for offset on curved surfaces scatters
-    # waypoints up to 90° off when face normals diverge from the spray direction.
+    # Apply standoff along mean_n — per-waypoint normals are for TCP orientation only;
+    # using them for offset on curved surfaces scatters waypoints when face normals
+    # diverge from the spray direction.
     if standoff_mm > 0.0:
         for _p in all_passes:
             _p.points = _p.points + standoff_mm * mean_n
@@ -482,6 +488,9 @@ def generate_conform_route(
     connections = _connector.connect_passes(
         all_passes, spray_width_mm=spray_width_mm, waypoint_spacing_mm=waypoint_spacing_mm,
     )
+
+    # Normals computed last — after standoff, snap, and connector reversals are all settled.
+    _batch_normals_tangents(all_passes, mesh, mean_n)
 
     total_length = sum(
         float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1)))
@@ -517,22 +526,17 @@ def generate_adaptive_grid_route(
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
     # Always build in H-basis; direction swap handled when emitting passes.
 
-    # Use all faces that face generally toward mean_n (same hemisphere filter
-    # as the Conform/Mesh-Surface segment filter).  This prevents the
-    # single-assignment classifier from shrinking the extent: boundary faces
-    # (e.g. FRONT-leaning faces on the LEFT surface) are classified to an
-    # adjacent region and absent from face_indices, but they are still
-    # physically on the visible surface and must set the grid extent.
+    # Extent from the selected region's faces — prevents the grid from extending into
+    # adjacent regions when the whole-mesh hemisphere filter was used before.
+    region_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
+    # global_depth from all forward-hemisphere faces so ray-miss fallback is safe.
     fwd_face_ids = np.where(mesh.face_normals @ mean_n >= 0.0)[0]
-    fwd_verts    = mesh.vertices[mesh.faces[fwd_face_ids].ravel()]
-    verts        = mesh.vertices[mesh.faces[basis_faces].ravel()]
-    global_depth = float((fwd_verts @ mean_n).max())
+    global_depth = float((mesh.vertices[mesh.faces[fwd_face_ids].ravel()] @ mean_n).max())
 
-    # Extent and depth sampling from all forward-hemisphere faces.
-    pass_min = float((fwd_verts @ pass_vec).min())
-    pass_max = float((fwd_verts @ pass_vec).max())
-    step_min = float((fwd_verts @ step_vec).min())
-    step_max = float((fwd_verts @ step_vec).max())
+    pass_min = float((region_verts @ pass_vec).min())
+    pass_max = float((region_verts @ pass_vec).max())
+    step_min = float((region_verts @ step_vec).min())
+    step_max = float((region_verts @ step_vec).max())
 
     _step = spray_width_mm * 0.85
 

@@ -84,9 +84,10 @@ def prune_collinear(points: np.ndarray, angle_tol_deg: float = 0.5) -> np.ndarra
     if len(pts) <= 2:
         return pts
     cos_tol = np.cos(np.radians(angle_tol_deg))
-    d     = np.diff(pts, axis=0)                             # (N-1, 3)
-    d_hat = d / np.linalg.norm(d, axis=1, keepdims=True).clip(1e-9)
-    dots  = np.sum(d_hat[:-1] * d_hat[1:], axis=1)          # (N-2,) consecutive dot products
-    keep  = np.ones(len(pts), dtype=bool)
-    keep[1:-1] = dots < cos_tol
+    keep = np.ones(len(pts), dtype=bool)
+    for i in range(1, len(pts) - 1):
+        d1 = pts[i] - pts[i - 1]; n1 = np.linalg.norm(d1)
+        d2 = pts[i + 1] - pts[i]; n2 = np.linalg.norm(d2)
+        if n1 > 1e-9 and n2 > 1e-9 and np.dot(d1 / n1, d2 / n2) > cos_tol:
+            keep[i] = False
     return pts[keep]
