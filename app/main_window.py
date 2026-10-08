@@ -1221,15 +1221,13 @@ class MainWindow(QMainWindow):
                 'Select bounding box regions first.')
             return
         wpt_mm = self._ribbon.get_waypoint_spacing_mm()
-        profile = get_active_profile()
         self._ribbon.set_generating(True)
-        msg = 'Generating geodesic paths…' if profile else 'Generating mesh paths...'
-        self.statusBar().showMessage(msg)
+        self.statusBar().showMessage('Generating mesh surface paths…')
         worker = _PathWorker(self._model.data, pairs, spray_mm,
                              waypoint_spacing_mm=wpt_mm,
                              standoff_mm=self._ribbon.get_standoff_mm(),
                              direction=self._ribbon.get_direction(),
-                             robot_profile=profile)
+                             robot_profile=None)   # always slice+stitch, never geodesic
         self._face_grid_planes_cache = None
         self._adaptive_grid_cache    = None
         self._viewer.clear_face_grid_planes()
