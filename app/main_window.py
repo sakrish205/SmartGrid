@@ -495,6 +495,22 @@ class _ViewerImportWorker(QThread):
         self.done.emit()
 
 
+class _NormalsWorker(QThread):
+    """Compute per-waypoint normals off the main thread."""
+    done = Signal()
+
+    def __init__(self, routes, mesh):
+        super().__init__()
+        self._routes = routes
+        self._mesh   = mesh
+
+    def run(self) -> None:
+        from app.path.face_grid_generator import compute_route_normals
+        for route in self._routes:
+            compute_route_normals(route, self._mesh)
+        self.done.emit()
+
+
 class MainWindow(QMainWindow):
 
     _MENUBAR_STYLE = (
@@ -533,6 +549,7 @@ class MainWindow(QMainWindow):
         self._worker:        Optional[QThread] = None
         self._load_worker:   Optional[QThread] = None
         self._coll_worker:   Optional[QThread] = None
+        self._norm_worker:   Optional[QThread] = None
         self._zombie_workers: list = []  # coll workers dropped while still running
         self._current_colors: dict[str, str]  = self._load_view_settings()
         self._face_grid_planes_cache: tuple | None = None
@@ -1342,12 +1359,35 @@ class MainWindow(QMainWindow):
     def _refresh_route_display(self) -> None:
         if self._viewer is None or not self._current_routes:
             return
+        needs_normals = (
+            self._ribbon.is_show_arrows()
+            and self._model is not None
+            and any(
+                p.normals is None
+                for route in self._current_routes
+                for p in route.passes
+            )
+        )
+        if needs_normals and self._norm_worker is None:
+            self.statusBar().showMessage('Computing orientations…')
+            self._norm_worker = _NormalsWorker(
+                self._current_routes, self._model.data.trimesh_mesh)
+            self._norm_worker.done.connect(self._on_normals_ready)
+            self._norm_worker.start()
+            return   # redraw triggered by _on_normals_ready
         self._viewer.show_route(
             self._current_routes,
             show_arrows=self._ribbon.is_show_arrows(),
             show_waypoints=self._ribbon.is_show_waypoints(),
             collision_ids=self._collision_ids,
         )
+
+    def _on_normals_ready(self) -> None:
+        if self._norm_worker:
+            self._norm_worker.deleteLater()
+            self._norm_worker = None
+        self.statusBar().showMessage('Orientations ready.')
+        self._refresh_route_display()
 
     def _on_route_error(self, message: str) -> None:
         self._ribbon.set_generating(False)
