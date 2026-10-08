@@ -248,6 +248,30 @@ _MAX_ANGLE_DEV  = 65.0   # degrees
 _MAX_SUB_LEVEL  = 6
 
 
+def _keep_outermost_segs(segments: np.ndarray, mean_n: np.ndarray, gap_mm: float) -> np.ndarray:
+    """Keep only segments on the outermost surface along mean_n.
+
+    Projects each segment midpoint onto mean_n. When a gap >= gap_mm exists
+    between depth-sorted clusters (outer shell vs inner panel), everything
+    below the largest gap is dropped.
+    ponytail: single largest-gap split — if a part has 3+ shells at very
+    different depths this keeps only the outermost; add iterative splitting
+    if that ever matters.
+    """
+    if len(segments) <= 1:
+        return segments
+    midpts = segments.mean(axis=1)           # (N, 3)
+    depths = midpts @ mean_n                 # scalar depth per segment
+    order  = np.argsort(depths)
+    gaps   = np.diff(depths[order])
+    if gaps.size == 0 or gaps.max() < gap_mm:
+        return segments                      # no inner panel gap — keep all
+    split = int(np.argmax(gaps)) + 1        # first index in outermost cluster
+    keep  = np.zeros(len(segments), dtype=bool)
+    keep[order[split:]] = True
+    return segments[keep]
+
+
 
 
 def generate_conform_route(
@@ -304,6 +328,14 @@ def generate_conform_route(
 
         face_mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
         segments  = raw_segs[face_mask]
+        if len(segments) == 0:
+            continue
+
+        # Drop inner-panel segments: keep only the outermost depth cluster.
+        # Gap threshold: larger of 8 mm or 12% of spray width — catches typical
+        # bumper/panel shell separation (10-50 mm) without splitting surface ripple.
+        _gap_mm  = max(spray_width_mm * 0.12, 8.0)
+        segments = _keep_outermost_segs(segments, mean_n, _gap_mm)
         if len(segments) == 0:
             continue
 
