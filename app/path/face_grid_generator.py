@@ -161,7 +161,9 @@ def generate_face_grid_route(
     global_pass_max = float((all_verts @ pass_vec).max())
     global_depth    = float((verts @ mean_n).max())
 
-    _step = spray_width_mm * 0.85
+    _step     = spray_width_mm * 0.85
+    band_half = spray_width_mm * 2.0
+    step_proj = verts @ step_vec
 
     span = step_max - step_min
     if span <= _step:
@@ -170,26 +172,14 @@ def generate_face_grid_route(
         first = step_min + _step / 2.0
         step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
 
-    # Batch ray cast for all row depths — one ray per row at the pass mid-point.
-    # Geometrically exact; immune to inner-panel vertices corrupting a vertex-max sample.
-    _ray_offset  = global_depth + 1000.0
-    _pass_center = (global_pass_min + global_pass_max) / 2.0
-    _row_origins = np.array([
-        _ray_offset * mean_n + _pass_center * pass_vec + s * step_vec
-        for s in step_positions
-    ], dtype=float)
-    _row_dirs = np.tile(-mean_n, (len(step_positions), 1))
-    _rlocs, _ridx, _ = mesh.ray.intersects_location(_row_origins, _row_dirs, multiple_hits=False)
-    _row_depths = np.full(len(step_positions), global_depth)
-    if len(_rlocs) > 0:
-        _row_depths[_ridx] = _rlocs @ mean_n
-
     all_passes: list[PaintPass] = []
     for local_idx, step_pos in enumerate(step_positions):
         pass_id    = local_idx
         is_forward = ((pass_id + direction_offset) % 2 == 0)
 
-        row_depth = float(_row_depths[local_idx])
+        in_band    = np.abs(step_proj - step_pos) <= band_half
+        band_verts = verts[in_band]
+        row_depth  = float((band_verts @ mean_n).max()) if len(band_verts) > 0 else global_depth
 
         row_face_pos = row_depth + standoff_mm
         pt_a = row_face_pos * mean_n + global_pass_min * pass_vec + step_pos * step_vec
@@ -388,30 +378,24 @@ def generate_conform_route(
         first = step_min + _step / 2.0
         step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
 
+    # Slice only forward-facing region faces — eliminates inner-panel segments at source.
+    _fwd_mask = mesh.face_normals[face_indices] @ mean_n >= 0.0
+    _outer_mesh = trimesh.Trimesh(
+        vertices=mesh.vertices,
+        faces=mesh.faces[face_indices[_fwd_mask]],
+        process=False,
+    )
+
     all_passes: list[PaintPass] = []
     pass_id = 0
 
     for plane_index, step_pos in enumerate(step_positions):
-        result = trimesh.intersections.mesh_plane(
-            mesh,
+        segments = trimesh.intersections.mesh_plane(
+            _outer_mesh,
             plane_normal=step_vec,
             plane_origin=step_pos * step_vec,
-            return_faces=True,
         )
-        if result is None:
-            continue
-        raw_segs, seg_face_ids = result
-        if raw_segs is None or len(raw_segs) == 0:
-            continue
-
-        face_mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
-        segments  = raw_segs[face_mask]
-        if len(segments) == 0:
-            continue
-
-        # Drop inner-panel / back-wall segments: keep only the outermost shell.
-        segments = _keep_outer_surface(segments, mean_n, mesh)
-        if len(segments) == 0:
+        if segments is None or len(segments) == 0:
             continue
 
         seg_lens = np.linalg.norm(segments[:, 1] - segments[:, 0], axis=1)
@@ -526,17 +510,14 @@ def generate_adaptive_grid_route(
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
     # Always build in H-basis; direction swap handled when emitting passes.
 
-    # Extent from the selected region's faces — prevents the grid from extending into
-    # adjacent regions when the whole-mesh hemisphere filter was used before.
-    region_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
-    # global_depth from all forward-hemisphere faces so ray-miss fallback is safe.
     fwd_face_ids = np.where(mesh.face_normals @ mean_n >= 0.0)[0]
-    global_depth = float((mesh.vertices[mesh.faces[fwd_face_ids].ravel()] @ mean_n).max())
+    fwd_verts    = mesh.vertices[mesh.faces[fwd_face_ids].ravel()]
+    global_depth = float((fwd_verts @ mean_n).max())
 
-    pass_min = float((region_verts @ pass_vec).min())
-    pass_max = float((region_verts @ pass_vec).max())
-    step_min = float((region_verts @ step_vec).min())
-    step_max = float((region_verts @ step_vec).max())
+    pass_min = float((fwd_verts @ pass_vec).min())
+    pass_max = float((fwd_verts @ pass_vec).max())
+    step_min = float((fwd_verts @ step_vec).min())
+    step_max = float((fwd_verts @ step_vec).max())
 
     _step = spray_width_mm * 0.85
 

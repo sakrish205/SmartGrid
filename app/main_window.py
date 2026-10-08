@@ -1015,16 +1015,19 @@ class MainWindow(QMainWindow):
         for region in sorted(self._selected_regions):
             try:
                 standoff = self._ribbon.get_standoff_mm()
+                _tmesh = self._model.data.trimesh_mesh
                 if direction in ('horizontal', 'both'):
                     routes.append(_bbox_gen.generate_bbox_route(
                         region, bounds, spray_mm, up,
                         direction='horizontal', direction_offset=offset,
-                        waypoint_spacing_mm=wpt_mm, standoff_mm=standoff))
+                        waypoint_spacing_mm=wpt_mm, standoff_mm=standoff,
+                        mesh=_tmesh))
                 if direction in ('vertical', 'both'):
                     routes.append(_bbox_gen.generate_bbox_route(
                         region, bounds, v_mm, up,
                         direction='vertical', direction_offset=offset,
-                        waypoint_spacing_mm=wpt_mm, standoff_mm=standoff))
+                        waypoint_spacing_mm=wpt_mm, standoff_mm=standoff,
+                        mesh=_tmesh))
             except Exception as exc:
                 QMessageBox.critical(self, 'Generation error',
                     f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')

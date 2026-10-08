@@ -5,9 +5,11 @@ For crosshatch, the caller makes two calls and gets two separate routes.
 """
 from __future__ import annotations
 import numpy as np
+import trimesh
 from app.path.path_model import PaintPass, Connection, PaintRoute
 from app.path.resampler import resample_arc, prune_collinear
 from app.path.local_normals import build_tcp_frames
+from app.path.face_grid_generator import _snap_to_outer_surface
 
 
 def generate_bbox_route(
@@ -21,6 +23,7 @@ def generate_bbox_route(
     standoff_mm: float = 0.0,          # outward offset from the face plane
     face_bounds: tuple | None = None,  # if set, use these bounds ONLY for face position
                                        # (bounds still controls pass width/height extent)
+    mesh: trimesh.Trimesh | None = None,  # when provided, snaps flat paths to outer surface
 ) -> PaintRoute:
     """Return a PaintRoute of parallel passes on the named bbox face.
 
@@ -118,6 +121,9 @@ def generate_bbox_route(
 
     spray_normal = np.zeros(3)
     spray_normal[face_axis] = float(face_sign)
+
+    if mesh is not None:
+        _snap_to_outer_surface(all_passes, mesh, spray_normal, standoff_mm)
 
     for p in all_passes:
         n = np.tile(spray_normal, (len(p.points), 1))
