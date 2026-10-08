@@ -875,11 +875,26 @@ class SmartRibbon(QWidget):
         self._exp_olp_btn.setEnabled(False)
 
     def set_generating(self, generating: bool) -> None:
-        self._gen_btn.setEnabled(not generating)
-        self._clear_btn.setEnabled(not generating)
         self._gen_btn.setText('Generating…' if generating else 'Generate\nPath')
-        self._arrows_check.setEnabled(not generating)
-        self._grid_check.setEnabled(not generating)
+        enabled = not generating
+        for btn in self._region_btns.values():
+            btn.setEnabled(enabled)
+        for w in (self._all_btn, self._none_btn, self._select_btn,
+                  self._unit_combo, self._pitch_spin,
+                  self._cw_radio, self._ccw_radio,
+                  self._bbox_radio, self._face_grid_radio, self._mesh_radio,
+                  self._fg_shadow_radio, self._fg_mesh_radio,
+                  self._standoff_spin,
+                  self._custom_check, self._wpt_interval_spin,
+                  self._gen_btn, self._grid_check, self._arrows_check,
+                  self._clear_btn):
+            w.setEnabled(enabled)
+        if generating:  # lock exports during generation; set_path_exists re-enables on finish
+            for w in (self._exp_json_btn, self._exp_csv_btn, self._exp_olp_btn):
+                w.setEnabled(False)
+        # restore correct states once generation ends
+        if not generating:
+            self._wpt_interval_spin.setEnabled(self._custom_check.isChecked())
 
     def set_path_exists(self, exists: bool) -> None:
         self._clear_btn.setEnabled(exists)
