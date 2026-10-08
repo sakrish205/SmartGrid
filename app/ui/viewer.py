@@ -621,6 +621,8 @@ class MeshViewer(QWidget):
                     mid_pts_list.append(paint_pass.points[1:-1])
 
                 if show_arrows:
+                    _chev_idx = (np.arange(len(paint_pass.points))
+                                 if show_waypoints else None)
                     _add_pass_chevrons(
                         self.plotter, self._actors,
                         paint_pass.points, color, arrow_len,
@@ -629,6 +631,7 @@ class MeshViewer(QWidget):
                         face_normal=route.spray_normal,
                         dot_color=wpt_color,
                         dot_size=wpt_size,
+                        indices=_chev_idx,
                     )
                     if (paint_pass.normals is not None
                             and len(paint_pass.normals) == len(paint_pass.points)):
@@ -1027,37 +1030,52 @@ def _add_pass_chevrons(
     face_normal: np.ndarray | None = None,
     dot_color: str | None = None,
     dot_size: float = 8.0,
+    indices: np.ndarray | None = None,
 ) -> None:
-    """Draw surveying-style chevron tick marks (><) along a pass line."""
+    """Draw surveying-style chevron tick marks (><) along a pass line.
+
+    indices: when provided, place chevrons at pts[indices] (custom/waypoint mode).
+             When None, arc-interpolate at ~150 mm intervals (default mode).
+    """
     pts = np.asarray(points, dtype=float)
     if len(pts) < 2:
         return
 
     tick_len = arrow_len * 0.4
 
-    # Walk the polyline and collect (center, seg_dir) at ~150 mm intervals
-    seg_lens = np.linalg.norm(np.diff(pts, axis=0), axis=1)
-    total_len = seg_lens.sum()
-    if total_len < 1e-9:
-        return
-
-    interval = max(150.0, total_len / max(1, int(total_len / 150)))
-
     positions: list[tuple] = []
-    cum = 0.0
-    next_pos = interval / 2.0  # first chevron at half-interval from start
-    for i in range(len(pts) - 1):
-        seg_d = pts[i + 1] - pts[i]
-        sl = seg_lens[i]
-        if sl < 1e-9:
-            continue
-        seg_dir = seg_d / sl
-        while cum + sl >= next_pos:
-            t = next_pos - cum
-            center = pts[i] + seg_dir * t
-            positions.append((center, seg_dir))
-            next_pos += interval
-        cum += sl
+
+    if indices is not None:
+        # Waypoint-anchored: chevron at each pts[i], direction from local segment.
+        for i in indices:
+            i = int(i)
+            if i + 1 < len(pts):
+                seg_d = pts[i + 1] - pts[i]
+            else:
+                seg_d = pts[i] - pts[i - 1]
+            n = float(np.linalg.norm(seg_d))
+            if n > 1e-9:
+                positions.append((pts[i], seg_d / n))
+    else:
+        # Arc-interpolated: one chevron per ~150 mm of path length.
+        seg_lens = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+        total_len = seg_lens.sum()
+        if total_len < 1e-9:
+            return
+        interval = max(150.0, total_len / max(1, int(total_len / 150)))
+        cum = 0.0
+        next_pos = interval / 2.0
+        for i in range(len(pts) - 1):
+            seg_d = pts[i + 1] - pts[i]
+            sl = seg_lens[i]
+            if sl < 1e-9:
+                continue
+            seg_dir = seg_d / sl
+            while cum + sl >= next_pos:
+                t = next_pos - cum
+                positions.append((pts[i] + seg_dir * t, seg_dir))
+                next_pos += interval
+            cum += sl
 
     if not positions:
         positions = [(pts[len(pts) // 2], (pts[-1] - pts[0]) / max(np.linalg.norm(pts[-1] - pts[0]), 1e-9))]
