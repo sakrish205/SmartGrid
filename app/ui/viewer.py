@@ -1080,41 +1080,34 @@ def _add_pass_chevrons(
     if not positions:
         positions = [(pts[len(pts) // 2], (pts[-1] - pts[0]) / max(np.linalg.norm(pts[-1] - pts[0]), 1e-9))]
 
-    # Build all chevron line pairs into one PolyData (fast — single actor)
+    # Build all orientation mark line pairs into one PolyData (fast — single actor)
     all_pts: list[np.ndarray] = []
     cells: list[int] = []
     idx = 0
 
-    # Perp vector lies in the face plane: normalize(seg_dir × face_normal).
-    # Fall back to world-axis candidates only when face_normal is unavailable.
+    # Surface normal unit vector — used for the outward (spray direction) arm.
     _fn = np.asarray(face_normal, dtype=float) if face_normal is not None else None
     _fn_norm = float(np.linalg.norm(_fn)) if _fn is not None else 0.0
     _fn_unit = _fn / _fn_norm if _fn_norm > 1e-9 else None
 
-    _candidates = [
-        np.array([0., 0., 1.]),
-        np.array([0., 1., 0.]),
-        np.array([1., 0., 0.]),
-    ]
-
     for center, seg_dir in positions:
-        perp = np.zeros(3)
+        # Arm 1: outward perpendicular to mesh — shows spray/tool direction (90° to surface)
         if _fn_unit is not None:
-            candidate = np.cross(seg_dir, _fn_unit)
-            pn = float(np.linalg.norm(candidate))
-            if pn > 0.15:
-                perp = candidate / pn
-        if np.linalg.norm(perp) < 0.5:   # fallback when face_normal is missing/parallel
-            for ref in _candidates:
+            out_arm = _fn_unit
+        else:
+            # No face normal: fall back to world-up perpendicular to travel direction
+            for ref in (np.array([0.,0.,1.]), np.array([0.,1.,0.]), np.array([1.,0.,0.])):
                 candidate = np.cross(seg_dir, ref)
                 pn = float(np.linalg.norm(candidate))
                 if pn > 0.15:
-                    perp = candidate / pn
+                    out_arm = candidate / pn
                     break
+            else:
+                out_arm = np.array([0., 0., 1.])
 
-        # Back-left and back-right arms (chevron points forward like ">")
-        p1 = center - tick_len * (seg_dir + perp)
-        p2 = center - tick_len * (seg_dir - perp)
+        # Arm 2: backward along travel direction — shows path direction
+        p1 = center + tick_len * out_arm        # points out of mesh (spray direction)
+        p2 = center - tick_len * seg_dir        # points backward (travel direction)
         all_pts += [center.copy(), p1, center.copy(), p2]
         cells += [2, idx, idx + 1, 2, idx + 2, idx + 3]
         idx += 4
