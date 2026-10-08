@@ -572,6 +572,7 @@ class MainWindow(QMainWindow):
 
         from app.ui.ribbon import RIBBON_H
         self._ribbon = SmartRibbon()
+        self._ribbon.set_standoff_from_profile(get_active_profile())
         ribbon_scroll = QScrollArea()
         ribbon_scroll.setWidget(self._ribbon)
         ribbon_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -728,8 +729,7 @@ class MainWindow(QMainWindow):
         set_active_profile(name)
         self._refresh_robots_menu()
         profile = get_active_profile()
-        if profile:
-            self._ribbon.set_standoff_mm(profile.standoff_optimal_mm)
+        self._ribbon.set_standoff_from_profile(profile)
         self.statusBar().showMessage(f'Active robot: {name}')
 
     def _open_robot_manager(self) -> None:
@@ -738,8 +738,8 @@ class MainWindow(QMainWindow):
         dlg.exec()
         self._refresh_robots_menu()
         active = get_active_profile()
+        self._ribbon.set_standoff_from_profile(active)
         if active:
-            self._ribbon.set_standoff_mm(active.standoff_optimal_mm)
             self.statusBar().showMessage(f'Active robot: {active.name}')
 
     # ------------------------------------------------------------------
@@ -899,6 +899,7 @@ class MainWindow(QMainWindow):
         self._viewer.enable_bbox_clicking(self._on_bbox_region_clicked)
 
         self._ribbon.set_model_loaded(True)
+        self._ribbon.set_standoff_from_profile(get_active_profile())
         self._ribbon.set_path_exists(False)
         self._ribbon.set_select_mode(False)
         self._viewer.set_select_mode(False)

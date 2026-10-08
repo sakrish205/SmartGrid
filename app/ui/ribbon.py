@@ -559,9 +559,17 @@ class SmartRibbon(QWidget):
         self._standoff_spin.setStyleSheet(_SPIN_CSS)
         self._standoff_spin.setToolTip(
             'Distance to lift waypoints above the mesh surface.\n'
-            '"off" (0) places paths directly on the surface.')
+            'Default: robot profile standoff_optimal_mm.\n'
+            'Check Custom to override.')
+        self._standoff_custom_check = QCheckBox('Custom')
+        self._standoff_custom_check.setToolTip(
+            'Override the robot profile standoff with a custom value.')
+        self._standoff_custom_check.toggled.connect(
+            lambda checked: self._standoff_spin.setEnabled(checked))
+        self._standoff_spin.setEnabled(False)   # locked until Custom or no profile
         standoff_hl.addWidget(self._standoff_label)
         standoff_hl.addWidget(self._standoff_spin)
+        standoff_hl.addWidget(self._standoff_custom_check)
         fg_vl.addLayout(standoff_hl)
 
         # Hide until Face Grid is selected
@@ -782,7 +790,12 @@ class SmartRibbon(QWidget):
 
         standoff_val = self._standoff_spin.value() * factor_old / factor_new
         self._standoff_spin.blockSignals(True)
-        self._standoff_spin.setRange(0.0, 500.0 * factor_old / factor_new)
+        prof = getattr(self, '_active_profile', None)
+        if prof is not None:
+            self._standoff_spin.setRange(prof.standoff_min_mm / factor_new,
+                                         prof.standoff_max_mm / factor_new)
+        else:
+            self._standoff_spin.setRange(0.0, 500.0 / factor_new)
         self._standoff_spin.setValue(standoff_val)
         self._standoff_spin.setSuffix(f'  {new_unit}')
         self._standoff_spin.blockSignals(False)
@@ -818,9 +831,40 @@ class SmartRibbon(QWidget):
         return self._standoff_spin.value() * UNIT_TO_MM.get(self._current_unit, 1.0)
 
     def set_standoff_mm(self, mm: float) -> None:
-        """Set standoff from a robot profile value (converts mm → current display unit)."""
+        """Set standoff from a robot profile (ignored when Custom is checked)."""
+        if self._standoff_custom_check.isChecked():
+            return
         factor = UNIT_TO_MM.get(self._current_unit, 1.0)
+        self._standoff_spin.blockSignals(True)
         self._standoff_spin.setValue(mm / factor)
+        self._standoff_spin.blockSignals(False)
+
+    def set_standoff_from_profile(self, profile) -> None:
+        """Apply robot profile standoff range + optimal value; unlock spin when no profile."""
+        self._active_profile = profile  # stored for unit-change rescaling (bug 2)
+        factor = UNIT_TO_MM.get(self._current_unit, 1.0)
+        if profile is None:
+            self._standoff_spin.setRange(0.0, 500.0)
+            self._standoff_spin.setEnabled(True)  # no profile → always editable (bug 1: don't force-check Custom)
+            self._standoff_spin.setToolTip(
+                'Distance to lift waypoints above the mesh surface.\n'
+                'No robot profile active — enter value directly.')
+            return
+        lo  = profile.standoff_min_mm / factor
+        hi  = profile.standoff_max_mm / factor
+        opt = profile.standoff_optimal_mm / factor
+        self._standoff_spin.setRange(lo, hi)
+        if not self._standoff_custom_check.isChecked():
+            self._standoff_spin.blockSignals(True)
+            self._standoff_spin.setValue(opt)
+            self._standoff_spin.blockSignals(False)
+            self._standoff_spin.setEnabled(False)
+        self._standoff_spin.setToolTip(
+            f'Robot profile: {profile.name}\n'
+            f'Optimal: {profile.standoff_optimal_mm:.0f} mm  '
+            f'Range: {profile.standoff_min_mm:.0f}–{profile.standoff_max_mm:.0f} mm\n'
+            'Check Custom to override.'
+        )
 
     def get_face_grid_submode(self) -> str:
         """'shadow' | 'mesh_standoff'"""
@@ -862,12 +906,14 @@ class SmartRibbon(QWidget):
                   self._cw_radio, self._ccw_radio,
                   self._bbox_radio, self._face_grid_radio, self._mesh_radio,
                   self._fg_shadow_radio, self._fg_mesh_radio,
-                  self._standoff_spin,
+                  self._standoff_custom_check,
                   self._custom_check, self._wpt_interval_spin,
                   self._gen_btn, self._grid_check, self._arrows_check):
             w.setEnabled(loaded)
-        # Spinner only active when Custom is checked
+        # Interval spinner only active when Custom is checked
         self._wpt_interval_spin.setEnabled(loaded and self._custom_check.isChecked())
+        # Standoff spin: enabled only when Custom is checked (profile controls it otherwise)
+        self._standoff_spin.setEnabled(loaded and self._standoff_custom_check.isChecked())
         # Path-specific controls always start disabled on (re)load; set_path_exists enables them
         self._clear_btn.setEnabled(False)
         self._exp_json_btn.setEnabled(False)
@@ -884,7 +930,7 @@ class SmartRibbon(QWidget):
                   self._cw_radio, self._ccw_radio,
                   self._bbox_radio, self._face_grid_radio, self._mesh_radio,
                   self._fg_shadow_radio, self._fg_mesh_radio,
-                  self._standoff_spin,
+                  self._standoff_custom_check,
                   self._custom_check, self._wpt_interval_spin,
                   self._gen_btn, self._grid_check, self._arrows_check,
                   self._clear_btn):
@@ -895,6 +941,7 @@ class SmartRibbon(QWidget):
         # restore correct states once generation ends
         if not generating:
             self._wpt_interval_spin.setEnabled(self._custom_check.isChecked())
+            self._standoff_spin.setEnabled(self._standoff_custom_check.isChecked())
 
     def set_path_exists(self, exists: bool) -> None:
         self._clear_btn.setEnabled(exists)

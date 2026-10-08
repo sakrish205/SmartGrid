@@ -12,8 +12,69 @@ SmartGrid solves the **manufacturing process-planning problem** of generating sy
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green)](https://pypi.org/project/PySide6/)
-[![Version](https://img.shields.io/badge/version-1.7.0-informational)]()
+[![Version](https://img.shields.io/badge/version-1.8.0-informational)]()
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+
+---
+
+## Workflow
+
+```
+Open Mesh (STL/OBJ/STEP)
+        │
+        ▼
+Robot Profile ──── standoff, speed, angles, gun size
+        │
+        ▼
+Select Regions ─── TOP / FRONT / REAR / etc.
+        │
+        ▼
+Set Parameters ─── pitch, direction, path mode, standoff
+        │           BBox │ Face Grid (Shadow/Mesh) │ Mesh Surface
+        ▼
+Generate Path
+        │
+        ├── boustrophedon passes per region
+        ├── standoff lift along surface normal
+        ├── approach/retract connections
+        └── resample waypoints (if Custom Interval on)
+        │
+        ▼
+View in 3D
+        │
+        ├── [Arrows] → orientation arms (surface normals, background thread)
+        └── [Grid]   → reference plane
+        │
+        ▼
+Collision Check ── gun vs mesh + approach angle vs profile limits
+        │
+        ▼
+Export
+        ├── JSON   (waypoints + normals + speed)
+        ├── CSV    (flat table)
+        └── OLP    (RoboDK / VC / Delmia / G-code)
+```
+
+---
+
+## Improvements (v1.8 — Robot Profile Standoff, All Controls Locked During Generation)
+
+### Standoff driven by robot profile — `ribbon.py`, `main_window.py`
+
+The Face Grid standoff spinbox now defaults to `RobotProfile.standoff_optimal_mm` from the active robot profile. The spinbox range is clamped to `[standoff_min_mm, standoff_max_mm]` so the value can never leave the robot's physical envelope. A **Custom** checkbox unlocks the spinbox for manual override when the profile value isn't appropriate for a specific job.
+
+`set_standoff_from_profile(profile)` is called whenever the active robot changes (robot manager or menu selection) and on every mesh load. When no profile is active the spinbox range resets to 0–500 mm and Custom is auto-checked so the field is immediately editable.
+
+The tooltip on the spinbox shows the profile name, optimal value, and min/max range in mm so the operator always knows where the value came from.
+
+### All ribbon controls locked during path generation — `ribbon.py`
+
+`set_generating(True)` now disables every interactive widget: region buttons, path mode radios, pitch spin, unit combo, direction radios, standoff spin, standoff Custom checkbox, waypoint interval controls, Arrows/Grid checkboxes, Clear, and all export buttons. Nothing can be changed mid-flight.
+
+After generation completes, `set_generating(False)` restores each control to its correct post-generation state:
+- Interval spin re-enabled only if Custom interval was checked
+- Standoff spin re-enabled only if Custom standoff was checked
+- Export buttons remain disabled until `set_path_exists(True)` is called by the generation callback
 
 ---
 
