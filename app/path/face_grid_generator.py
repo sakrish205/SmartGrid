@@ -202,6 +202,7 @@ def generate_face_grid_route(
             slice_position=float(step_pos),
         ))
 
+    _snap_to_outer_surface(all_passes, mesh, mean_n, standoff_mm)
     _batch_normals_tangents(all_passes, mesh, mean_n)
 
     connections: list[Connection] = []
@@ -248,28 +249,95 @@ _MAX_ANGLE_DEV  = 65.0   # degrees
 _MAX_SUB_LEVEL  = 6
 
 
-def _keep_outermost_segs(segments: np.ndarray, mean_n: np.ndarray, gap_mm: float) -> np.ndarray:
-    """Keep only segments on the outermost surface along mean_n.
+def _keep_outer_surface(
+    segments: np.ndarray,
+    mean_n: np.ndarray,
+    mesh: trimesh.Trimesh,
+    tol_mm: float = 2.0,
+) -> np.ndarray:
+    """Keep only segments on the outermost shell — works for any mesh topology.
 
-    Projects each segment midpoint onto mean_n. When a gap >= gap_mm exists
-    between depth-sorted clusters (outer shell vs inner panel), everything
-    below the largest gap is dropped.
-    ponytail: single largest-gap split — if a part has 3+ shells at very
-    different depths this keeps only the outermost; add iterative splitting
-    if that ever matters.
+    For each segment midpoint, fires a ray from outside the mesh along -mean_n.
+    A segment is outer if its depth along mean_n matches the first ray hit
+    within tol_mm. Inner panels, ribs, and back walls are deeper in the mesh
+    (lower depth) than the outermost surface, so they are dropped.
+
+    Fallback: a segment whose ray misses entirely (open-mesh gap, degenerate
+    triangle) is kept rather than silently dropped.
+
+    tol_mm=2.0 covers triangulation noise (<0.1 mm) with large margin while
+    safely rejecting inner shells that are always >5 mm behind the outer face.
     """
-    if len(segments) <= 1:
+    if len(segments) == 0:
         return segments
-    midpts = segments.mean(axis=1)           # (N, 3)
-    depths = midpts @ mean_n                 # scalar depth per segment
-    order  = np.argsort(depths)
-    gaps   = np.diff(depths[order])
-    if gaps.size == 0 or gaps.max() < gap_mm:
-        return segments                      # no inner panel gap — keep all
-    split = int(np.argmax(gaps)) + 1        # first index in outermost cluster
-    keep  = np.zeros(len(segments), dtype=bool)
-    keep[order[split:]] = True
-    return segments[keep]
+
+    midpts     = segments.mean(axis=1)               # (N, 3)
+    seg_depths = (midpts @ mean_n).astype(float)
+
+    # Origin well outside the mesh along mean_n
+    ray_offset  = float(seg_depths.max() - seg_depths.min()) + 1000.0
+    ray_origins = midpts + ray_offset * mean_n       # (N, 3)
+    ray_dirs    = np.tile(-mean_n, (len(midpts), 1))
+
+    locs, ray_idx, _ = mesh.ray.intersects_location(
+        ray_origins, ray_dirs, multiple_hits=False,
+    )
+
+    # first_hit[i] = depth of first mesh surface hit for ray i
+    first_hit = np.full(len(segments), -np.inf)
+    if len(locs) > 0:
+        first_hit[ray_idx] = locs @ mean_n          # unique per ray (single-hit mode)
+
+    no_hit   = first_hit == -np.inf                 # ray missed — keep (open mesh safety)
+    is_outer = np.abs(seg_depths - first_hit) <= tol_mm
+    return segments[is_outer | no_hit]
+
+
+def _snap_to_outer_surface(
+    passes: list,
+    mesh: trimesh.Trimesh,
+    mean_n: np.ndarray,
+    standoff_mm: float,
+    tol_mm: float = 2.0,
+) -> None:
+    """In-place: snap any waypoint not on the outermost shell to it.
+
+    Universal post-generation safety net for all path modes. Batches all
+    waypoints across all passes, fires one set of rays from outside, and moves
+    any point whose depth doesn't match the first hit (inner surface / inside
+    the mesh) to the outer surface + standoff along mean_n.
+
+    tol_mm=2.0 — same as _keep_outer_surface; covers triangulation noise while
+    safely catching inner panels which are always >5 mm set back.
+    """
+    if not passes:
+        return
+    counts  = [len(p.points) for p in passes]
+    all_pts = np.vstack([p.points for p in passes])   # (N, 3)
+    depths  = all_pts @ mean_n
+
+    ray_offset  = float(depths.max() - depths.min()) + 1000.0
+    ray_origins = all_pts + ray_offset * mean_n
+    ray_dirs    = np.tile(-mean_n, (len(all_pts), 1))
+
+    locs, ray_idx, _ = mesh.ray.intersects_location(
+        ray_origins, ray_dirs, multiple_hits=False,
+    )
+
+    first_hit     = np.full(len(all_pts), np.nan)
+    first_hit_pos = np.full_like(all_pts, np.nan)
+    if len(locs) > 0:
+        first_hit[ray_idx]     = locs @ mean_n
+        first_hit_pos[ray_idx] = locs
+
+    has_hit    = ~np.isnan(first_hit)
+    needs_snap = has_hit & (np.abs(depths - first_hit) > tol_mm)
+    if needs_snap.any():
+        all_pts[needs_snap] = first_hit_pos[needs_snap] + standoff_mm * mean_n
+        idx = 0
+        for p, n in zip(passes, counts):
+            p.points = all_pts[idx:idx + n].copy()
+            idx += n
 
 
 
@@ -331,11 +399,8 @@ def generate_conform_route(
         if len(segments) == 0:
             continue
 
-        # Drop inner-panel segments: keep only the outermost depth cluster.
-        # Gap threshold: larger of 8 mm or 12% of spray width — catches typical
-        # bumper/panel shell separation (10-50 mm) without splitting surface ripple.
-        _gap_mm  = max(spray_width_mm * 0.12, 8.0)
-        segments = _keep_outermost_segs(segments, mean_n, _gap_mm)
+        # Drop inner-panel / back-wall segments: keep only the outermost shell.
+        segments = _keep_outer_surface(segments, mean_n, mesh)
         if len(segments) == 0:
             continue
 
@@ -410,6 +475,10 @@ def generate_conform_route(
         for _p in all_passes:
             _p.points = _p.points + standoff_mm * mean_n
 
+    # Universal safety net: snap any waypoint that ended up on an inner surface
+    # or inside the mesh to the outermost shell + standoff.
+    _snap_to_outer_surface(all_passes, mesh, mean_n, standoff_mm)
+
     connections = _connector.connect_passes(
         all_passes, spray_width_mm=spray_width_mm, waypoint_spacing_mm=waypoint_spacing_mm,
     )
@@ -465,12 +534,7 @@ def generate_adaptive_grid_route(
     step_min = float((fwd_verts @ step_vec).min())
     step_max = float((fwd_verts @ step_vec).max())
 
-    # Projections for per-cell depth sampling — forward-hemisphere faces.
-    pass_proj = fwd_verts @ pass_vec
-    step_proj = fwd_verts @ step_vec
-
-    _step     = spray_width_mm * 0.85
-    band_half = spray_width_mm * 2.0
+    _step = spray_width_mm * 0.85
 
     def _positions(lo, hi):
         if hi - lo <= _step:
@@ -482,22 +546,29 @@ def generate_adaptive_grid_route(
     v_steps = _positions(pass_min, pass_max)   # cols  — along pass_vec
     n_h, n_v = len(h_steps), len(v_steps)
 
-    # Sample surface depth at every (row i, col j) grid intersection.
-    # Precompute the row mask once per H row to avoid O(N*M*V) fully recomputed work.
-    fwd_n     = fwd_verts @ mean_n   # depth projection for all forward-hemisphere verts
+    # Sample surface depth at every (row i, col j) grid intersection via ray casting.
+    # Ray from well outside the mesh along -mean_n → first hit = outermost surface.
+    # This is geometrically exact and immune to inner panels / ribs that would
+    # corrupt a vertex-max depth sample.
+    ray_offset = global_depth + 1000.0
+    _all_grid_origins = np.array([
+        ray_offset * mean_n + p * pass_vec + s * step_vec
+        for s in h_steps for p in v_steps
+    ], dtype=float)                                        # (n_h*n_v, 3)
+    _all_grid_dirs = np.tile(-mean_n, (n_h * n_v, 1))
+
+    _glocs, _gidx, _ = mesh.ray.intersects_location(
+        _all_grid_origins, _all_grid_dirs, multiple_hits=False,
+    )
+    _grid_depths = np.full(n_h * n_v, global_depth)       # fallback = max surface depth
+    if len(_glocs) > 0:
+        _grid_depths[_gidx] = _glocs @ mean_n
+
     grid_pts = np.empty((n_h, n_v, 3), dtype=float)
     for i, s in enumerate(h_steps):
-        in_row    = np.abs(step_proj - s) <= band_half
-        row_pass  = pass_proj[in_row]
-        row_n     = fwd_n[in_row] if in_row.any() else None
-        row_depth = float(row_n.max()) if row_n is not None else global_depth
         for j, p in enumerate(v_steps):
-            if row_n is not None:
-                in_col = np.abs(row_pass - p) <= band_half
-                depth  = float(row_n[in_col].max()) if in_col.any() else row_depth
-            else:
-                depth = global_depth
-            grid_pts[i, j] = (depth + standoff_mm) * mean_n + p * pass_vec + s * step_vec
+            depth = _grid_depths[i * n_v + j] + standoff_mm
+            grid_pts[i, j] = depth * mean_n + p * pass_vec + s * step_vec
 
     def _resample_anchored(pts: np.ndarray, spacing: float) -> np.ndarray:
         """Resample between each consecutive pair of grid intersection points,
@@ -536,6 +607,10 @@ def generate_adaptive_grid_route(
                 points=pts, is_forward=is_forward, sub_index=0,
                 slice_position=float(p),
             ))
+
+    # Universal safety net: ray-cast snaps any point that landed on an inner
+    # surface (can happen when grid rays miss at edges and use fallback depth).
+    _snap_to_outer_surface(all_passes, mesh, mean_n, standoff_mm)
 
     _batch_normals_tangents(all_passes, mesh, mean_n)
 
