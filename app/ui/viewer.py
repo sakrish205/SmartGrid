@@ -627,6 +627,8 @@ class MeshViewer(QWidget):
                         f'arr_{ri}_{paint_pass.id}_{paint_pass.sub_index}',
                         line_width=float(self._colors.get('arrow_line_width', '4.0')),
                         face_normal=route.spray_normal,
+                        dot_color=wpt_color,
+                        dot_size=wpt_size,
                     )
                     if (paint_pass.normals is not None
                             and len(paint_pass.normals) == len(paint_pass.points)):
@@ -1023,6 +1025,8 @@ def _add_pass_chevrons(
     key_prefix: str,
     line_width: float = 4.0,
     face_normal: np.ndarray | None = None,
+    dot_color: str | None = None,
+    dot_size: float = 8.0,
 ) -> None:
     """Draw surveying-style chevron tick marks (><) along a pass line."""
     pts = np.asarray(points, dtype=float)
@@ -1106,6 +1110,14 @@ def _add_pass_chevrons(
         render_lines_as_tubes=False, reset_camera=False,
     )
     actors[f'{key_prefix}_chev'] = actor
+
+    if dot_color is not None and positions:
+        centers = np.array([c for c, _ in positions], dtype=float)
+        dot_actor = plotter.add_mesh(
+            pv.PolyData(centers), color=dot_color, point_size=dot_size,
+            render_points_as_spheres=True, reset_camera=False,
+        )
+        actors[f'{key_prefix}_chev_dots'] = dot_actor
 
 
 def _make_bbox_face(region: str, bounds, up_axis: int) -> Optional[pv.PolyData]:
