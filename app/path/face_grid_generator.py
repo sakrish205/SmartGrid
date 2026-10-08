@@ -161,9 +161,7 @@ def generate_face_grid_route(
     global_pass_max = float((all_verts @ pass_vec).max())
     global_depth    = float((verts @ mean_n).max())
 
-    _step     = spray_width_mm * 0.85
-    band_half = spray_width_mm * 2.0
-    step_proj = verts @ step_vec
+    _step = spray_width_mm * 0.85
 
     span = step_max - step_min
     if span <= _step:
@@ -172,16 +170,15 @@ def generate_face_grid_route(
         first = step_min + _step / 2.0
         step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
 
+    # Place all passes at global_depth + standoff (outermost safe position).
+    # _snap_to_outer_surface then pulls each resampled waypoint to its actual
+    # local outer surface + standoff — no per-row vertex sampling needed.
+    row_face_pos = global_depth + standoff_mm
+
     all_passes: list[PaintPass] = []
     for local_idx, step_pos in enumerate(step_positions):
         pass_id    = local_idx
         is_forward = ((pass_id + direction_offset) % 2 == 0)
-
-        in_band    = np.abs(step_proj - step_pos) <= band_half
-        band_verts = verts[in_band]
-        row_depth  = float((band_verts @ mean_n).max()) if len(band_verts) > 0 else global_depth
-
-        row_face_pos = row_depth + standoff_mm
         pt_a = row_face_pos * mean_n + global_pass_min * pass_vec + step_pos * step_vec
         pt_b = row_face_pos * mean_n + global_pass_max * pass_vec + step_pos * step_vec
 
@@ -249,48 +246,6 @@ _MAX_ANGLE_DEV  = 65.0   # degrees
 _MAX_SUB_LEVEL  = 6
 
 
-def _keep_outer_surface(
-    segments: np.ndarray,
-    mean_n: np.ndarray,
-    mesh: trimesh.Trimesh,
-    tol_mm: float = 2.0,
-) -> np.ndarray:
-    """Keep only segments on the outermost shell — works for any mesh topology.
-
-    For each segment midpoint, fires a ray from outside the mesh along -mean_n.
-    A segment is outer if its depth along mean_n matches the first ray hit
-    within tol_mm. Inner panels, ribs, and back walls are deeper in the mesh
-    (lower depth) than the outermost surface, so they are dropped.
-
-    Fallback: a segment whose ray misses entirely (open-mesh gap, degenerate
-    triangle) is kept rather than silently dropped.
-
-    tol_mm=2.0 covers triangulation noise (<0.1 mm) with large margin while
-    safely rejecting inner shells that are always >5 mm behind the outer face.
-    """
-    if len(segments) == 0:
-        return segments
-
-    midpts     = segments.mean(axis=1)               # (N, 3)
-    seg_depths = (midpts @ mean_n).astype(float)
-
-    # Origin well outside the mesh along mean_n
-    ray_offset  = float(seg_depths.max() - seg_depths.min()) + 1000.0
-    ray_origins = midpts + ray_offset * mean_n       # (N, 3)
-    ray_dirs    = np.tile(-mean_n, (len(midpts), 1))
-
-    locs, ray_idx, _ = mesh.ray.intersects_location(
-        ray_origins, ray_dirs, multiple_hits=False,
-    )
-
-    # first_hit[i] = depth of first mesh surface hit for ray i
-    first_hit = np.full(len(segments), -np.inf)
-    if len(locs) > 0:
-        first_hit[ray_idx] = locs @ mean_n          # unique per ray (single-hit mode)
-
-    no_hit   = first_hit == -np.inf                 # ray missed — keep (open mesh safety)
-    is_outer = np.abs(seg_depths - first_hit) <= tol_mm
-    return segments[is_outer | no_hit]
 
 
 def _snap_to_outer_surface(
@@ -300,44 +255,45 @@ def _snap_to_outer_surface(
     standoff_mm: float,
     tol_mm: float = 2.0,
 ) -> None:
-    """In-place: snap any waypoint not on the outermost shell to it.
+    """In-place: snap any waypoint not at standoff from the outermost shell.
 
-    Universal post-generation safety net for all path modes. Batches all
-    waypoints across all passes, fires one set of rays from outside, and moves
-    any point whose depth doesn't match the first hit (inner surface / inside
-    the mesh) to the outer surface + standoff along mean_n.
-
-    tol_mm=2.0 — same as _keep_outer_surface; covers triangulation noise while
-    safely catching inner panels which are always >5 mm set back.
+    Uses trimesh.proximity.closest_point for direction-independent detection —
+    handles curved surfaces where a single mean_n ray would miss.  For each
+    waypoint whose signed distance from the nearest surface differs from
+    standoff_mm by more than tol_mm, fires a ray along mean_n from outside to
+    find the true outer surface and places the waypoint there + standoff.
+    Fallback for ray misses (open edge, oblique face): snap to closest surface
+    point + standoff * mean_n.
     """
     if not passes:
         return
     counts  = [len(p.points) for p in passes]
-    all_pts = np.vstack([p.points for p in passes])   # (N, 3)
-    depths  = all_pts @ mean_n
+    all_pts = np.vstack([p.points for p in passes])
 
-    ray_offset  = float(depths.max() - depths.min()) + 1000.0
-    ray_origins = all_pts + ray_offset * mean_n
-    ray_dirs    = np.tile(-mean_n, (len(all_pts), 1))
+    from trimesh import proximity
+    closest_pts, _, tri_ids = proximity.closest_point(mesh, all_pts)
+    face_norms = mesh.face_normals[tri_ids]
+    # proj: signed distance along local surface normal (negative = inside mesh)
+    proj = np.einsum('ij,ij->i', all_pts - closest_pts, face_norms)
+    needs_snap = np.abs(proj - standoff_mm) > tol_mm
 
-    locs, ray_idx, _ = mesh.ray.intersects_location(
-        ray_origins, ray_dirs, multiple_hits=False,
-    )
+    if not needs_snap.any():
+        return
 
-    first_hit     = np.full(len(all_pts), np.nan)
-    first_hit_pos = np.full_like(all_pts, np.nan)
+    snap_pts    = all_pts[needs_snap]
+    ray_origins = snap_pts + 1000.0 * mean_n
+    ray_dirs    = np.tile(-mean_n, (len(snap_pts), 1))
+    locs, ridx, _ = mesh.ray.intersects_location(ray_origins, ray_dirs, multiple_hits=False)
+
+    snap_targets = closest_pts[needs_snap] + standoff_mm * mean_n  # fallback
     if len(locs) > 0:
-        first_hit[ray_idx]     = locs @ mean_n
-        first_hit_pos[ray_idx] = locs
+        snap_targets[ridx] = locs + standoff_mm * mean_n
 
-    has_hit    = ~np.isnan(first_hit)
-    needs_snap = has_hit & (np.abs(depths - first_hit) > tol_mm)
-    if needs_snap.any():
-        all_pts[needs_snap] = first_hit_pos[needs_snap] + standoff_mm * mean_n
-        idx = 0
-        for p, n in zip(passes, counts):
-            p.points = all_pts[idx:idx + n].copy()
-            idx += n
+    all_pts[needs_snap] = snap_targets
+    idx = 0
+    for p, n in zip(passes, counts):
+        p.points = all_pts[idx:idx + n].copy()
+        idx += n
 
 
 
@@ -378,11 +334,26 @@ def generate_conform_route(
         first = step_min + _step / 2.0
         step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
 
-    # Slice only forward-facing region faces — eliminates inner-panel segments at source.
-    _fwd_mask = mesh.face_normals[face_indices] @ mean_n >= 0.0
+    # Build submesh from outer-shell faces only.
+    # Step 1: keep faces whose normal faces toward mean_n.
+    _fwd_idx = face_indices[mesh.face_normals[face_indices] @ mean_n >= 0.0]
+    if len(_fwd_idx) == 0:
+        _fwd_idx = face_indices
+    # Step 2: keep only faces that are the outermost surface at their centroid.
+    # Fire one ray per centroid from outside along mean_n; a face is outer if the
+    # first-hit depth matches its own centroid depth (inner ribs are occluded).
+    _c_orig = mesh.triangles_center[_fwd_idx] + 1000.0 * mean_n
+    _c_dirs = np.tile(-mean_n, (len(_fwd_idx), 1))
+    _clocs, _cidx, _ = mesh.ray.intersects_location(_c_orig, _c_dirs, multiple_hits=False)
+    _outer_mask = np.zeros(len(_fwd_idx), dtype=bool)
+    if len(_cidx) > 0:
+        _cent_d = (mesh.triangles_center[_fwd_idx][_cidx]) @ mean_n
+        _hit_d  = _clocs @ mean_n
+        _outer_mask[_cidx] = np.abs(_cent_d - _hit_d) < 2.0
+    _outer_faces = _fwd_idx[_outer_mask] if _outer_mask.any() else _fwd_idx
     _outer_mesh = trimesh.Trimesh(
         vertices=mesh.vertices,
-        faces=mesh.faces[face_indices[_fwd_mask]],
+        faces=mesh.faces[_outer_faces],
         process=False,
     )
 
