@@ -1105,12 +1105,10 @@ def _add_pass_chevrons(
             else:
                 out_arm = np.array([0., 0., 1.])
 
-        # Arm 2: backward along travel direction — shows path direction
-        p1 = center + tick_len * out_arm        # points out of mesh (spray direction)
-        p2 = center - tick_len * seg_dir        # points backward (travel direction)
-        all_pts += [center.copy(), p1, center.copy(), p2]
-        cells += [2, idx, idx + 1, 2, idx + 2, idx + 3]
-        idx += 4
+        p1 = center + tick_len * out_arm        # points out of mesh — spray direction
+        all_pts += [center.copy(), p1]
+        cells += [2, idx, idx + 1]
+        idx += 2
 
     mesh = pv.PolyData()
     mesh.points = np.array(all_pts, dtype=float)
