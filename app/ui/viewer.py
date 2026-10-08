@@ -633,42 +633,6 @@ class MeshViewer(QWidget):
                         dot_size=wpt_size,
                         indices=_chev_idx,
                     )
-                    if (paint_pass.normals is not None
-                            and len(paint_pass.normals) == len(paint_pass.points)):
-                        # Distance-based stride: one indicator per ~spray_width of path.
-                        # Respects both the default spacing and any custom waypoint spacing
-                        # the user set, because waypoints are already resampled at that spacing.
-                        pts = paint_pass.points
-                        if len(pts) >= 2:
-                            avg_gap = float(np.linalg.norm(
-                                np.diff(pts, axis=0), axis=1).mean())
-                            orient_spacing = max(route.spacing_mm, arrow_len * 0.5)
-                            orient_stride  = max(1, round(orient_spacing / max(avg_gap, 0.1)))
-                        else:
-                            orient_stride = 1
-                        idx = np.arange(0, len(pts), orient_stride)
-
-                        norm_len  = arrow_len * 0.4
-                        nrm_color = '#FF6D00' if _cid == 'orientation_exceeded' else '#00E5FF'
-                        n_starts = pts[idx]
-                        n_ends   = n_starts + paint_pass.normals[idx] * norm_len
-                        actor = self.plotter.add_mesh(
-                            _make_multiline(list(np.stack([n_starts, n_ends], axis=1))),
-                            color=nrm_color, line_width=2.0,
-                            render_lines_as_tubes=False, reset_camera=False,
-                        )
-                        self._actors[f'norm_{ri}_{paint_pass.id}'] = actor
-
-                        if (paint_pass.tangent is not None
-                                and len(paint_pass.tangent) == len(pts)):
-                            t_starts = pts[idx]
-                            t_ends   = t_starts + paint_pass.tangent[idx] * (arrow_len * 0.35)
-                            actor = self.plotter.add_mesh(
-                                _make_multiline(list(np.stack([t_starts, t_ends], axis=1))),
-                                color='#FF4081', line_width=2.0,
-                                render_lines_as_tubes=False, reset_camera=False,
-                            )
-                            self._actors[f'tcpf_{ri}_{paint_pass.id}'] = actor
 
             for color, pt_list in buckets.items():
                 actor = self.plotter.add_mesh(
@@ -771,7 +735,7 @@ class MeshViewer(QWidget):
 
     def clear_route(self) -> None:
         keys = [k for k in self._actors
-                if k.startswith(('pass_', 'conn_', 'arr_', 'wpt_', 'norm_', 'tcpf_'))]
+                if k.startswith(('pass_', 'conn_', 'arr_', 'wpt_'))]
         for k in keys:
             self.plotter.remove_actor(self._actors.pop(k))
         self.plotter.render()
