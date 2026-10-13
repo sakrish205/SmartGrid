@@ -18,14 +18,6 @@ _MAX_SUB_PER_LEVEL = 6      # max polylines per slice (holes/islands)
 
 _NAMED_FACES = frozenset({'TOP', 'BOTTOM', 'FRONT', 'REAR', 'LEFT', 'RIGHT'})
 
-# Face-normal axis per named region: the axis the face points along.
-# Used to derive the sweep axis = 3 - slice_axis - fn_axis.
-_FN_AXIS = {
-    'TOP': lambda up: up, 'BOTTOM': lambda up: up,
-    'FRONT': lambda up: (up+1)%3, 'REAR': lambda up: (up+1)%3,
-    'LEFT': lambda up: (up+2)%3, 'RIGHT': lambda up: (up+2)%3,
-}
-
 
 def _arc_length(pts: np.ndarray) -> float:
     return float(np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1)))
@@ -88,13 +80,11 @@ def _build_planes_combined(
     verts    = mesh.vertices[mesh.faces[region_face_indices].ravel()]
     axis_min = verts[:, slice_axis].min() - 0.001
     axis_max = verts[:, slice_axis].max() + 0.001
-    step     = spray_width_mm * 0.85
-
-    if (axis_max - axis_min) <= step:
-        positions = [float((axis_min + axis_max) / 2.0)]
-    else:
-        first     = axis_min + step / 2.0
-        positions = [float(p) for p in np.arange(first, axis_max, step)]
+    span = axis_max - axis_min
+    n    = max(1, round(span / spray_width_mm))
+    step = span / n
+    first = axis_min + step / 2.0
+    positions = [float(first + i * step) for i in range(n)]
 
     planes = []
     for pos in positions:
@@ -136,14 +126,6 @@ def generate_route(
         )
         slice_region_id = ''   # strict np.isin filter in slice_region
 
-    # For named faces: derive sweep axis from face-normal axis and slice axis.
-    # sweep = 3 - slice_axis - fn_axis  (the one remaining axis in 3-space)
-    if region_id in _NAMED_FACES:
-        fn_axis = _FN_AXIS[region_id](up)
-    else:
-        mean_normal = np.abs(mesh.face_normals[region_face_indices]).mean(axis=0) if len(region_face_indices) else np.zeros(3)
-        fn_axis = int(np.argmax(mean_normal))
-
     passes   = []
     pass_id  = 0
     for i, (plane_normal, plane_origin, pos) in enumerate(planes):
@@ -156,29 +138,17 @@ def generate_route(
         if segs is None:
             continue
 
-        if region_id in _NAMED_FACES:
-            # Industry-standard OLP: 2 waypoints per pass (start edge → end edge).
-            # Matches ABB RAPID mvHood/mvSideA pattern from reference files.
-            slice_axis = int(np.argmax(np.abs(plane_normal)))
-            sweep_axis = 3 - slice_axis - fn_axis
-            pts_flat = segs.reshape(-1, 3)
-            min_i = int(np.argmin(pts_flat[:, sweep_axis]))
-            max_i = int(np.argmax(pts_flat[:, sweep_axis]))
-            if min_i == max_i:
+        polylines = _stitcher.stitch_segments(segs)
+        polylines = _filter_polylines(polylines, spray_width_mm)
+        all_polylines = []
+        for pts_raw in polylines[:_MAX_SUB_PER_LEVEL]:
+            pts_raw = np.asarray(pts_raw, dtype=float)
+            if len(pts_raw) < 2:
                 continue
-            all_polylines = [np.vstack([pts_flat[min_i], pts_flat[max_i]])]
-        else:
-            polylines = _stitcher.stitch_segments(segs)
-            polylines = _filter_polylines(polylines, spray_width_mm)
-            all_polylines = []
-            for pts_raw in polylines[:_MAX_SUB_PER_LEVEL]:
-                pts_raw = np.asarray(pts_raw, dtype=float)
-                if len(pts_raw) < 2:
-                    continue
-                pts_raw = rdp_simplify(pts_raw, _RDP_EPSILON)
-                if waypoint_spacing_mm > 0.0:
-                    pts_raw = resample_arc(pts_raw, waypoint_spacing_mm)
-                all_polylines.append(pts_raw)
+            pts_raw = rdp_simplify(pts_raw, _RDP_EPSILON)
+            if waypoint_spacing_mm > 0.0:
+                pts_raw = resample_arc(pts_raw, waypoint_spacing_mm)
+            all_polylines.append(pts_raw)
 
         for sub_i, pts in enumerate(all_polylines):
             is_fwd = (i % 2 == 0)
@@ -224,10 +194,10 @@ if __name__ == '__main__':
     print(f'self-check OK — {route.total_passes} passes, '
           f'{route.total_length_mm:.1f} mm total')
 
-    # Named face self-check: each pass must be exactly 2 points (edge-to-edge)
+    # Named face self-check: surface-following passes (≥2 waypoints each)
     top_route = generate_route(data, 'TOP', regions['TOP'], spray_width_mm=30.0)
     assert top_route.total_passes > 0, 'TOP: no passes'
     for p in top_route.passes:
-        assert len(p.points) == 2, f'TOP pass {p.id}: expected 2 pts, got {len(p.points)}'
+        assert len(p.points) >= 2, f'TOP pass {p.id}: expected ≥2 pts, got {len(p.points)}'
     print(f'named-face self-check OK — TOP: {top_route.total_passes} passes, '
-          f'each 2 waypoints')
+          f'surface-following ({len(top_route.passes[0].points)} pts on first pass)')

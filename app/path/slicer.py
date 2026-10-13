@@ -73,13 +73,11 @@ def compute_slice_planes(
     axis_min = region_verts[:, slice_axis].min() - 0.001
     axis_max = region_verts[:, slice_axis].max() + 0.001
 
-    step = spray_width_mm * 0.85
     span = axis_max - axis_min
-    if span <= step:
-        positions = [float((axis_min + axis_max) / 2.0)]
-    else:
-        first = axis_min + step / 2.0
-        positions = [float(p) for p in np.arange(first, axis_max, step)]
+    n    = max(1, round(span / spray_width_mm))
+    step = span / n
+    first = axis_min + step / 2.0
+    positions = [float(first + i * step) for i in range(n)]
 
     planes = []
     for pos in positions:

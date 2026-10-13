@@ -820,6 +820,17 @@ class SmartRibbon(QWidget):
     def get_direction(self) -> str:
         return 'vertical' if self._dir_v_radio.isChecked() else 'horizontal'
 
+    def set_direction(self, direction: str) -> None:
+        """Set H/V radio without emitting signals (auto-set on region change)."""
+        self._dir_h_radio.blockSignals(True)
+        self._dir_v_radio.blockSignals(True)
+        if direction == 'vertical':
+            self._dir_v_radio.setChecked(True)
+        else:
+            self._dir_h_radio.setChecked(True)
+        self._dir_h_radio.blockSignals(False)
+        self._dir_v_radio.blockSignals(False)
+
     def get_path_target(self) -> str:
         if self._bbox_radio.isChecked():
             return 'bbox'

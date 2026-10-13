@@ -561,6 +561,8 @@ class MainWindow(QMainWindow):
         self._current_colors: dict[str, str]  = self._load_view_settings()
         self._face_grid_planes_cache: tuple | None = None
         self._adaptive_grid_cache:   tuple | None = None
+        self._prog_timer: Optional[QTimer] = None
+        self._prog_idx:   int              = 0
 
         self._build_ui()
         self._build_menus()
@@ -940,6 +942,16 @@ class MainWindow(QMainWindow):
     # Bbox region selection
     # ------------------------------------------------------------------
 
+    def _auto_set_direction(self) -> None:
+        """Set H/V radio based on current selection when in Mesh Surface mode."""
+        if self._ribbon.get_path_target() != 'mesh':
+            return
+        sel = self._selected_regions
+        if sel and sel.issubset(_SIDE_REGIONS):
+            self._ribbon.set_direction('vertical')
+        elif sel & _TB_REGIONS:
+            self._ribbon.set_direction('horizontal')
+
     def _on_bbox_region_clicked(self, region: str) -> None:
         if self._viewer is None:
             return
@@ -956,6 +968,7 @@ class MainWindow(QMainWindow):
             f'{n} region(s) selected: {", ".join(sorted(self._selected_regions))}'
             if n else 'Click a bounding box face to select it.'
         )
+        self._auto_set_direction()
         self._update_grid()
 
     def _on_region_shortcut(self, region_id: str, checked: bool) -> None:
@@ -973,6 +986,7 @@ class MainWindow(QMainWindow):
             f'{n} region(s) selected: {", ".join(sorted(self._selected_regions))}'
             if n else 'Click a bounding box face to select it.'
         )
+        self._auto_set_direction()
         self._update_grid()
 
     # ------------------------------------------------------------------
@@ -1014,6 +1028,9 @@ class MainWindow(QMainWindow):
             return
         if self._worker:  # non-None = in flight (running OR results pending delivery)
             return
+        if self._prog_timer:
+            self._prog_timer.stop()
+            self._prog_timer = None
         spray_mm    = self._ribbon.get_spray_width_mm()
         path_target = self._ribbon.get_path_target()
         self._last_params = self._build_params(path_target, spray_mm)
@@ -1244,6 +1261,40 @@ class MainWindow(QMainWindow):
         self._worker = worker
         worker.start()
 
+    @staticmethod
+    def _truncate_routes(routes, n: int):
+        remaining = n
+        out = []
+        for r in routes:
+            if remaining <= 0:
+                break
+            sliced = r.passes[:remaining]
+            remaining -= len(sliced)
+            out.append(_dc_replace(r, passes=sliced, total_passes=len(sliced)))
+        return out
+
+    def _prog_tick(self, routes, total: int) -> None:
+        if self._prog_idx > total:
+            if self._prog_timer:
+                self._prog_timer.stop()
+                self._prog_timer = None
+            self._viewer.show_route(
+                routes,
+                show_arrows=self._ribbon.is_show_arrows(),
+                show_waypoints=self._ribbon.is_show_waypoints(),
+                collision_ids=self._collision_ids,
+            )
+            self.statusBar().showMessage(
+                f'Path generation complete  —  {total} passes.'
+                '  Checking collisions…')
+            return
+        partial = self._truncate_routes(routes, self._prog_idx)
+        self._viewer.show_route(partial, show_arrows=False,
+                                show_waypoints=False, collision_ids={})
+        self.statusBar().showMessage(
+            f'Generating… pass {self._prog_idx} / {total}')
+        self._prog_idx += 1
+
     def _on_route_ready(self, routes: list[PaintRoute]) -> None:
         self._ribbon.set_generating(False)
         if self._worker:
@@ -1264,13 +1315,16 @@ class MainWindow(QMainWindow):
         if profile:
             self._collision_ids.update(check_orientation(routes, profile))
 
-        # Show paths immediately — collision highlights added after background check
-        self._viewer.show_route(
-            routes,
-            show_arrows=self._ribbon.is_show_arrows(),
-            show_waypoints=self._ribbon.is_show_waypoints(),
-            collision_ids=self._collision_ids,
-        )
+        # Progressive pass-by-pass display via QTimer
+        total_for_prog = sum(r.total_passes for r in routes)
+        self._prog_idx = 1
+        if self._prog_timer:
+            self._prog_timer.stop()
+        self._prog_timer = QTimer(self)
+        self._prog_timer.setInterval(50)
+        self._prog_timer.timeout.connect(
+            lambda: self._prog_tick(routes, total_for_prog))
+        self._prog_timer.start()
         self._ribbon.update_route_stats(routes, self._ribbon.current_unit)
         self._ribbon.set_path_exists(bool(routes))
         from app.path.path_model import UNIT_TO_MM
@@ -1416,6 +1470,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('Generation failed.')
 
     def _clear_paths(self) -> None:
+        if self._prog_timer:
+            self._prog_timer.stop()
+            self._prog_timer = None
         self._face_grid_planes_cache = None
         self._adaptive_grid_cache    = None
         if self._coll_worker:
