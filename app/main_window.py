@@ -616,6 +616,7 @@ class MainWindow(QMainWindow):
         self._ribbon.export_csv.connect(self._export_csv)
         self._ribbon.export_olp.connect(self._export_olp)
         self._ribbon.view_settings_req.connect(self._open_view_settings)
+        self._ribbon.path_mode_changed.connect(self._auto_set_direction)
 
         # Defer heavy imports (trimesh, pyvista, pyvistaqt) to after first paint
         QTimer.singleShot(0, self._init_viewer)
@@ -943,14 +944,17 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _auto_set_direction(self) -> None:
-        """Set H/V radio based on current selection when in Mesh Surface mode."""
+        """Set H/V radio based on selection; lock non-applicable radio in Mesh Surface mode."""
         if self._ribbon.get_path_target() != 'mesh':
+            self._ribbon.set_direction(self._ribbon.get_direction(), lock=False)
             return
         sel = self._selected_regions
         if sel and sel.issubset(_SIDE_REGIONS):
-            self._ribbon.set_direction('vertical')
+            self._ribbon.set_direction('vertical', lock=True)
         elif sel & _TB_REGIONS:
-            self._ribbon.set_direction('horizontal')
+            self._ribbon.set_direction('horizontal', lock=True)
+        else:
+            self._ribbon.set_direction(self._ribbon.get_direction(), lock=False)
 
     def _on_bbox_region_clicked(self, region: str) -> None:
         if self._viewer is None:

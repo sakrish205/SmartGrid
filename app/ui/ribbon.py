@@ -323,6 +323,7 @@ class SmartRibbon(QWidget):
     export_csv          = Signal()
     export_olp          = Signal()
     view_settings_req   = Signal()
+    path_mode_changed   = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -579,6 +580,7 @@ class SmartRibbon(QWidget):
         hl.addWidget(self._fg_subpanel)
 
         self._face_grid_radio.toggled.connect(self._on_target_changed)
+        self._target_grp.idClicked.connect(lambda _: self.path_mode_changed.emit())
         g.add_layout(hl)
         return g
 
@@ -836,14 +838,18 @@ class SmartRibbon(QWidget):
     def get_direction(self) -> str:
         return 'vertical' if self._dir_v_radio.isChecked() else 'horizontal'
 
-    def set_direction(self, direction: str) -> None:
-        """Set H/V radio without emitting signals (auto-set on region change)."""
+    def set_direction(self, direction: str, lock: bool = False) -> None:
+        """Set H/V radio without emitting signals; when lock=True, disable the other radio."""
         self._dir_h_radio.blockSignals(True)
         self._dir_v_radio.blockSignals(True)
         if direction == 'vertical':
             self._dir_v_radio.setChecked(True)
+            self._dir_h_radio.setEnabled(not lock)
+            self._dir_v_radio.setEnabled(True)
         else:
             self._dir_h_radio.setChecked(True)
+            self._dir_h_radio.setEnabled(True)
+            self._dir_v_radio.setEnabled(not lock)
         self._dir_h_radio.blockSignals(False)
         self._dir_v_radio.blockSignals(False)
 
