@@ -864,8 +864,8 @@ class SmartRibbon(QWidget):
         lo  = profile.standoff_min_mm / factor
         hi  = profile.standoff_max_mm / factor
         opt = profile.standoff_optimal_mm / factor
-        self._standoff_spin.setRange(lo, hi)
         if not self._standoff_custom_check.isChecked():
+            self._standoff_spin.setRange(lo, hi)
             self._standoff_spin.blockSignals(True)
             self._standoff_spin.setValue(opt)
             self._standoff_spin.blockSignals(False)
