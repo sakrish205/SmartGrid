@@ -187,16 +187,14 @@ def generate_face_grid_route(
     global_pass_max = float((all_verts @ pass_vec).max())
     global_depth    = float((verts @ mean_n).max())
 
-    _step     = spray_width_mm * 0.85
     band_half = spray_width_mm * 2.0
     step_proj = verts @ step_vec   # basis_faces only — for depth band sampling
 
-    span = step_max - step_min
-    if span <= _step:
-        step_positions = [(step_min + step_max) / 2.0]
-    else:
-        first = step_min + _step / 2.0
-        step_positions = list(np.arange(first, step_max + _step * 0.5, _step))
+    span      = step_max - step_min
+    n_passes  = max(1, round(span / spray_width_mm))
+    _step     = span / n_passes
+    first     = step_min + _step / 2.0
+    step_positions = [float(first + i * _step) for i in range(n_passes)]
 
     all_passes: list[PaintPass] = []
     for local_idx, step_pos in enumerate(step_positions):
@@ -266,10 +264,10 @@ def generate_face_grid_route(
 # ---------------------------------------------------------------------------
 
 _RDP_EPS        = 0.3    # mm — same as generator.py
-_MIN_PASS_FRAC  = 0.10
+_MIN_PASS_FRAC  = 0.15
 _MIN_PASS_ABS   = 5.0    # mm
 _MAX_ANGLE_DEV  = 65.0   # degrees
-_MAX_SUB_LEVEL  = 6
+_MAX_SUB_LEVEL  = 3
 
 
 
@@ -302,16 +300,15 @@ def generate_conform_route(
     all_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
     step_min = float((all_verts @ step_vec).min()) - 0.001
     step_max = float((all_verts @ step_vec).max()) + 0.001
-    _step = spray_width_mm * 0.85
-    span = step_max - step_min
-    if span <= _step:
-        step_positions = [(step_min + step_max) / 2.0]
-    else:
-        first = step_min + _step / 2.0
-        step_positions = list(np.arange(first, step_max, _step))
+    span      = step_max - step_min
+    n_planes  = max(1, round(span / spray_width_mm))
+    _step     = span / n_planes
+    first     = step_min + _step / 2.0
+    step_positions = [float(first + i * _step) for i in range(n_planes)]
 
     all_passes: list[PaintPass] = []
-    pass_id = 0
+    pass_id       = 0
+    visible_count = 0   # counts planes that produced passes; drives boustrophedon
 
     for plane_index, step_pos in enumerate(step_positions):
         result = trimesh.intersections.mesh_plane(
@@ -343,7 +340,8 @@ def generate_conform_route(
         from app.path.generator import _filter_polylines
         polylines = _filter_polylines(polylines, spray_width_mm)[:_MAX_SUB_LEVEL]
 
-        is_forward = (plane_index + direction_offset) % 2 == 0
+        is_forward = (visible_count + direction_offset) % 2 == 0
+        visible_count += 1
 
         for sub_idx, poly in enumerate(polylines):
             if len(poly) < 2:
@@ -457,14 +455,14 @@ def generate_adaptive_grid_route(
     pass_proj = fwd_verts @ pass_vec
     step_proj = fwd_verts @ step_vec
 
-    _step     = spray_width_mm * 0.85
     band_half = spray_width_mm * 2.0
 
     def _positions(lo, hi):
-        if hi - lo <= _step:
-            return [(lo + hi) / 2.0]
-        first = lo + _step / 2.0
-        return list(np.arange(first, hi + _step * 0.5, _step))
+        span = hi - lo
+        n = max(1, round(span / spray_width_mm))
+        step = span / n
+        first = lo + step / 2.0
+        return [float(first + i * step) for i in range(n)]
 
     h_steps = _positions(step_min, step_max)   # rows  — along step_vec
     v_steps = _positions(pass_min, pass_max)   # cols  — along pass_vec
