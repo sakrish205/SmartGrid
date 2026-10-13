@@ -1273,7 +1273,7 @@ class MainWindow(QMainWindow):
             out.append(_dc_replace(r, passes=sliced, total_passes=len(sliced)))
         return out
 
-    def _prog_tick(self, routes, total: int) -> None:
+    def _prog_tick(self, routes, total: int, is_face_grid: bool = False) -> None:
         if self._prog_idx > total:
             if self._prog_timer:
                 self._prog_timer.stop()
@@ -1284,9 +1284,10 @@ class MainWindow(QMainWindow):
                 show_waypoints=self._ribbon.is_show_waypoints(),
                 collision_ids=self._collision_ids,
             )
+            total_conns = sum(len(r.connections) for r in routes)
             self.statusBar().showMessage(
-                f'Path generation complete  —  {total} passes.'
-                '  Checking collisions…')
+                f'Path generation complete  —  {total} passes, {total_conns} connections.'
+                + ('' if is_face_grid else '  Checking collisions…'))
             return
         partial = self._truncate_routes(routes, self._prog_idx)
         self._viewer.show_route(partial, show_arrows=False,
@@ -1323,7 +1324,7 @@ class MainWindow(QMainWindow):
         self._prog_timer = QTimer(self)
         self._prog_timer.setInterval(50)
         self._prog_timer.timeout.connect(
-            lambda: self._prog_tick(routes, total_for_prog))
+            lambda: self._prog_tick(routes, total_for_prog, is_face_grid))
         self._prog_timer.start()
         self._ribbon.update_route_stats(routes, self._ribbon.current_unit)
         self._ribbon.set_path_exists(bool(routes))
@@ -1354,9 +1355,7 @@ class MainWindow(QMainWindow):
             )
         is_face_grid = (self._last_params is not None and
                         'Face Grid' in self._last_params.path_mode)
-        self.statusBar().showMessage(
-            f'Path generation complete  —  {total_passes} passes, {total_conns} connections.'
-            + ('' if is_face_grid else '  Checking collisions…'))
+        # final status message emitted by _prog_tick when animation finishes
         self._update_grid()
 
         # Spawn background collision check (skip for face grid — standoff is built-in)
