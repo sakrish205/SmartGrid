@@ -264,12 +264,34 @@ def generate_face_grid_route(
 # ---------------------------------------------------------------------------
 
 _RDP_EPS        = 0.3    # mm — same as generator.py
-_MIN_PASS_FRAC  = 0.15
+_MIN_PASS_FRAC  = 0.10
 _MIN_PASS_ABS   = 5.0    # mm
 _MAX_ANGLE_DEV  = 65.0   # degrees
-_MAX_SUB_LEVEL  = 3
+_MAX_SUB_LEVEL  = 6
 
 
+def _filter_chains(chains: list[np.ndarray], spray_width_mm: float) -> list[np.ndarray]:
+    if not chains:
+        return chains
+    lengths = [float(np.sum(np.linalg.norm(np.diff(c, axis=0), axis=1))) for c in chains]
+    order = sorted(range(len(chains)), key=lambda i: lengths[i], reverse=True)
+    chains = [chains[i] for i in order]
+    lengths = [lengths[i] for i in order]
+    min_len = max(spray_width_mm * _MIN_PASS_FRAC, _MIN_PASS_ABS)
+    cos_lim = np.cos(np.radians(_MAX_ANGLE_DEV))
+    pdir = chains[0][-1] - chains[0][0]
+    pn = np.linalg.norm(pdir)
+    primary_dir = pdir / pn if pn > 1e-9 else np.array([1., 0., 0.])
+    kept = [chains[0]]
+    for c, arc in zip(chains[1:], lengths[1:]):
+        if arc < min_len:
+            continue
+        d = c[-1] - c[0]
+        dn = np.linalg.norm(d)
+        if dn > 1e-9 and abs(np.dot(d / dn, primary_dir)) < cos_lim:
+            continue
+        kept.append(c)
+    return kept[:_MAX_SUB_LEVEL]
 
 
 def generate_conform_route(
@@ -283,11 +305,12 @@ def generate_conform_route(
     standoff_mm: float = 0.0,
     direction: str = 'horizontal',
 ) -> PaintRoute:
-    """Conform: Mesh Surface slicing logic + per-waypoint standoff + TCP frames.
+    """Conform toolpath: tilted-basis cutting planes + trimesh intersection.
 
-    Reuses the same trimesh.intersections.mesh_plane loop as generate_route
-    (Mesh Surface), then lifts each waypoint along its local surface normal
-    by standoff_mm and stores per-waypoint normals + TCP tangent frames.
+    Uses Adaptive's mean-normal basis so planes are perpendicular to the
+    surface step direction (correct arc-length spacing on tilted surfaces).
+    Intersects the actual mesh for exact surface-following geometry.
+    Standoff applied uniformly via mean_n — no per-waypoint nearest-face snap.
     """
     if len(face_indices) == 0:
         raise ValueError(f"Conform: region '{region}' has no faces.")
@@ -300,17 +323,17 @@ def generate_conform_route(
     all_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
     step_min = float((all_verts @ step_vec).min()) - 0.001
     step_max = float((all_verts @ step_vec).max()) + 0.001
-    span      = step_max - step_min
-    n_planes  = max(1, round(span / spray_width_mm))
-    _step     = span / n_planes
-    first     = step_min + _step / 2.0
+    span = step_max - step_min
+    n_planes = max(1, round(span / spray_width_mm))
+    _step = span / n_planes
+    first = step_min + _step / 2.0
     step_positions = [float(first + i * _step) for i in range(n_planes)]
 
     all_passes: list[PaintPass] = []
-    pass_id       = 0
-    visible_count = 0   # counts planes that produced passes; drives boustrophedon
+    pass_id = 0
+    visible_count = 0  # drives boustrophedon; skipped planes don't count
 
-    for plane_index, step_pos in enumerate(step_positions):
+    for step_pos in step_positions:
         result = trimesh.intersections.mesh_plane(
             mesh,
             plane_normal=step_vec,
@@ -319,42 +342,36 @@ def generate_conform_route(
         )
         if result is None:
             continue
-        raw_segs, seg_face_ids = result
-        if raw_segs is None or len(raw_segs) == 0:
+        segments, seg_face_ids = result
+        if segments is None or len(segments) == 0:
             continue
 
-        face_mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
-        segments  = raw_segs[face_mask]
+        mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
+        segments = segments[mask]
         if len(segments) == 0:
             continue
 
-        seg_lens = np.linalg.norm(segments[:, 1] - segments[:, 0], axis=1)
-        segments  = segments[seg_lens > 1e-12]
+        lens = np.linalg.norm(segments[:, 1, :] - segments[:, 0, :], axis=1)
+        segments = segments[lens > 1e-12]
         if len(segments) == 0:
             continue
 
-        polylines = _stitch_segs(segments)
-        if not polylines:
-            continue
-
-        from app.path.generator import _filter_polylines
-        polylines = _filter_polylines(polylines, spray_width_mm)[:_MAX_SUB_LEVEL]
+        chains = _stitch_segs(segments)
+        chains = _filter_chains(chains, spray_width_mm)
 
         is_forward = (visible_count + direction_offset) % 2 == 0
         visible_count += 1
 
-        for sub_idx, poly in enumerate(polylines):
-            if len(poly) < 2:
-                continue
-            pts = poly if is_forward else poly[::-1].copy()
+        for sub_idx, chain in enumerate(chains):
+            pts = chain if is_forward else chain[::-1].copy()
             pts = rdp_simplify(pts, _RDP_EPS)
-            _sp = waypoint_spacing_mm if waypoint_spacing_mm > 0 else spray_width_mm * 0.4
-            if len(pts) >= 2:
-                pts = resample_arc(pts, _sp)
-            pts = prune_collinear(pts)
             if len(pts) < 2:
                 continue
-
+            if standoff_mm > 0.0:
+                pts = pts + standoff_mm * mean_n
+            if waypoint_spacing_mm > 0 and len(pts) >= 2:
+                pts = resample_arc(pts, waypoint_spacing_mm)
+            pts = prune_collinear(pts)
             all_passes.append(PaintPass(
                 id=pass_id, region_id=region, direction=direction,
                 points=pts, is_forward=is_forward, sub_index=sub_idx,
@@ -362,43 +379,19 @@ def generate_conform_route(
             ))
             pass_id += 1
 
-    # Same TSP-lite ordering as generate_route
-    from collections import defaultdict
-    _lmap: dict[float, list] = defaultdict(list)
-    for _p in all_passes:
-        _lmap[round(_p.slice_position, 4)].append(_p)
-    _sorted: list[PaintPass] = []
-    for _pos in sorted(_lmap.keys()):
-        _grp = _lmap[_pos]
-        if len(_grp) > 1:
-            _cur = _sorted[-1].points[-1] if _sorted else _grp[0].points[0]
-            _rem = list(_grp)
-            while _rem:
-                _i = min(range(len(_rem)), key=lambda i: min(
-                    np.linalg.norm(_rem[i].points[0] - _cur),
-                    np.linalg.norm(_rem[i].points[-1] - _cur),
-                ))
-                _p = _rem.pop(_i)
-                if np.linalg.norm(_p.points[-1] - _cur) < np.linalg.norm(_p.points[0] - _cur):
-                    _p = PaintPass(id=_p.id, region_id=_p.region_id, direction=_p.direction,
-                                   points=_p.points[::-1].copy(), is_forward=not _p.is_forward,
-                                   sub_index=_p.sub_index, slice_position=_p.slice_position)
-                _sorted.append(_p)
-                _cur = _p.points[-1]
-        else:
-            _sorted.extend(_grp)
-    all_passes = _sorted
-
-    # Apply standoff along mean_n (same as BBox/Adaptive) — per-waypoint normals are
-    # for TCP orientation only; using them for offset on curved surfaces scatters
-    # waypoints up to 90° off when face normals diverge from the spray direction.
-    if standoff_mm > 0.0:
-        for _p in all_passes:
-            _p.points = _p.points + standoff_mm * mean_n
-
-    connections = _connector.connect_passes(
-        all_passes, spray_width_mm=spray_width_mm, waypoint_spacing_mm=waypoint_spacing_mm,
-    )
+    connections: list[Connection] = []
+    for i in range(len(all_passes) - 1):
+        conn_pts = np.array([
+            all_passes[i].points[-1].copy(),
+            all_passes[i + 1].points[0].copy(),
+        ], dtype=float)
+        if waypoint_spacing_mm > 0:
+            conn_pts = resample_arc(conn_pts, waypoint_spacing_mm)
+        connections.append(Connection(
+            id=i, from_pass_id=all_passes[i].id,
+            to_pass_id=all_passes[i + 1].id,
+            points=conn_pts, is_air_move=False,
+        ))
 
     total_length = sum(
         float(np.sum(np.linalg.norm(np.diff(p.points, axis=0), axis=1)))
