@@ -285,7 +285,14 @@ def _offset_route_by_standoff(route: 'PaintRoute', mesh, standoff_mm: float) -> 
     def _offset_pts(pts: np.ndarray):
         if len(pts) == 0:
             return pts, None
-        _, _, face_ids = _query.on_surface(pts)
+        try:
+            _, _, face_ids = _query.on_surface(pts)
+        except (IndexError, ValueError):
+            # trimesh BVH off-by-one when points sit exactly on mesh surface;
+            # tiny jitter breaks degenerate equidistant-triangle ties
+            import trimesh.proximity as _tp
+            _, _, face_ids = _tp.closest_point(mesh, pts + 1e-3)
+        face_ids = np.asarray(face_ids).clip(0, len(mesh.faces) - 1)
         normals = mesh.face_normals[face_ids]
         return pts + normals * standoff_mm, normals
 
@@ -309,7 +316,7 @@ def _offset_route_by_standoff(route: 'PaintRoute', mesh, standoff_mm: float) -> 
     for c in route.connections:
         new_conns.append(Connection(
             id=c.id, from_pass_id=c.from_pass_id, to_pass_id=c.to_pass_id,
-            points=_offset_pts(c.points),
+            points=_offset_pts(c.points)[0],
             is_air_move=c.is_air_move,
         ))
     total_length = sum(

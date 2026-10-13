@@ -26,7 +26,12 @@ def interpolate_normals(pts: np.ndarray, mesh: trimesh.Trimesh) -> np.ndarray:
     Uses face normals of the nearest triangle (same approach as BF offsetObjectivePoint
     which takes the normal from the sliced surface point directly).
     """
-    _, _, tri_ids = _query_for(mesh).on_surface(pts)
+    try:
+        _, _, tri_ids = _query_for(mesh).on_surface(pts)
+    except (IndexError, ValueError):
+        # trimesh BVH off-by-one on exact-surface points; jitter breaks ties
+        _, _, tri_ids = _prox.closest_point(mesh, pts + 1e-3)
+    tri_ids = np.asarray(tri_ids).clip(0, len(mesh.faces) - 1)
     return mesh.face_normals[tri_ids].copy()
 
 
