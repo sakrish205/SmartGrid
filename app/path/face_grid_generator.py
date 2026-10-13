@@ -335,6 +335,9 @@ def generate_conform_route(
     first = step_min + _step / 2.0
     step_positions = [float(first + i * _step) for i in range(n_planes)]
 
+    _fmap = _resolve_face_map(up_axis)
+    _seg_filter: tuple[int, int] | None = _fmap.get(region)  # (axis, sign) or None
+
     all_passes: list[PaintPass] = []
     pass_id = 0
     visible_count = 0  # drives boustrophedon; skipped planes don't count
@@ -352,7 +355,11 @@ def generate_conform_route(
         if segments is None or len(segments) == 0:
             continue
 
-        mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
+        if _seg_filter is not None:
+            _fa, _fs = _seg_filter
+            mask = mesh.face_normals[seg_face_ids, _fa] * _fs > 0.0
+        else:
+            mask = mesh.face_normals[seg_face_ids] @ mean_n >= 0.0
         segments = segments[mask]
         if len(segments) == 0:
             continue
