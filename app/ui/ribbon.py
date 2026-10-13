@@ -564,8 +564,7 @@ class SmartRibbon(QWidget):
         self._standoff_custom_check = QCheckBox('Custom')
         self._standoff_custom_check.setToolTip(
             'Override the robot profile standoff with a custom value.')
-        self._standoff_custom_check.toggled.connect(
-            lambda checked: self._standoff_spin.setEnabled(checked))
+        self._standoff_custom_check.toggled.connect(self._on_standoff_custom_toggled)
         self._standoff_spin.setEnabled(False)   # locked until Custom or no profile
         standoff_hl.addWidget(self._standoff_label)
         standoff_hl.addWidget(self._standoff_spin)
@@ -719,6 +718,23 @@ class SmartRibbon(QWidget):
     # ------------------------------------------------------------------
     # Internal signal connections
     # ------------------------------------------------------------------
+
+    def _on_standoff_custom_toggled(self, checked: bool) -> None:
+        if checked:
+            self._standoff_spin.setRange(0.0, 9999.0)
+            self._standoff_spin.setEnabled(True)
+        else:
+            self._standoff_spin.setEnabled(False)
+            prof = getattr(self, '_active_profile', None)
+            factor = UNIT_TO_MM.get(self._current_unit, 1.0)
+            if prof is not None:
+                self._standoff_spin.setRange(prof.standoff_min_mm / factor,
+                                             prof.standoff_max_mm / factor)
+                self._standoff_spin.blockSignals(True)
+                self._standoff_spin.setValue(prof.standoff_optimal_mm / factor)
+                self._standoff_spin.blockSignals(False)
+            else:
+                self._standoff_spin.setRange(0.0, 500.0)
 
     def _connect_internal(self) -> None:
         self._open_btn.clicked.connect(self.open_requested)
