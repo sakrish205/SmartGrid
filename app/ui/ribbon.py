@@ -315,7 +315,6 @@ class SmartRibbon(QWidget):
     spacing_changed     = Signal()      # Pt Interval changed (not auto-connected; apply on Generate)
     pitch_changed       = Signal()      # Spray pitch changed (not auto-connected; apply on Generate)
     region_toggled      = Signal(str, bool)
-    jig_face_changed    = Signal(str)   # '' = none, else region name
     select_mode_changed = Signal(bool)
     generate_requested  = Signal()
     clear_requested     = Signal()
@@ -420,15 +419,6 @@ class SmartRibbon(QWidget):
         row2.addWidget(self._none_btn)
         row2.addSpacing(4)
         row2.addWidget(self._select_btn)
-        row2.addSpacing(8)
-        row2.addWidget(_row_label('Jig:'))
-        self._jig_combo = QComboBox()
-        self._jig_combo.addItems(['—'] + _REGIONS)
-        self._jig_combo.setCurrentText('BOTTOM')
-        self._jig_combo.setFixedWidth(70)
-        self._jig_combo.setToolTip('Face resting on the jig — excluded from painting (shown red)')
-        self._jig_combo.setStyleSheet(_COMBO_CSS)
-        row2.addWidget(self._jig_combo)
         row2.addStretch()
 
         vl.addLayout(row1)
@@ -744,8 +734,6 @@ class SmartRibbon(QWidget):
         self._all_btn.clicked.connect(self._select_all_regions)
         self._none_btn.clicked.connect(self._clear_all_regions)
         self._select_btn.toggled.connect(self.select_mode_changed)
-        self._jig_combo.currentTextChanged.connect(
-            lambda t: self.jig_face_changed.emit(t if t != '—' else ''))
 
         self._unit_combo.currentTextChanged.connect(self._on_unit_changed)
         self._pitch_spin.valueChanged.connect(self._on_pitch_changed)
@@ -964,11 +952,6 @@ class SmartRibbon(QWidget):
     def set_unit(self, unit: str) -> None:
         if unit in _UNITS and unit != self._current_unit:
             self._unit_combo.setCurrentText(unit)  # triggers _on_unit_changed
-
-    def get_jig_face(self) -> str:
-        """Return the currently selected jig face name, or '' if none."""
-        t = self._jig_combo.currentText()
-        return t if t != '—' else ''
 
     def set_region_checked(self, region: str, checked: bool) -> None:
         btn = self._region_btns.get(region)

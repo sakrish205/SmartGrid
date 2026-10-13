@@ -441,7 +441,7 @@ class MeshViewer(QWidget):
     # Bbox face highlights (yellow) — mesh is never touched
     # ------------------------------------------------------------------
 
-    def highlight_bbox_region(self, region: str, selected: bool, blocked: bool = False) -> None:
+    def highlight_bbox_region(self, region: str, selected: bool) -> None:
         key = f'bbox_face_{region}'
         if key in self._actors:
             self.plotter.remove_actor(self._actors.pop(key))
@@ -453,14 +453,12 @@ class MeshViewer(QWidget):
                 self._mesh_data.up_axis,
             )
             if face_mesh is not None:
-                color      = '#E53935' if blocked else self._colors['face_highlight']
-                edge_color = '#B71C1C' if blocked else '#FFC107'
                 actor = self.plotter.add_mesh(
                     face_mesh,
-                    color=color,
-                    opacity=0.50 if blocked else 0.45,
+                    color=self._colors['face_highlight'],
+                    opacity=0.45,
                     show_edges=True,
-                    edge_color=edge_color,
+                    edge_color='#FFC107',
                     line_width=2.0,
                     lighting=False,
                     backface_culling=False,
