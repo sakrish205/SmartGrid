@@ -550,6 +550,7 @@ class MainWindow(QMainWindow):
         self._model              = None          # set after heavy imports load
         self._viewer             = None          # set after viewer deferred init
         self._selected_regions:  set[str]        = set()
+        self._jig_face:          str             = 'BOTTOM'  # excluded from Mesh Surface gen
         self._current_routes:    list[PaintRoute] = []
         self._collision_ids:     dict[int, str]   = {}
         self._last_params:       GenerationParams | None = None
@@ -606,6 +607,7 @@ class MainWindow(QMainWindow):
         # Signals that do not touch the viewer — safe to wire now
         self._ribbon.open_requested.connect(self._open_file)
         self._ribbon.region_toggled.connect(self._on_region_shortcut)
+        self._ribbon.jig_face_changed.connect(self._on_jig_face_changed)
         self._ribbon.select_mode_changed.connect(self._on_select_mode_changed)
         self._ribbon.generate_requested.connect(self._on_generate)
         self._ribbon.clear_requested.connect(self._clear_paths)
@@ -943,13 +945,14 @@ class MainWindow(QMainWindow):
     def _on_bbox_region_clicked(self, region: str) -> None:
         if self._viewer is None:
             return
+        blocked = (region == self._jig_face)
         if region in self._selected_regions:
             self._selected_regions.discard(region)
             self._viewer.highlight_bbox_region(region, False)
             self._ribbon.set_region_checked(region, False)
         else:
             self._selected_regions.add(region)
-            self._viewer.highlight_bbox_region(region, True)
+            self._viewer.highlight_bbox_region(region, True, blocked=blocked)
             self._ribbon.set_region_checked(region, True)
         n = len(self._selected_regions)
         self.statusBar().showMessage(
@@ -967,13 +970,29 @@ class MainWindow(QMainWindow):
             self._selected_regions.add(region_id)
         else:
             self._selected_regions.discard(region_id)
-        self._viewer.highlight_bbox_region(region_id, checked)
+        blocked = (region_id == self._jig_face)
+        self._viewer.highlight_bbox_region(region_id, checked, blocked=blocked)
         n = len(self._selected_regions)
         self.statusBar().showMessage(
             f'{n} region(s) selected: {", ".join(sorted(self._selected_regions))}'
             if n else 'Click a bounding box face to select it.'
         )
         self._update_grid()
+
+    def _on_jig_face_changed(self, region: str) -> None:
+        """Update jig face: remove old red highlight, apply new one."""
+        if self._viewer is None:
+            return
+        old = self._jig_face
+        self._jig_face = region
+        # Re-highlight old face without blocked flag
+        if old and old in self._selected_regions:
+            self._viewer.highlight_bbox_region(old, True, blocked=False)
+        # Apply red highlight to new jig face if it's currently selected
+        if region and region in self._selected_regions:
+            self._viewer.highlight_bbox_region(region, True, blocked=True)
+        jig_label = region if region else 'none'
+        self.statusBar().showMessage(f'Jig face set to {jig_label} (excluded from Mesh Surface generation)')
 
     # ------------------------------------------------------------------
     # Path generation
@@ -1222,7 +1241,8 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _generate_mesh(self, spray_mm: float) -> None:
-        pairs = _group_for_mesh(self._selected_regions, self._model)
+        paint_regions = self._selected_regions - ({self._jig_face} if self._jig_face else set())
+        pairs = _group_for_mesh(paint_regions, self._model)
         if not pairs:
             QMessageBox.warning(self, 'No selection',
                 'Select bounding box regions first.')
