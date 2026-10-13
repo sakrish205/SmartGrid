@@ -8,13 +8,14 @@ from app.mesh.preprocessor import MeshData
 from app.path.path_model import PaintPass, PaintRoute
 from app.path import slicer as _slicer
 from app.path import stitcher as _stitcher
+from app.path import connector as _connector
 from app.path.resampler import rdp_simplify, resample_arc
 
 _RDP_EPSILON       = 0.3    # mm — removes triangle discretisation jaggies
-_MIN_PASS_FRACTION = 0.10   # drop passes shorter than 10% of spray_width
+_MIN_PASS_FRACTION = 0.15   # drop passes shorter than 15% of spray_width
 _MIN_PASS_ABS_MM   = 1.0    # absolute floor so thin edges survive
 _MAX_ANGLE_DEV_DEG = 65.0   # angle limit for short sub-passes only
-_MAX_SUB_PER_LEVEL = 6      # max polylines per slice (holes/islands)
+_MAX_SUB_PER_LEVEL = 3      # max polylines per slice (holes/islands)
 
 _NAMED_FACES = frozenset({'TOP', 'BOTTOM', 'FRONT', 'REAR', 'LEFT', 'RIGHT'})
 
@@ -126,8 +127,9 @@ def generate_route(
         )
         slice_region_id = ''   # strict np.isin filter in slice_region
 
-    passes   = []
-    pass_id  = 0
+    passes        = []
+    pass_id       = 0
+    visible_count = 0   # counts slices that actually produced passes; drives boustrophedon
     for i, (plane_normal, plane_origin, pos) in enumerate(planes):
         segs = _slicer.slice_region(
             mesh, region_face_indices,
@@ -150,11 +152,16 @@ def generate_route(
                 pts_raw = resample_arc(pts_raw, waypoint_spacing_mm)
             all_polylines.append(pts_raw)
 
+        if not all_polylines:
+            continue
+
+        # Use visible_count (not plane index i) so skipped planes don't break alternation
+        is_fwd = (visible_count % 2 == 0)
+        visible_count += 1
+
         for sub_i, pts in enumerate(all_polylines):
-            is_fwd = (i % 2 == 0)
             if not is_fwd:
                 pts = pts[::-1]
-
             passes.append(PaintPass(
                 id=pass_id, region_id=region_id,
                 direction=direction, points=pts,
@@ -164,9 +171,12 @@ def generate_route(
             ))
             pass_id += 1
 
+    connections = _connector.connect_passes(
+        passes, spray_width_mm=spray_width_mm, waypoint_spacing_mm=waypoint_spacing_mm,
+    )
     total_len = sum(_arc_length(p.points) for p in passes)
     return PaintRoute(
-        region_id=region_id, passes=passes, connections=[],
+        region_id=region_id, passes=passes, connections=connections,
         unit='mm', spacing_mm=spray_width_mm,
         total_passes=len(passes), total_length_mm=total_len,
     )
