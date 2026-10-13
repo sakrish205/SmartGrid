@@ -846,6 +846,23 @@ class MainWindow(QMainWindow):
     # File loading
     # ------------------------------------------------------------------
 
+    def open_file(self, path: str, up_axis: int = 2) -> None:
+        """Public entry point for CLI / scripted launch — skips the up-axis dialog."""
+        if self._load_worker or self._worker:
+            return
+        self._selected_regions.clear()
+        self._current_routes = []
+        for region in ('TOP', 'BOTTOM', 'FRONT', 'REAR', 'LEFT', 'RIGHT'):
+            self._ribbon.set_region_checked(region, False)
+        self._ribbon.set_model_loaded(False)
+        self.statusBar().showMessage(f'Reading {os.path.basename(path)}…')
+        worker = _LoadWorker(path, up_axis)
+        worker.progress.connect(self.statusBar().showMessage)
+        worker.finished.connect(self._on_load_ready)
+        worker.error.connect(self._on_load_error)
+        self._load_worker = worker
+        worker.start()
+
     def _open_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, 'Open Mesh File', '',

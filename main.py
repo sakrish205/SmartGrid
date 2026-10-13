@@ -50,12 +50,17 @@ _APP_STYLE = (
 
 
 def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser(description='SmartGrid')
+    ap.add_argument('file', nargs='?', help='STL/OBJ file to open on launch')
+    ap.add_argument('--up-axis', type=int, choices=[0, 1, 2], default=None,
+                    help='Up axis: 0=X 1=Y 2=Z')
+    args, qt_args = ap.parse_known_args()
+
     _setup_logging()
-    # QApplication must be created before any PyVista/VTK initialisation
     from PySide6.QtWidgets import QApplication
     from PySide6.QtGui import QIcon
-    import pathlib
-    app = QApplication(sys.argv)
+    app = QApplication([sys.argv[0]] + qt_args)
     app.setApplicationName("SmartGrid")
     app.setApplicationVersion("1.5.3")
     app.setStyleSheet(_APP_STYLE)
@@ -63,10 +68,15 @@ def main() -> None:
     if _icon.exists():
         app.setWindowIcon(QIcon(str(_icon)))
 
-    # Deferred import so Qt is ready before VTK registers its OpenGL context
     from app.main_window import MainWindow
     window = MainWindow()
     window.show()
+
+    if args.file:
+        from PySide6.QtCore import QTimer
+        up = args.up_axis if args.up_axis is not None else 2
+        QTimer.singleShot(200, lambda: window.open_file(args.file, up_axis=up))
+
     sys.exit(app.exec())
 
 
