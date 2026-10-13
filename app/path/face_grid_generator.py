@@ -83,14 +83,20 @@ def _get_basis_faces(region: str, face_indices: np.ndarray,
                      mesh, up_axis: int) -> np.ndarray:
     """Return forward-facing subset of face_indices for basis computation.
 
-    Falls back to hemisphere filter for combined region names (e.g. 'FRONT+LEFT').
+    For named regions, prefers well-aligned faces (dot > 0.5, within 60° of
+    canonical) so the mean normal isn't diluted by boundary faces whose
+    normals point mostly in an adjacent direction.  Falls back progressively
+    to any forward-facing face, then to all face_indices.
     """
     face_map = _resolve_face_map(up_axis)
     if region in face_map:
         face_axis, face_sign = face_map[region]
-        mask = mesh.face_normals[face_indices, face_axis] * face_sign > 0.0
-        result = face_indices[mask]
-        return result if len(result) > 0 else face_indices
+        proj = mesh.face_normals[face_indices, face_axis] * face_sign
+        for threshold in (0.5, 0.0):
+            result = face_indices[proj > threshold]
+            if len(result) > 0:
+                return result
+        return face_indices
     # Combined region — hemisphere filter from mean normal
     mean_n = mesh.face_normals[face_indices].mean(axis=0)
     n = np.linalg.norm(mean_n)
