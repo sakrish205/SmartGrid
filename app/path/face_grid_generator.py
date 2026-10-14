@@ -440,13 +440,17 @@ def generate_adaptive_grid_route(
     mean_n, pass_vec, step_vec = _compute_surface_basis(basis_faces, mesh, up_axis)
     # Always build in H-basis; direction swap handled when emitting passes.
 
-    # Use all faces that face generally toward mean_n (same hemisphere filter
-    # as the Conform/Mesh-Surface segment filter).  This prevents the
-    # single-assignment classifier from shrinking the extent: boundary faces
-    # (e.g. FRONT-leaning faces on the LEFT surface) are classified to an
-    # adjacent region and absent from face_indices, but they are still
-    # physically on the visible surface and must set the grid extent.
-    fwd_face_ids = np.where(mesh.face_normals @ mean_n >= 0.0)[0]
+    # Include boundary faces the classifier assigned to adjacent regions
+    # (e.g. FRONT-leaning faces on the LEFT surface) so the grid extent
+    # covers the full visible surface.  Use the canonical axis for named
+    # regions — hemisphere around mean_n lets opposite-side faces through
+    # when mean_n is tilted by surface curvature.
+    _fmap_adp = _resolve_face_map(up_axis)
+    if region in _fmap_adp:
+        _fa_adp, _fs_adp = _fmap_adp[region]
+        fwd_face_ids = np.where(mesh.face_normals[:, _fa_adp] * _fs_adp > 0.0)[0]
+    else:
+        fwd_face_ids = np.where(mesh.face_normals @ mean_n >= 0.0)[0]
     fwd_verts    = mesh.vertices[mesh.faces[fwd_face_ids].ravel()]
     verts        = mesh.vertices[mesh.faces[basis_faces].ravel()]
     global_depth = float((fwd_verts @ mean_n).max())
