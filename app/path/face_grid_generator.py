@@ -579,12 +579,26 @@ def get_face_grid_plane_corners(
     pass_max = float((all_verts @ pass_vec).max())
     step_min = float((all_verts @ step_vec).min())
     step_max = float((all_verts @ step_vec).max())
-    face_depth = float((verts @ mean_n).max()) + standoff_mm
 
-    # Centre of the plane in world space
-    pc = (pass_min + pass_max) / 2.0
-    sc = (step_min + step_max) / 2.0
-    centre = face_depth * mean_n + pc * pass_vec + sc * step_vec
+    # Centre of the plane in world space.
+    # Named regions: anchor depth on the canonical face axis so the plane
+    # always appears on the correct side even when mean_n is tilted (a curved
+    # surface whose mean normal leans toward an adjacent face direction would
+    # otherwise place the plane on the wrong side).
+    _fmap = _resolve_face_map(up_axis)
+    if region in _fmap:
+        face_axis, face_sign = _fmap[region]
+        outer = float((verts[:, face_axis] * face_sign).max()) + standoff_mm
+        centre = np.array([
+            outer * face_sign if i == face_axis
+            else float((all_verts[:, i].min() + all_verts[:, i].max()) / 2.0)
+            for i in range(3)
+        ], dtype=float)
+    else:
+        face_depth = float((verts @ mean_n).max()) + standoff_mm
+        pc = (pass_min + pass_max) / 2.0
+        sc = (step_min + step_max) / 2.0
+        centre = face_depth * mean_n + pc * pass_vec + sc * step_vec
 
     dp = (pass_max - pass_min) / 2.0
     ds = (step_max - step_min) / 2.0
