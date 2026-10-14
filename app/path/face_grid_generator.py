@@ -575,38 +575,44 @@ def get_face_grid_plane_corners(
     verts     = mesh.vertices[mesh.faces[basis_faces].ravel()]
     all_verts = mesh.vertices[mesh.faces[face_indices].ravel()]
 
+    # For named regions: flat canonical quad (same axis logic as the bbox
+    # face highlight) guarantees the plane sits on the correct side even
+    # when mean_n is tilted.  Tilted corners via pass_vec/step_vec place
+    # corners on the opposite side of the model when mean_n leans far from
+    # the canonical direction — don't use them for positioning here.
+    _fmap = _resolve_face_map(up_axis)
+    if region in _fmap:
+        face_axis, face_sign = _fmap[region]
+        other_a, other_b = [i for i in range(3) if i != face_axis]
+        outer = float((verts[:, face_axis] * face_sign).max()) + standoff_mm
+        depth_coord = outer * face_sign
+        corners = np.zeros((4, 3), dtype=float)
+        corners[:, face_axis] = depth_coord
+        corners[0, other_a] = float(all_verts[:, other_a].min())
+        corners[0, other_b] = float(all_verts[:, other_b].min())
+        corners[1, other_a] = float(all_verts[:, other_a].max())
+        corners[1, other_b] = float(all_verts[:, other_b].min())
+        corners[2, other_a] = float(all_verts[:, other_a].max())
+        corners[2, other_b] = float(all_verts[:, other_b].max())
+        corners[3, other_a] = float(all_verts[:, other_a].min())
+        corners[3, other_b] = float(all_verts[:, other_b].max())
+        return corners
+
+    # Combined region: use tilted basis (mean_n may be reliable here)
     pass_min = float((all_verts @ pass_vec).min())
     pass_max = float((all_verts @ pass_vec).max())
     step_min = float((all_verts @ step_vec).min())
     step_max = float((all_verts @ step_vec).max())
-
-    # Centre of the plane in world space.
-    # Named regions: anchor depth on the canonical face axis so the plane
-    # always appears on the correct side even when mean_n is tilted (a curved
-    # surface whose mean normal leans toward an adjacent face direction would
-    # otherwise place the plane on the wrong side).
-    _fmap = _resolve_face_map(up_axis)
-    if region in _fmap:
-        face_axis, face_sign = _fmap[region]
-        outer = float((verts[:, face_axis] * face_sign).max()) + standoff_mm
-        centre = np.array([
-            outer * face_sign if i == face_axis
-            else float((all_verts[:, i].min() + all_verts[:, i].max()) / 2.0)
-            for i in range(3)
-        ], dtype=float)
-    else:
-        face_depth = float((verts @ mean_n).max()) + standoff_mm
-        pc = (pass_min + pass_max) / 2.0
-        sc = (step_min + step_max) / 2.0
-        centre = face_depth * mean_n + pc * pass_vec + sc * step_vec
-
+    face_depth = float((verts @ mean_n).max()) + standoff_mm
+    pc = (pass_min + pass_max) / 2.0
+    sc = (step_min + step_max) / 2.0
+    centre = face_depth * mean_n + pc * pass_vec + sc * step_vec
     dp = (pass_max - pass_min) / 2.0
     ds = (step_max - step_min) / 2.0
-
     return np.array([
-        centre - dp * pass_vec - ds * step_vec,   # BL
-        centre + dp * pass_vec - ds * step_vec,   # BR
-        centre + dp * pass_vec + ds * step_vec,   # TR
-        centre - dp * pass_vec + ds * step_vec,   # TL
+        centre - dp * pass_vec - ds * step_vec,
+        centre + dp * pass_vec - ds * step_vec,
+        centre + dp * pass_vec + ds * step_vec,
+        centre - dp * pass_vec + ds * step_vec,
     ], dtype=float)
 
