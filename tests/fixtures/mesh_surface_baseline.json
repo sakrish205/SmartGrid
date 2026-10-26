@@ -1,0 +1,31 @@
+{
+  "_purpose": "Phase 0 golden baseline for Mesh Surface's generate_route(), captured before the Mesh Flow rename/rewrite (see convertmdfiles/MeshFlow_Phase0_Rename_Audit.md). Phase 8 of the Mesh Flow plan must reproduce these exact values after the rename to prove it introduced no behavior change.",
+  "box_top": {
+    "mesh": "unit_box",
+    "region_id": "TOP",
+    "spacing_mm": 0.2,
+    "total_passes": 5,
+    "total_length_mm": 15.0,
+    "n_connections": 4,
+    "pass_point_counts": [4, 4, 4, 4, 4],
+    "first_pass_first_point": [-0.4008, -0.5, -0.5],
+    "first_pass_last_point": [-0.4008, 0.5, -0.5],
+    "spray_normal": [0.0, 0.0, 0.0],
+    "normals_is_none": true,
+    "tangent_is_none": true
+  },
+  "cylinder_front": {
+    "mesh": "cylinder",
+    "region_id": "FRONT",
+    "spacing_mm": 20.0,
+    "total_passes": 10,
+    "total_length_mm": 1862.708099,
+    "n_connections": 9,
+    "pass_point_counts": [23, 23, 24, 26, 26, 26, 24, 26, 23, 23],
+    "first_pass_first_point": [-14.514234, 47.847017, -90.0009],
+    "first_pass_last_point": [-14.514234, -47.847017, -90.0009],
+    "spray_normal": [0.0, 0.0, 0.0],
+    "normals_is_none": true,
+    "tangent_is_none": true
+  }
+}
