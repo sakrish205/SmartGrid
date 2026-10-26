@@ -17,7 +17,7 @@ def generate_bbox_route(
     direction: str = 'horizontal',   # 'horizontal' | 'vertical'
     direction_offset: int = 0,       # 0=CW (default), 1=CCW (flip first pass)
     waypoint_spacing_mm: float = 0.0,  # 0 = no resampling; >0 = uniform waypoints
-    standoff_mm: float = 0.0,          # outward offset from the face plane
+    standoff_mm: float = 0.0,          # unused — Boundary Box always sits on the bbox face
     face_bounds: tuple | None = None,  # if set, use these bounds ONLY for face position
                                        # (bounds still controls pass width/height extent)
 ) -> PaintRoute:
@@ -27,9 +27,13 @@ def generate_bbox_route(
     direction='vertical'   — axes swapped (90° rotation of horizontal).
 
     face_bounds: when provided (e.g. the full mesh bbox), the face plane position is
-    derived from face_bounds rather than bounds. This lets the standard zero-standoff
-    position coincide with the mesh bounding box face (the blue wire cage) while the
-    pass width/height is still clipped to the selected region's own extents.
+    derived from face_bounds rather than bounds. The pass width/height is still clipped
+    to the selected region's own extents.
+
+    standoff_mm is accepted for call-signature compatibility (GenerationParams still
+    records the UI's standoff setting for export metadata) but intentionally has no
+    effect here — Boundary Box is a flat plane projected from the bounding box, not a
+    surface-following mode, so it stays pinned to the box face regardless of standoff.
     """
     if spray_width_mm <= 0:
         raise ValueError(f"spray_width_mm must be > 0, got {spray_width_mm}")
@@ -60,7 +64,6 @@ def generate_bbox_route(
 
     face_axis, face_sign = face_map[region]
     face_pos = face_maxs[face_axis] if face_sign > 0 else face_mins[face_axis]
-    face_pos += face_sign * standoff_mm   # shift outward by standoff distance
 
     # Horizontal base axes for each face
     if region in ('TOP', 'BOTTOM'):

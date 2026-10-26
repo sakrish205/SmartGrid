@@ -11,8 +11,10 @@ DELMIA  — APT text: GOTO/X,Y,Z,I,J,K  (I,J,K = tool-Z = -spray_normal)
 """
 from __future__ import annotations
 import csv
-import numpy as np
+import os
 from datetime import datetime
+import numpy as np
+from scipy.spatial.transform import Rotation
 
 from app.path.path_model import PaintRoute, GenerationParams
 
@@ -53,6 +55,79 @@ def _get_tangent(p, pt_idx: int) -> tuple[float, float, float] | None:
         t = p.tangent[pt_idx]
         return round(float(t[0]), 6), round(float(t[1]), 6), round(float(t[2]), 6)
     return None
+
+
+def _get_tcp_orientation(
+    route: 'PaintRoute',
+    p,
+    pt_idx: int,
+    points: np.ndarray | None = None,
+) -> tuple[tuple[float, float, float, float], tuple[float, float, float], tuple[float, float, float]]:
+    """Compute orthonormal TCP orientation frame at waypoint pt_idx.
+
+    Returns:
+        quaternion_wxyz: (q1, q2, q3, q4) where q1 is scalar w (ABB convention).
+        fanuc_wpr: (W, P, R) in degrees (extrinsic XYZ).
+        durr_abc: (A, B, C) in degrees.
+    """
+    if p is not None and getattr(p, 'normals', None) is not None and pt_idx < len(p.normals):
+        n = np.asarray(p.normals[pt_idx], dtype=float)
+    elif hasattr(route, 'spray_normal') and route.spray_normal is not None:
+        n = np.asarray(route.spray_normal, dtype=float)
+    else:
+        n = np.array([0.0, 0.0, 1.0])
+
+    n_len = np.linalg.norm(n)
+    n = n / n_len if n_len > 1e-9 else np.array([0.0, 0.0, 1.0])
+
+    # Tool approach Z points into the part surface
+    tz = -n
+
+    tx = None
+    if p is not None and getattr(p, 'tangent', None) is not None and pt_idx < len(p.tangent):
+        t_cand = np.asarray(p.tangent[pt_idx], dtype=float)
+        if np.linalg.norm(t_cand) > 1e-6:
+            tx = t_cand / np.linalg.norm(t_cand)
+
+    if tx is None:
+        pts = points if points is not None else (p.points if p is not None else None)
+        if pts is not None and len(pts) > 1:
+            if pt_idx < len(pts) - 1:
+                diff = pts[pt_idx + 1] - pts[pt_idx]
+            else:
+                diff = pts[pt_idx] - pts[pt_idx - 1]
+            diff_len = np.linalg.norm(diff)
+            if diff_len > 1e-6:
+                tx = diff / diff_len
+
+    if tx is None:
+        ref = np.array([0.0, 0.0, 1.0]) if abs(tz[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+        tx = np.cross(tz, ref)
+        tx = tx / (np.linalg.norm(tx) + 1e-9)
+
+    # Gram-Schmidt: ensure tx is orthogonal to tz
+    tx = tx - np.dot(tx, tz) * tz
+    tx_len = np.linalg.norm(tx)
+    if tx_len < 1e-6:
+        ref = np.array([0.0, 1.0, 0.0]) if abs(tz[1]) < 0.9 else np.array([1.0, 0.0, 0.0])
+        tx = np.cross(tz, ref)
+        tx_len = np.linalg.norm(tx)
+    tx = tx / tx_len
+
+    # ty completes right-handed triad
+    ty = np.cross(tz, tx)
+    ty = ty / (np.linalg.norm(ty) + 1e-9)
+
+    R = np.column_stack([tx, ty, tz])
+    rot = Rotation.from_matrix(R)
+    q_xyzw = rot.as_quat()
+    # ABB RAPID expects [w, x, y, z]
+    q_wxyz = (round(float(q_xyzw[3]), 6), round(float(q_xyzw[0]), 6),
+              round(float(q_xyzw[1]), 6), round(float(q_xyzw[2]), 6))
+    eulers = rot.as_euler('xyz', degrees=True)
+    wpr = (round(float(eulers[0]), 3), round(float(eulers[1]), 3), round(float(eulers[2]), 3))
+    abc = (round(float(eulers[0]), 3), round(float(eulers[1]), 3), round(float(eulers[2]), 3))
+    return q_wxyz, wpr, abc
 
 
 def export_robodk(
@@ -255,3 +330,310 @@ def export_gcode(
 
         f.write('M30\n')
         f.write('%\n')
+
+
+def export_abb_rapid(
+    routes: list[PaintRoute],
+    filepath: str,
+    params: GenerationParams | None = None,
+    speeds_map: dict[int, np.ndarray] | None = None,
+) -> None:
+    """ABB RAPID (.mod) program matching Exercise_2.mod OEM standard.
+
+    Generates:
+      - CONST robtarget declarations with unit quaternions [w, x, y, z]
+      - PERS wobjdata wobjPart
+      - PROC runJob() calling mvPath()
+      - PROC mvPath() with PaintL for passes and MoveL for connectors
+    """
+    fixed = params.paint_speed_mmpm if params else 1000.0
+
+    targets: list[tuple[str, tuple[float, float, float], tuple[float, float, float, float]]] = []
+    moves: list[tuple[str, str, int]] = []
+
+    target_idx = 10
+    for route in routes:
+        conn_by_from = {c.from_pass_id: c for c in route.connections}
+        for p in route.passes:
+            speeds = _pass_speeds(p, speeds_map, fixed)
+            for i, pt in enumerate(p.points):
+                t_name = f'p{target_idx}'
+                target_idx += 10
+                q_wxyz, _, _ = _get_tcp_orientation(route, p, i)
+                targets.append((t_name, (round(float(pt[0]), 3), round(float(pt[1]), 3), round(float(pt[2]), 3)), q_wxyz))
+                sp_mmps = int(round(float(speeds[i]) / 60.0)) if float(speeds[i]) > 0 else 500
+                moves.append(('paint', t_name, sp_mmps))
+
+            conn = conn_by_from.get(p.id)
+            if conn is not None:
+                for i, pt in enumerate(conn.points):
+                    t_name = f'p{target_idx}'
+                    target_idx += 10
+                    q_wxyz, _, _ = _get_tcp_orientation(route, None, i, points=conn.points)
+                    targets.append((t_name, (round(float(pt[0]), 3), round(float(pt[1]), 3), round(float(pt[2]), 3)), q_wxyz))
+                    moves.append(('move', t_name, 1500))
+
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write('%%%\n')
+        f.write('  VERSION:1\n')
+        f.write('  LANGUAGE:ENGLISH\n')
+        f.write('%%%\n\n')
+        f.write('MODULE M1\n')
+        f.write('  ! Targets defined at standoff with unit quaternions [q1, q2, q3, q4] = [w, x, y, z]\n')
+        for t_name, (x, y, z), (q1, q2, q3, q4) in targets:
+            f.write(
+                f'  CONST robtarget {t_name}:=[[{x:.3f},{y:.3f},{z:.3f}],'
+                f'[{q1:.6f},{q2:.6f},{q3:.6f},{q4:.6f}],'
+                f'[0,0,0,0],[9E+009,9E+009,9E+009,9E+009,9E+009,9E+009]];\n'
+            )
+        f.write('\n')
+        f.write('  PERS wobjdata wobjPart:=[FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];\n\n')
+        f.write('  PROC runJob()\n')
+        f.write('    mvPath;\n')
+        f.write('  ENDPROC\n\n')
+        f.write('  PROC mvPath()\n')
+        for move_type, t_name, sp in moves:
+            if move_type == 'paint':
+                f.write(f'    PaintL {t_name},v{sp},z10,tool0\\wobj:=wobjPart;\n')
+            else:
+                f.write(f'    MoveL {t_name},v{sp},z50,tool0\\wobj:=wobjPart;\n')
+        f.write('  ENDPROC\n')
+        f.write('ENDMODULE\n')
+
+
+def export_fanuc_ls(
+    routes: list[PaintRoute],
+    filepath: str,
+    params: GenerationParams | None = None,
+    speeds_map: dict[int, np.ndarray] | None = None,
+) -> None:
+    """Fanuc TP / Karel ASCII format (.LS) matching S1_100.LS OEM standard.
+
+    Generates:
+      - /PROG, /ATTR, /APPL headers
+      - /MN motion sequence with Gun=ON on pass start, Gun=OFF on pass end
+      - /POS Cartesian positions (X,Y,Z in mm) and Euler angles (W,P,R in degrees)
+    """
+    fixed = params.paint_speed_mmpm if params else 1000.0
+
+    points_data: list[tuple[int, tuple[float, float, float], tuple[float, float, float]]] = []
+    mn_lines: list[str] = []
+
+    pt_num = 1
+    mn_line_num = 1
+    mn_lines.append(f'   {mn_line_num}:  Preset[1] ;')
+    mn_line_num += 1
+
+    for route in routes:
+        conn_by_from = {c.from_pass_id: c for c in route.connections}
+        for p in route.passes:
+            speeds = _pass_speeds(p, speeds_map, fixed)
+            n_pts = len(p.points)
+            for i, pt in enumerate(p.points):
+                _, wpr, _ = _get_tcp_orientation(route, p, i)
+                points_data.append((pt_num, (float(pt[0]), float(pt[1]), float(pt[2])), wpr))
+                sp_mmps = int(round(float(speeds[i]) / 60.0)) if float(speeds[i]) > 0 else 500
+
+                if i == 0:
+                    trigger_str = ' Gun=ON'
+                elif i == n_pts - 1:
+                    trigger_str = ' Gun=OFF'
+                else:
+                    trigger_str = ''
+
+                mn_lines.append(f'   {mn_line_num}:L P[{pt_num}] {sp_mmps}mm/sec CNT100{trigger_str}    ;')
+                mn_line_num += 1
+                pt_num += 1
+
+            conn = conn_by_from.get(p.id)
+            if conn is not None:
+                for i, pt in enumerate(conn.points):
+                    _, wpr, _ = _get_tcp_orientation(route, None, i, points=conn.points)
+                    points_data.append((pt_num, (float(pt[0]), float(pt[1]), float(pt[2])), wpr))
+                    mn_lines.append(f'   {mn_line_num}:L P[{pt_num}] 1500mm/sec CNT100    ;')
+                    mn_line_num += 1
+                    pt_num += 1
+
+    now = datetime.now()
+    date_str = now.strftime('%y-%m-%d')
+    time_str = now.strftime('%H:%M:%S')
+    prog_name = os.path.splitext(os.path.basename(filepath))[0].upper().replace(' ', '_')[:16] or 'SMARTGRID'
+
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(f'/PROG  {prog_name}\t  Process\n')
+        f.write('/ATTR\n')
+        f.write('OWNER\t\t= MNEDITOR;\n')
+        f.write('COMMENT\t\t= "SmartGrid OLP";\n')
+        f.write('PROG_SIZE\t= 0;\n')
+        f.write(f'CREATE\t\t= DATE {date_str}  TIME {time_str};\n')
+        f.write(f'MODIFIED\t= DATE {date_str}  TIME {time_str};\n')
+        f.write(f'FILE_NAME\t= {prog_name};\n')
+        f.write('VERSION\t\t= 0;\n')
+        f.write(f'LINE_COUNT\t= {len(mn_lines)};\n')
+        f.write('MEMORY_SIZE\t= 0;\n')
+        f.write('PROTECT\t\t= READ_WRITE;\n')
+        f.write('TCD:  STACK_SIZE\t= 0,\n')
+        f.write('      TASK_PRIORITY\t= 50,\n')
+        f.write('      TIME_SLICE\t= 0,\n')
+        f.write('      BUSY_LAMP_OFF\t= 0,\n')
+        f.write('      ABORT_REQUEST\t= 0,\n')
+        f.write('      PAUSE_REQUEST\t= 0;\n')
+        f.write('DEFAULT_GROUP\t= 1,*,*,*,*;\n')
+        f.write('CONTROL_CODE\t= 00000000 00000000;\n')
+        f.write('/APPL\n\n')
+        f.write('AUTO_SINGULARITY_HEADER;\n')
+        f.write('  ENABLE_SINGULARITY_AVOIDANCE   : FALSE;\n')
+        f.write('PAINT_PROCESS;\n')
+        f.write('  DEFAULT_USER_FRAME\t= 1;\n')
+        f.write('  DEFAULT_TOOL_FRAME\t= 1;\n')
+        f.write('/MN\n')
+        for line in mn_lines:
+            f.write(line + '\n')
+        f.write('/POS\n')
+        for p_idx, (x, y, z), (w, p, r) in points_data:
+            f.write(f'P[{p_idx}]{{\n')
+            f.write('   GP1:\n')
+            f.write("\tUF : 1, UT : 1,\t\tCONFIG : 'N U T, 0, 0, 0',\n")
+            f.write(f'\tX = {x:10.3f}  mm,\tY = {y:10.3f}  mm,\tZ = {z:10.3f}  mm,\n')
+            f.write(f'\tW = {w:10.3f} deg,\tP = {p:10.3f} deg,\tR = {r:10.3f} deg\n')
+            f.write('};\n')
+
+
+def export_durr(
+    routes: list[PaintRoute],
+    filepath: str,
+    params: GenerationParams | None = None,
+    speeds_map: dict[int, np.ndarray] | None = None,
+) -> None:
+    """Dürr EcoScreen trajectory (.tid & .tip) matching Aleta_Ptras standard.
+
+    Writes companion pair:
+      - .tid: Point table (P1 : POINT := (Object, X, Y, Z, A, B, C, 0, 0, 0)),
+        PT{n} trigger-position points, and TRIGGERFRAME declarations.
+      - .tip: Motion and brush commands (LIN(P1), SETBRUSH/GUN each with their
+        own PT/TR pair, GunOff emitted only after the LIN that reaches it).
+    """
+    fixed = params.paint_speed_mmpm if params else 1000.0
+
+    base_path, _ = os.path.splitext(filepath)
+    tid_path = base_path + '.tid'
+    tip_path = base_path + '.tip'
+
+    points_data: list[tuple[int, tuple[float, float, float], tuple[float, float, float]]] = []
+    # ponytail: PT trigger-position == the P point it fires at (no gun-delay offset
+    # modeled); upgrade once spray-gun response time / lead distance is known.
+    trigger_points: list[tuple[int, tuple[float, float, float], tuple[float, float, float]]] = []
+    tip_lines: list[str] = [
+        'RSELECT("R11")',
+        '  //',
+        '  SETTOOL(ECOBELL3E_200)',
+        '  SETOBJECT(PART)',
+        '  //',
+        '  OVERLAP(NODEC50)',
+        '  ACC(A3500)',
+        '  VEL(V1000)',
+        '  //',
+    ]
+
+    pt_num = 1
+    tr_num = 1
+
+    for route in routes:
+        conn_by_from = {c.from_pass_id: c for c in route.connections}
+        for p in route.passes:
+            speeds = _pass_speeds(p, speeds_map, fixed)
+            n_pts = len(p.points)
+            for i, pt in enumerate(p.points):
+                _, _, abc = _get_tcp_orientation(route, p, i)
+                coords = (float(pt[0]), float(pt[1]), float(pt[2]))
+                points_data.append((pt_num, coords, abc))
+                sp_mmps = int(round(float(speeds[i]) / 60.0)) if float(speeds[i]) > 0 else 500
+
+                if i == 0:
+                    tip_lines.append(f'  LIN(P{pt_num})')
+                    tip_lines.append(f'  VEL(V{sp_mmps})')
+                    trigger_points.append((tr_num, coords, abc))
+                    # ponytail: brush pattern fixed at 1 — SmartGrid passes carry no
+                    # per-zone spray-pattern id; upgrade once PaintPass exposes one.
+                    tip_lines.append(f'  SETBRUSH(GUN1, 1, PT{tr_num}, TR{tr_num})')
+                    tr_num += 1
+                    trigger_points.append((tr_num, coords, abc))
+                    tip_lines.append(f'  GUN(GUN1, GunOn, PT{tr_num}, TR{tr_num})')
+                    tr_num += 1
+                elif i == n_pts - 1:
+                    tip_lines.append(f'  LIN(P{pt_num})')
+                    trigger_points.append((tr_num, coords, abc))
+                    tip_lines.append(f'  GUN(GUN1, GunOff, PT{tr_num}, TR{tr_num})')
+                    tr_num += 1
+                    tip_lines.append('  VEL(V1000)')
+                else:
+                    tip_lines.append(f'  LIN(P{pt_num})')
+
+                pt_num += 1
+
+            conn = conn_by_from.get(p.id)
+            if conn is not None:
+                for i, pt in enumerate(conn.points):
+                    _, _, abc = _get_tcp_orientation(route, None, i, points=conn.points)
+                    points_data.append((pt_num, (float(pt[0]), float(pt[1]), float(pt[2])), abc))
+                    tip_lines.append(f'  LIN(P{pt_num})')
+                    pt_num += 1
+
+    with open(tid_path, 'w', encoding='utf-8') as f:
+        f.write('// POINT\n')
+        for p_idx, (x, y, z), (a, b, c) in points_data:
+            f.write(f'P{p_idx} : POINT := (Object, {x:.3f}, {y:.3f}, {z:.3f}, {a:.3f}, {b:.3f}, {c:.3f}, 0, 0, 0)\n')
+        for tr_idx, (x, y, z), (a, b, c) in trigger_points:
+            f.write(f'PT{tr_idx} : POINT := (Object, {x:.3f}, {y:.3f}, {z:.3f}, {a:.3f}, {b:.3f}, {c:.3f}, 0, 0, 0)\n')
+        f.write('\n// TRIGGERFRAME\n')
+        for tr_idx in range(1, tr_num):
+            f.write(f'TR{tr_idx} : TRIGGERFRAME := (Object, 0, 0, 0, 0)\n')
+        f.write('//--------------------------------------------\n')
+
+    with open(tip_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(tip_lines) + '\n')
+
+
+def export_cad_dxf(
+    routes: list[PaintRoute],
+    filepath: str,
+    params: GenerationParams | None = None,
+    speeds_map: dict[int, np.ndarray] | None = None,
+) -> None:
+    """Export 3D toolpath curves as AutoCAD DXF 3D polylines.
+
+    Creates layers:
+      - PAINT_PASSES (Blue) for spray passes at standoff depth.
+      - AIR_CONNECTORS (Red) for air transfer moves.
+    """
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write('0\nSECTION\n2\nHEADER\n0\nENDSEC\n')
+        f.write('0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n2\n')
+        f.write('0\nLAYER\n2\nPAINT_PASSES\n70\n0\n62\n5\n6\nCONTINUOUS\n')
+        f.write('0\nLAYER\n2\nAIR_CONNECTORS\n70\n0\n62\n1\n6\nCONTINUOUS\n')
+        f.write('0\nENDTAB\n0\nENDSEC\n')
+        f.write('0\nSECTION\n2\nENTITIES\n')
+
+        def _write_polyline(pts: np.ndarray, layer: str):
+            if len(pts) < 2:
+                return
+            f.write('0\nPOLYLINE\n8\n' + layer + '\n66\n1\n70\n8\n')
+            for pt in pts:
+                f.write(
+                    f'0\nVERTEX\n8\n{layer}\n'
+                    f'10\n{float(pt[0]):.4f}\n'
+                    f'20\n{float(pt[1]):.4f}\n'
+                    f'30\n{float(pt[2]):.4f}\n'
+                    '70\n32\n'
+                )
+            f.write('0\nSEQEND\n8\n' + layer + '\n')
+
+        for route in routes:
+            conn_by_from = {c.from_pass_id: c for c in route.connections}
+            for p in route.passes:
+                _write_polyline(p.points, 'PAINT_PASSES')
+                conn = conn_by_from.get(p.id)
+                if conn is not None:
+                    _write_polyline(conn.points, 'AIR_CONNECTORS')
+
+        f.write('0\nENDSEC\n0\nEOF\n')

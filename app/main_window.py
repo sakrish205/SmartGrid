@@ -28,7 +28,10 @@ from app.ui.ribbon import SmartRibbon
 from app.export.json_export import export_route_json
 from app.robot.robot_profile import get_active_profile, load_profiles
 from app.export.csv_export import export_route_csv
-from app.export.olp_export import export_robodk, export_vc, export_delmia_apt, export_gcode
+from app.export.olp_export import (
+    export_robodk, export_vc, export_delmia_apt, export_gcode,
+    export_abb_rapid, export_fanuc_ls, export_durr, export_cad_dxf,
+)
 from app.ui.view_settings_dialog import ViewSettingsDialog, DEFAULTS as _COLOR_DEFAULTS
 
 
@@ -557,6 +560,7 @@ class MainWindow(QMainWindow):
         self._load_worker:   Optional[QThread] = None
         self._coll_worker:   Optional[QThread] = None
         self._norm_worker:   Optional[QThread] = None
+        self._import_worker: Optional[QThread] = None
         self._zombie_workers: list = []  # coll workers dropped while still running
         self._current_colors: dict[str, str]  = self._load_view_settings()
         self._face_grid_planes_cache: tuple | None = None
@@ -804,6 +808,14 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._save_view_settings()
+        # Wait for any in-flight background QThread so Qt doesn't destroy it while
+        # its run() is still executing (causes "QThread: Destroyed while thread is
+        # still running" and can crash if the thread touches a since-freed widget).
+        workers = [self._worker, self._load_worker, self._coll_worker,
+                   self._norm_worker, self._import_worker, *self._zombie_workers]
+        for worker in workers:
+            if worker is not None and worker.isRunning():
+                worker.wait()
         super().closeEvent(event)
 
     # ------------------------------------------------------------------
@@ -1685,10 +1697,14 @@ with JSON / CSV / OLP export.</p>
             self.statusBar().showMessage('Export failed.')
 
     _OLP_FORMATS = {
-        'RoboDK (6-col curve CSV)':  ('robodk', 'CSV (*.csv)',        '.csv'),
-        'Visual Components (CSV)':   ('vc',     'CSV (*.csv)',        '.csv'),
-        'DELMIA (APT text)':         ('delmia', 'APT (*.apt)',        '.apt'),
-        'G-code (CNC / Robot)':      ('gcode',  'G-code (*.nc)',      '.nc'),
+        'ABB RAPID (.mod)':          ('abb_rapid', 'ABB RAPID (*.mod)',      '.mod'),
+        'Fanuc TP / Karel (.LS)':    ('fanuc_ls',  'Fanuc LS (*.ls)',        '.ls'),
+        'Dürr EcoScreen (.tid/.tip)': ('durr',      'Dürr EcoScreen (*.tid)', '.tid'),
+        'CAD 3D Curve (.dxf)':        ('cad_dxf',   'AutoCAD DXF (*.dxf)',    '.dxf'),
+        'RoboDK (6-col curve CSV)':  ('robodk',    'CSV (*.csv)',            '.csv'),
+        'Visual Components (CSV)':   ('vc',        'CSV (*.csv)',            '.csv'),
+        'DELMIA (APT text)':         ('delmia',    'APT (*.apt)',            '.apt'),
+        'G-code (CNC / Robot)':      ('gcode',     'G-code (*.nc)',          '.nc'),
     }
 
     def _export_olp(self) -> None:
@@ -1741,8 +1757,16 @@ with JSON / CSV / OLP export.</p>
 
         self.statusBar().showMessage('Exporting OLP...')
         try:
-            fn = {'robodk': export_robodk, 'vc': export_vc, 'delmia': export_delmia_apt,
-                  'gcode': export_gcode}[fmt_key]
+            fn = {
+                'abb_rapid': export_abb_rapid,
+                'fanuc_ls':  export_fanuc_ls,
+                'durr':      export_durr,
+                'cad_dxf':   export_cad_dxf,
+                'robodk':    export_robodk,
+                'vc':        export_vc,
+                'delmia':    export_delmia_apt,
+                'gcode':     export_gcode,
+            }[fmt_key]
             fn(self._current_routes, path, params=params, speeds_map=speeds_map)
             self.statusBar().showMessage(f'Exported: {path}')
         except Exception as exc:
