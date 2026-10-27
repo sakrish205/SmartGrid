@@ -20,6 +20,7 @@ from app.meshflow import lane_planner as _lane_planner
 from app.meshflow import surface_intersector as _surface_intersector
 from app.meshflow import transition_planner as _transition_planner
 from app.meshflow.open_decisions import LanePitchStrategy
+from app.path import local_normals as _local_normals
 from app.path import surface_safety as _surface_safety
 from app.path.path_model import MeshFlowRegion, PaintPass, PaintRoute
 from app.path.resampler import rdp_simplify, resample_arc
@@ -58,13 +59,19 @@ def generate_mesh_flow_route(
     step) before generating lanes.
 
     standoff_mm (F59/C1): when > 0, every pass point is lifted off the surface
-    along the region's own mean outward normal via
-    app.path.surface_safety.outward_tcp_offset — the TCP belongs off the
-    surface, matching every other path mode, not sitting on it. ponytail: one
-    mean normal per region (the same single scan-frame-per-region design
-    direction_estimator already uses), not a per-point local normal — fine for
-    the near-planar regions this targets today; upgrade path is a per-point
-    closest-surface-normal lookup if a strongly curved region ever needs it.
+    along ITS OWN nearest-triangle normal, looked up against a SUBMESH of
+    just this region's own faces (never the full mesh) via
+    app.path.local_normals.interpolate_normals. Two independent, diagnosed
+    failure modes made a simpler offset wrong on real-world meshes: (1) a
+    single region-mean normal is wrong wherever the true local normal
+    diverges from the average on curved geometry; (2) looking up the nearest
+    triangle against the FULL mesh can return an unrelated nearby part's
+    normal on a multi-body assembly (mirrors/handles/trim sitting close to a
+    body panel) — restricting the lookup to this region's own submesh makes
+    that structurally impossible. On top of both, when the full mesh is
+    watertight, any point that still ends up on the wrong side is caught via
+    app.path.surface_safety.inside_mesh_mask (F57) and its normal is flipped
+    — a self-verifying result, not just a formula trusted to be right.
     """
     mesh: trimesh.Trimesh = mesh_data.trimesh_mesh
 
@@ -82,6 +89,11 @@ def generate_mesh_flow_route(
     region.lane_pitch_mm = pitch_mm
 
     planes = _lane_planner.generate_lane_planes(region, mesh, pitch_mm)
+
+    # Built once per region, reused by every pass's standoff offset below —
+    # restricts the nearest-triangle lookup to THIS region's own geometry so
+    # it can never return an unrelated part's normal on a multi-body mesh.
+    region_mesh = mesh.submesh([region.face_indices], append=True) if standoff_mm > 0.0 else None
 
     passes: list[PaintPass] = []
     pass_id = 0
@@ -107,18 +119,23 @@ def generate_mesh_flow_route(
             pts = pts[::-1]
 
         pass_normals = None
-        if standoff_mm > 0.0 and mean_normal_norm > 1e-9:
-            pts = np.array([
-                _surface_safety.outward_tcp_offset(pt, spray_normal, standoff_mm) for pt in pts
-            ])
-            pass_normals = np.tile(spray_normal, (len(pts), 1))
+        pass_tangent = None
+        if standoff_mm > 0.0:
+            pass_normals = _local_normals.interpolate_normals(pts, region_mesh)
+            if mesh.is_watertight:
+                offset_preview = pts + pass_normals * standoff_mm
+                wrong_side = _surface_safety.inside_mesh_mask(offset_preview, mesh)
+                if wrong_side is not None and wrong_side.any():
+                    pass_normals[wrong_side] *= -1.0
+            pts = pts + pass_normals * standoff_mm
+            pass_tangent = _local_normals.build_tcp_frames(pts, pass_normals)
 
         passes.append(PaintPass(
             id=pass_id, region_id=region.region_id,
             direction='mesh_flow', points=pts,
             is_forward=is_fwd, sub_index=0,
             slice_position=position,
-            normals=pass_normals, tangent=None,
+            normals=pass_normals, tangent=pass_tangent,
         ))
         pass_id += 1
 

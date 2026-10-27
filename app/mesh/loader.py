@@ -50,4 +50,10 @@ def load_mesh(filepath: str) -> trimesh.Trimesh:
     if raw.is_empty or len(raw.faces) < 4:
         raise ValueError("Mesh has no usable faces — check the file.")
 
+    # Real-world STL/OBJ exports commonly have inconsistent face winding
+    # (flipped normals on a subset of triangles) — _load_step already repairs
+    # this for STEP via gmsh tessellation; STL/OBJ never got the same repair.
+    # Pure topology/orientation correction: never moves a vertex.
+    trimesh.repair.fix_normals(raw, multibody=True)
+
     return raw
