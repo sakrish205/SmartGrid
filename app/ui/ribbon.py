@@ -557,33 +557,6 @@ class SmartRibbon(QWidget):
         fg_vl.addWidget(self._fg_shadow_radio)
         fg_vl.addWidget(self._fg_mesh_radio)
 
-        # Standoff row
-        standoff_hl = QHBoxLayout()
-        standoff_hl.setSpacing(4)
-        standoff_hl.setContentsMargins(0, 0, 0, 0)
-        self._standoff_label = _row_label('Standoff')
-        self._standoff_spin  = QDoubleSpinBox()
-        self._standoff_spin.setRange(0.0, 500.0)
-        self._standoff_spin.setValue(0.0)
-        self._standoff_spin.setSingleStep(5.0)
-        self._standoff_spin.setDecimals(1)
-        self._standoff_spin.setSuffix('  mm')
-        self._standoff_spin.setFixedWidth(72)
-        self._standoff_spin.setStyleSheet(_SPIN_CSS)
-        self._standoff_spin.setToolTip(
-            'Distance to lift waypoints above the mesh surface.\n'
-            'Default: robot profile standoff_optimal_mm.\n'
-            'Check Custom to override.')
-        self._standoff_custom_check = QCheckBox('Custom')
-        self._standoff_custom_check.setToolTip(
-            'Override the robot profile standoff with a custom value.')
-        self._standoff_custom_check.toggled.connect(self._on_standoff_custom_toggled)
-        self._standoff_spin.setEnabled(False)   # locked until Custom or no profile
-        standoff_hl.addWidget(self._standoff_label)
-        standoff_hl.addWidget(self._standoff_spin)
-        standoff_hl.addWidget(self._standoff_custom_check)
-        fg_vl.addLayout(standoff_hl)
-
         # Hide until Face Grid is selected
         self._fg_subpanel = QWidget()
         self._fg_subpanel.setLayout(fg_vl)
@@ -620,7 +593,7 @@ class SmartRibbon(QWidget):
 
     # ── Waypoints ─────────────────────────────────────────────────────────
     def _build_waypoints(self) -> _Group:
-        g = _Group('Waypoints')
+        g = _Group('Waypoints & Standoff')
         g.setMinimumWidth(100)
 
         vl = QVBoxLayout()
@@ -650,6 +623,33 @@ class SmartRibbon(QWidget):
         self._wpt_interval_spin.setEnabled(False)  # enabled only when Custom is checked
         interval_hl.addWidget(self._wpt_interval_spin)
         vl.addLayout(interval_hl)
+
+        # Standoff row
+        standoff_hl = QHBoxLayout()
+        standoff_hl.setSpacing(4)
+        standoff_hl.setContentsMargins(0, 0, 0, 0)
+        self._standoff_label = _row_label('Standoff')
+        self._standoff_spin  = QDoubleSpinBox()
+        self._standoff_spin.setRange(0.0, 500.0)
+        self._standoff_spin.setValue(0.0)
+        self._standoff_spin.setSingleStep(5.0)
+        self._standoff_spin.setDecimals(1)
+        self._standoff_spin.setSuffix('  mm')
+        self._standoff_spin.setFixedWidth(72)
+        self._standoff_spin.setStyleSheet(_SPIN_CSS)
+        self._standoff_spin.setToolTip(
+            'Distance to lift waypoints above the mesh surface.\n'
+            'Default: robot profile standoff_optimal_mm.\n'
+            'Check Custom to override.')
+        self._standoff_custom_check = QCheckBox('Custom')
+        self._standoff_custom_check.setToolTip(
+            'Override the robot profile standoff with a custom value.')
+        self._standoff_custom_check.toggled.connect(self._on_standoff_custom_toggled)
+        self._standoff_spin.setEnabled(False)   # locked until Custom or no profile
+        standoff_hl.addWidget(self._standoff_label)
+        standoff_hl.addWidget(self._standoff_spin)
+        standoff_hl.addWidget(self._standoff_custom_check)
+        vl.addLayout(standoff_hl)
 
         g.add_layout(vl)
         return g

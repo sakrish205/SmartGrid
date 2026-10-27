@@ -3,6 +3,7 @@ and the minimal core generator. Mesh Surface's generate_route() is untouched by
 any of this — see tests/test_mesh_surface_baseline.py for that guarantee.
 """
 from __future__ import annotations
+import numpy as np
 import pytest
 import trimesh
 
@@ -56,6 +57,39 @@ def test_generate_mesh_flow_route_on_curved_region():
         explicit_pitch_mm=20.0,
     )
     assert route.total_passes > 0
+
+
+def test_generate_mesh_flow_route_applies_standoff_and_normals(flat_panel_mesh):
+    """F59/C1 — the TCP belongs off the surface, not on it (fixes the false
+    near-miss flag every Mesh Flow pass used to trip once the background
+    collision check ran against a configured standoff > 0)."""
+    data = preprocess(flat_panel_mesh, 'panel.stl', up_axis=2)
+    region = build_regions(data, ['TOP'])[0]
+
+    route = generate_mesh_flow_route(
+        data, region,
+        lane_pitch_strategy=LanePitchStrategy.EXPLICIT_SETTING,
+        explicit_pitch_mm=30.0, standoff_mm=10.0,
+    )
+    assert route.total_passes > 0
+    for p in route.passes:
+        assert p.normals is not None
+        assert p.normals.shape == p.points.shape
+        _closest, dists, _tri = flat_panel_mesh.nearest.on_surface(p.points)
+        assert np.allclose(dists, 10.0, atol=1e-6)
+
+
+def test_generate_mesh_flow_route_zero_standoff_leaves_points_on_surface(flat_panel_mesh):
+    data = preprocess(flat_panel_mesh, 'panel.stl', up_axis=2)
+    region = build_regions(data, ['TOP'])[0]
+
+    route = generate_mesh_flow_route(
+        data, region,
+        lane_pitch_strategy=LanePitchStrategy.EXPLICIT_SETTING,
+        explicit_pitch_mm=30.0,
+    )
+    for p in route.passes:
+        assert p.normals is None
 
 
 def test_resolve_lane_pitch_from_width_overlap_raises_open_decision_blocked():

@@ -20,6 +20,7 @@ from app.meshflow import lane_planner as _lane_planner
 from app.meshflow import surface_intersector as _surface_intersector
 from app.meshflow import transition_planner as _transition_planner
 from app.meshflow.open_decisions import LanePitchStrategy
+from app.path import surface_safety as _surface_safety
 from app.path.path_model import MeshFlowRegion, PaintPass, PaintRoute
 from app.path.resampler import rdp_simplify, resample_arc
 
@@ -48,12 +49,22 @@ def generate_mesh_flow_route(
     explicit_pitch_mm: float | None,
     waypoint_spacing_mm: float = 0.0,
     user_direction: np.ndarray | None = None,
+    standoff_mm: float = 0.0,
 ) -> PaintRoute:
     """R1/R3/R4/R5 — generate a boustrophedon PaintRoute for one region.
 
     Populates region.primary_direction/spacing_direction/lane_pitch_mm in place
     (mirroring how app.path.generator leaves PaintPass.normals/tangent for a later
     step) before generating lanes.
+
+    standoff_mm (F59/C1): when > 0, every pass point is lifted off the surface
+    along the region's own mean outward normal via
+    app.path.surface_safety.outward_tcp_offset — the TCP belongs off the
+    surface, matching every other path mode, not sitting on it. ponytail: one
+    mean normal per region (the same single scan-frame-per-region design
+    direction_estimator already uses), not a per-point local normal — fine for
+    the near-planar regions this targets today; upgrade path is a per-point
+    closest-surface-normal lookup if a strongly curved region ever needs it.
     """
     mesh: trimesh.Trimesh = mesh_data.trimesh_mesh
 
@@ -62,6 +73,10 @@ def generate_mesh_flow_route(
     )
     region.primary_direction = primary_direction
     region.spacing_direction = spacing_direction
+
+    mean_normal = mesh.face_normals[region.face_indices].mean(axis=0)
+    mean_normal_norm = np.linalg.norm(mean_normal)
+    spray_normal = mean_normal / mean_normal_norm if mean_normal_norm > 1e-9 else np.zeros(3)
 
     pitch_mm = _lane_planner.resolve_lane_pitch(explicit_pitch_mm, lane_pitch_strategy)
     region.lane_pitch_mm = pitch_mm
@@ -91,12 +106,19 @@ def generate_mesh_flow_route(
         if not is_fwd:
             pts = pts[::-1]
 
+        pass_normals = None
+        if standoff_mm > 0.0 and mean_normal_norm > 1e-9:
+            pts = np.array([
+                _surface_safety.outward_tcp_offset(pt, spray_normal, standoff_mm) for pt in pts
+            ])
+            pass_normals = np.tile(spray_normal, (len(pts), 1))
+
         passes.append(PaintPass(
             id=pass_id, region_id=region.region_id,
             direction='mesh_flow', points=pts,
             is_forward=is_fwd, sub_index=0,
             slice_position=position,
-            normals=None, tangent=None,
+            normals=pass_normals, tangent=None,
         ))
         pass_id += 1
 
@@ -104,10 +126,6 @@ def generate_mesh_flow_route(
         passes, mesh, region, spray_width_mm=pitch_mm, waypoint_spacing_mm=waypoint_spacing_mm,
     )
     total_len = sum(_arc_length(p.points) for p in passes)
-
-    mean_normal = mesh.face_normals[region.face_indices].mean(axis=0)
-    mean_normal_norm = np.linalg.norm(mean_normal)
-    spray_normal = mean_normal / mean_normal_norm if mean_normal_norm > 1e-9 else np.zeros(3)
 
     return PaintRoute(
         region_id=region.region_id, passes=passes, connections=connections,

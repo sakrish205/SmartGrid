@@ -31,6 +31,9 @@ class _FakeRibbon:
     def get_waypoint_spacing_mm(self) -> float:
         return 2.0
 
+    def get_standoff_mm(self) -> float:
+        return 15.0
+
     def set_generating(self, generating: bool) -> None:
         pass
 
@@ -47,8 +50,9 @@ class _FakeWorker:
     """Stand-in for _MeshFlowWorker: captures constructor args, never runs."""
     instances: list['_FakeWorker'] = []
 
-    def __init__(self, mesh_data, selected_region_ids, spray_mm, waypoint_spacing_mm=0.0):
+    def __init__(self, mesh_data, selected_region_ids, spray_mm, waypoint_spacing_mm=0.0, standoff_mm=0.0):
         self.selected_region_ids = selected_region_ids
+        self.standoff_mm = standoff_mm
         self.finished = types.SimpleNamespace(connect=lambda *_a, **_k: None)
         self.error = types.SimpleNamespace(connect=lambda *_a, **_k: None)
         _FakeWorker.instances.append(self)
@@ -68,6 +72,7 @@ def _make_fake_window(selected_regions: set[str]) -> QWidget:
     win._worker = None
     win._on_route_ready = lambda *_a: None
     win._on_route_error = lambda *_a: None
+    win._on_mesh_flow_route_ready = lambda *_a: None
     win.statusBar = lambda: types.SimpleNamespace(showMessage=lambda *_a: None)
     return win
 
@@ -102,3 +107,38 @@ def test_excluding_every_region_blocks_generation(qapp):
     win = _make_fake_window(set(_ALL_REGIONS))
     MainWindow._generate_mesh_flow(win, spray_mm=10.0)
     assert _FakeWorker.instances == []
+
+
+def test_generation_forwards_the_ribbon_standoff_value(qapp):
+    win = _make_fake_window({'BOTTOM'})
+    MainWindow._generate_mesh_flow(win, spray_mm=10.0)
+    assert _FakeWorker.instances[0].standoff_mm == 15.0
+
+
+def test_dropped_regions_are_warned_about_and_routes_still_forwarded(qapp, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(QMessageBox, 'warning',
+                         staticmethod(lambda *a, **k: warnings.append(a)))
+    received = []
+    win = _make_fake_window({'BOTTOM'})
+    win._on_route_ready = lambda routes: received.append(routes)
+
+    MainWindow._on_mesh_flow_route_ready(win, (['route-stub'], ['REAR', 'LEFT']))
+
+    assert len(warnings) == 1
+    assert 'LEFT' in warnings[0][2] and 'REAR' in warnings[0][2]
+    assert received == [['route-stub']]
+
+
+def test_no_dropped_regions_means_no_warning(qapp, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(QMessageBox, 'warning',
+                         staticmethod(lambda *a, **k: warnings.append(a)))
+    received = []
+    win = _make_fake_window({'BOTTOM'})
+    win._on_route_ready = lambda routes: received.append(routes)
+
+    MainWindow._on_mesh_flow_route_ready(win, (['route-stub'], []))
+
+    assert warnings == []
+    assert received == [['route-stub']]

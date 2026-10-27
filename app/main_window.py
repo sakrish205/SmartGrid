@@ -443,12 +443,14 @@ class _MeshFlowWorker(QThread):
         selected_region_ids: list[str],
         spray_mm: float,
         waypoint_spacing_mm: float = 0.0,
+        standoff_mm: float = 0.0,
     ) -> None:
         super().__init__()
         self._mesh_data           = mesh_data
         self._selected_region_ids = selected_region_ids
         self._spray_mm            = spray_mm
         self._waypoint_spacing    = waypoint_spacing_mm
+        self._standoff_mm         = standoff_mm
 
     def run(self) -> None:
         try:
@@ -459,17 +461,23 @@ class _MeshFlowWorker(QThread):
 
             regions = build_regions(self._mesh_data, self._selected_region_ids)
             routes = []
+            dropped: list[str] = []
             for region in regions:
                 if region.confidence is RegionConfidence.REJECTED:
+                    dropped.append(region.region_id)
                     continue
                 route = generate_mesh_flow_route(
                     self._mesh_data, region,
                     lane_pitch_strategy=LanePitchStrategy.EXPLICIT_SETTING,
                     explicit_pitch_mm=self._spray_mm,
                     waypoint_spacing_mm=self._waypoint_spacing,
+                    standoff_mm=self._standoff_mm,
                 )
+                if route.total_passes == 0:
+                    dropped.append(region.region_id)
+                    continue
                 routes.append(route)
-            self.finished.emit(routes)
+            self.finished.emit((routes, dropped))
         except Exception as exc:
             self.error.emit(f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
 
@@ -1341,8 +1349,8 @@ class MainWindow(QMainWindow):
         face(s) the user clicks are excluded (e.g. a hanger/mount point), and
         generation runs on the complement — every other region, merged into one
         path by _on_route_ready's existing merge_routes call. Regions the region
-        manager rejects (e.g. no faces classified) are silently skipped, not
-        generated."""
+        manager rejects, or that produce zero passes, are reported by
+        _on_mesh_flow_route_ready rather than silently dropped."""
         if not self._selected_regions:
             QMessageBox.warning(self, 'No exclusion selected',
                 'Mesh Flow generates on every region except the one(s) you select.\n'
@@ -1359,15 +1367,32 @@ class MainWindow(QMainWindow):
         worker = _MeshFlowWorker(
             self._model.data, positive_regions, spray_mm,
             waypoint_spacing_mm=wpt_mm,
+            standoff_mm=self._ribbon.get_standoff_mm(),
         )
         self._face_grid_planes_cache = None
         self._adaptive_grid_cache    = None
         self._viewer.clear_face_grid_planes()
         self._viewer.show_bbox(True)
-        worker.finished.connect(self._on_route_ready)
+        worker.finished.connect(self._on_mesh_flow_route_ready)
         worker.error.connect(self._on_route_error)
         self._worker = worker
         worker.start()
+
+    def _on_mesh_flow_route_ready(self, result: tuple[list[PaintRoute], list[str]]) -> None:
+        """Mesh Flow's own completion slot: reports regions the worker dropped
+        (no faces classified, or zero passes generated) — invisible to
+        _on_route_ready's own empty_regions check once merge_routes has already
+        collapsed multiple regions into one — then defers to the normal shared
+        completion path for everything else (merge/stats/collision)."""
+        routes, dropped = result
+        if dropped:
+            QMessageBox.warning(
+                self, 'Some regions were skipped',
+                'These regions produced no path and were skipped:\n  '
+                + ', '.join(sorted(dropped))
+                + '\n\nLikely too little surface area was classified into them on this geometry.',
+            )
+        self._on_route_ready(routes)
 
     @staticmethod
     def _truncate_routes(routes, n: int):
