@@ -12,19 +12,17 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from app.path.resampler import resample_arc
+from app.path.curvature_metrics import (
+    approximate_curvature,
+    segment_directions,
+    second_differences,
+    smoothness_penalty,
+)
+from app.path.segment_runs import (
+    split_contiguous_gun_on_runs,
+    split_contiguous_gun_on_runs_including_unknown,
+)
 from app.reference.reference_model import ReferenceProgram, ReferenceWaypoint
-
-# F13 note: "skip duplicate points" — points closer than this are treated as one.
-_DUP_EPS_MM = 1e-6
-
-
-def segment_directions(points: np.ndarray) -> np.ndarray:
-    """F13 — d_i = normalize(q_(i+1) - q_i), duplicate points skipped."""
-    diffs = np.diff(points, axis=0)
-    lengths = np.linalg.norm(diffs, axis=1)
-    keep = lengths > _DUP_EPS_MM
-    return diffs[keep] / lengths[keep, None]
 
 
 def segment_lengths(points: np.ndarray) -> np.ndarray:
@@ -35,26 +33,6 @@ def segment_lengths(points: np.ndarray) -> np.ndarray:
 def total_length(points: np.ndarray) -> float:
     """F37 — L = sum(l_i)."""
     return float(segment_lengths(points).sum())
-
-
-def second_differences(points: np.ndarray) -> np.ndarray:
-    """F17 — delta^2 q_i = q_(i+1) - 2*q_i + q_(i-1)."""
-    if len(points) < 3:
-        return np.zeros((0, points.shape[1]))
-    return points[2:] - 2.0 * points[1:-1] + points[:-2]
-
-
-def smoothness_penalty(points: np.ndarray) -> float:
-    """F18 — E_smooth = sum ||delta^2 q_i||^2."""
-    d2 = second_differences(points)
-    return float(np.sum(np.linalg.norm(d2, axis=1) ** 2))
-
-
-def approximate_curvature(points: np.ndarray, arc_spacing_mm: float) -> np.ndarray:
-    """F19 — kappa_i ~= ||delta^2 q_i|| / delta_s^2, after F38 arc-length resampling."""
-    resampled = resample_arc(points, arc_spacing_mm) if len(points) >= 2 else points
-    d2 = second_differences(resampled)
-    return np.linalg.norm(d2, axis=1) / (arc_spacing_mm ** 2)
 
 
 def pointing_axis(orientation: np.ndarray, controller: str) -> np.ndarray | None:
@@ -123,31 +101,10 @@ class ReferenceMetricsReport:
     skipped_transit_runs: int = 0
 
 
-def _split_contiguous_gun_on_runs(waypoints: list[ReferenceWaypoint]) -> list[list[ReferenceWaypoint]]:
-    """Group motion waypoints into contiguous gun_on==True runs ("lanes").
-
-    Transit/approach/retract runs (gun_on False or unknown) are skipped per the
-    plan's note: "gated to skip across gun_on transitions so transit moves
-    aren't scored as paint-pass smoothness."
-    """
-    runs: list[list[ReferenceWaypoint]] = []
-    current: list[ReferenceWaypoint] = []
-    for w in waypoints:
-        if w.process_state.gun_on is True:
-            current.append(w)
-        else:
-            if current:
-                runs.append(current)
-                current = []
-    if current:
-        runs.append(current)
-    return runs
-
-
 def compute_reference_metrics(program: ReferenceProgram, arc_spacing_mm: float = 10.0) -> ReferenceMetricsReport:
     motion = program.motion_waypoints()
-    lane_runs = _split_contiguous_gun_on_runs(motion)
-    all_run_count = len(_split_contiguous_gun_on_runs_including_unknown(motion))
+    lane_runs = split_contiguous_gun_on_runs(motion)
+    all_run_count = len(split_contiguous_gun_on_runs_including_unknown(motion))
 
     report = ReferenceMetricsReport(
         source_file=program.source_file,
@@ -187,23 +144,3 @@ def compute_reference_metrics(program: ReferenceProgram, arc_spacing_mm: float =
             ]
     report.alternation_signs = alternation_signs(directions)
     return report
-
-
-def _split_contiguous_gun_on_runs_including_unknown(
-    waypoints: list[ReferenceWaypoint],
-) -> list[list[ReferenceWaypoint]]:
-    """Same grouping as _split_contiguous_gun_on_runs but counts ALL runs
-    (paint and transit) — used only to report how many transit runs were skipped."""
-    runs: list[list[ReferenceWaypoint]] = []
-    current: list[ReferenceWaypoint] = []
-    current_state: bool | None = None
-    for w in waypoints:
-        state = w.process_state.gun_on is True
-        if current and state != current_state:
-            runs.append(current)
-            current = []
-        current.append(w)
-        current_state = state
-    if current:
-        runs.append(current)
-    return runs

@@ -21,14 +21,15 @@ def _region_vectors(up_axis: int) -> dict[str, np.ndarray]:
     }
 
 
-def classify_regions(
+def _classify_regions_scored(
     mesh_data: MeshData,
-    threshold: float = 0.42,
-) -> dict[str, np.ndarray]:
-    """Return mapping region_id -> int array of face indices.
+    threshold: float,
+) -> tuple[dict[str, np.ndarray], np.ndarray, list[str]]:
+    """Shared scoring logic for classify_regions and classify_regions_with_confidence.
 
-    Uses a weighted combination of face-normal alignment (60%) and
-    centroid position within the bounding box (40%).
+    Returns (region_id -> face indices, per-face best_score (F,), region_names in
+    best_score column order) — the per-face confidence score classify_regions has
+    always computed internally but never returned.
     """
     region_vecs_dict = _region_vectors(mesh_data.up_axis)
     region_names = list(region_vecs_dict.keys())
@@ -61,4 +62,29 @@ def classify_regions(
         mask = classified & (best_idx == col)
         result[name] = np.where(mask)[0].astype(np.int64)
 
+    return result, best_score, region_names
+
+
+def classify_regions(
+    mesh_data: MeshData,
+    threshold: float = 0.42,
+) -> dict[str, np.ndarray]:
+    """Return mapping region_id -> int array of face indices.
+
+    Uses a weighted combination of face-normal alignment (60%) and
+    centroid position within the bounding box (40%).
+    """
+    result, _best_score, _region_names = _classify_regions_scored(mesh_data, threshold)
     return result
+
+
+def classify_regions_with_confidence(
+    mesh_data: MeshData,
+    threshold: float = 0.42,
+) -> tuple[dict[str, np.ndarray], np.ndarray]:
+    """Same classification as classify_regions, plus the per-face best_score (F,)
+    array it has always computed internally but never returned — used by Mesh Flow's
+    region_manager to populate MeshFlowRegion.confidence/confidence_reasons instead of
+    discarding this evidence (see app/meshflow/region_manager.py)."""
+    result, best_score, _region_names = _classify_regions_scored(mesh_data, threshold)
+    return result, best_score

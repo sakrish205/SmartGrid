@@ -1,6 +1,11 @@
 """SmartGrid — single-strip professional Ribbon bar."""
 from __future__ import annotations
+import os
 from typing import Optional
+
+# Mesh Flow (Phase 3) — invisible until a human opts in; see convertmdfiles'
+# Mesh Flow implementation plan. Fully testable headlessly regardless of visibility.
+MESH_FLOW_UI_ENABLED = os.environ.get('SMARTGRID_MESH_FLOW_UI', '0') == '1'
 
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
@@ -498,6 +503,7 @@ class SmartRibbon(QWidget):
         self._bbox_radio      = QRadioButton('Boundary Box')
         self._face_grid_radio = QRadioButton('Face Grid')
         self._mesh_radio      = QRadioButton('Mesh Surface')
+        self._mesh_flow_radio = QRadioButton('Mesh Flow (beta)')
         self._bbox_radio.setChecked(True)
         self._bbox_radio.setToolTip(
             'Generates parallel passes across the full bounding-box face.\n'
@@ -508,15 +514,21 @@ class SmartRibbon(QWidget):
         self._mesh_radio.setToolTip(
             'Slices directly through the mesh triangles.\n'
             'Accurate on complex curved surfaces.')
-        for r in (self._bbox_radio, self._face_grid_radio, self._mesh_radio):
+        self._mesh_flow_radio.setToolTip(
+            'Region-local, surface-adaptive raster planner (in development).\n'
+            'Several production decisions are still unresolved — see the Mesh Flow spec.')
+        for r in (self._bbox_radio, self._face_grid_radio, self._mesh_radio, self._mesh_flow_radio):
             r.setStyleSheet(_RADIO_CSS)
         self._target_grp = QButtonGroup(self)
         self._target_grp.addButton(self._bbox_radio,      0)
         self._target_grp.addButton(self._face_grid_radio, 2)
         self._target_grp.addButton(self._mesh_radio,      1)
+        self._target_grp.addButton(self._mesh_flow_radio, 3)
         target_vl.addWidget(self._bbox_radio)
         target_vl.addWidget(self._face_grid_radio)
         target_vl.addWidget(self._mesh_radio)
+        target_vl.addWidget(self._mesh_flow_radio)
+        self._mesh_flow_radio.setVisible(MESH_FLOW_UI_ENABLED)
         target_w = QWidget()
         target_w.setLayout(target_vl)
         target_w.setMinimumWidth(100)
@@ -858,6 +870,8 @@ class SmartRibbon(QWidget):
             return 'bbox'
         if self._face_grid_radio.isChecked():
             return 'face_grid'
+        if self._mesh_flow_radio.isChecked():
+            return 'mesh_flow'
         return 'mesh'
 
     def get_standoff_mm(self) -> float:

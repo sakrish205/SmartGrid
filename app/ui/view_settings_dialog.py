@@ -25,6 +25,7 @@ DEFAULTS: dict[str, str] = {
     'waypoint':       '#FFD700',
     'grid':           '#546e7a',
     'face_highlight': '#FFD700',
+    'face_highlight_negative': '#E53935',
     # line widths
     'arrow_line_width': '4.0',
     'pass_line_width':  '5.0',
@@ -41,6 +42,7 @@ _COLOR_LABELS: dict[str, str] = {
     'waypoint':       'Waypoints',
     'grid':           'Grid lines',
     'face_highlight': 'Face highlight',
+    'face_highlight_negative': 'Face highlight (excluded)',
 }
 
 

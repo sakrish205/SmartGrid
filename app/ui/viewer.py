@@ -441,7 +441,9 @@ class MeshViewer(QWidget):
     # Bbox face highlights (yellow) — mesh is never touched
     # ------------------------------------------------------------------
 
-    def highlight_bbox_region(self, region: str, selected: bool) -> None:
+    def highlight_bbox_region(self, region: str, selected: bool, negative: bool = False) -> None:
+        """negative=True paints the Mesh Flow exclusion color instead of the
+        normal inclusive-selection color (self._colors['face_highlight'])."""
         key = f'bbox_face_{region}'
         if key in self._actors:
             self.plotter.remove_actor(self._actors.pop(key))
@@ -453,9 +455,10 @@ class MeshViewer(QWidget):
                 self._mesh_data.up_axis,
             )
             if face_mesh is not None:
+                color_key = 'face_highlight_negative' if negative else 'face_highlight'
                 actor = self.plotter.add_mesh(
                     face_mesh,
-                    color=self._colors['face_highlight'],
+                    color=self._colors[color_key],
                     opacity=0.45,
                     show_edges=True,
                     edge_color='#FFC107',

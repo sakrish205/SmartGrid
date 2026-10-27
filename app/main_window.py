@@ -37,6 +37,7 @@ from app.ui.view_settings_dialog import ViewSettingsDialog, DEFAULTS as _COLOR_D
 
 _SIDE_REGIONS = frozenset({'FRONT', 'REAR', 'LEFT', 'RIGHT'})
 _TB_REGIONS   = frozenset({'TOP', 'BOTTOM'})
+_ALL_REGIONS  = _SIDE_REGIONS | _TB_REGIONS
 
 
 def _group_for_mesh(selected_regions, model):
@@ -424,6 +425,50 @@ class _PathWorker(QThread):
                     if self._standoff_mm > 0.0:
                         route = _offset_route_by_standoff(route, mesh, self._standoff_mm)
                     routes.append(route)
+            self.finished.emit(routes)
+        except Exception as exc:
+            self.error.emit(f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
+
+
+class _MeshFlowWorker(QThread):
+    """Mesh Flow (Phase 3) — region-local, surface-adaptive raster. Modeled on
+    _PathWorker above but fully parallel to Mesh Surface's generate_route(), never
+    calling into it."""
+    finished = Signal(object)
+    error    = Signal(str)
+
+    def __init__(
+        self,
+        mesh_data,
+        selected_region_ids: list[str],
+        spray_mm: float,
+        waypoint_spacing_mm: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self._mesh_data           = mesh_data
+        self._selected_region_ids = selected_region_ids
+        self._spray_mm            = spray_mm
+        self._waypoint_spacing    = waypoint_spacing_mm
+
+    def run(self) -> None:
+        try:
+            from app.meshflow.region_manager import build_regions
+            from app.meshflow.core_generator import generate_mesh_flow_route
+            from app.meshflow.open_decisions import LanePitchStrategy
+            from app.path.path_model import RegionConfidence
+
+            regions = build_regions(self._mesh_data, self._selected_region_ids)
+            routes = []
+            for region in regions:
+                if region.confidence is RegionConfidence.REJECTED:
+                    continue
+                route = generate_mesh_flow_route(
+                    self._mesh_data, region,
+                    lane_pitch_strategy=LanePitchStrategy.EXPLICIT_SETTING,
+                    explicit_pitch_mm=self._spray_mm,
+                    waypoint_spacing_mm=self._waypoint_spacing,
+                )
+                routes.append(route)
             self.finished.emit(routes)
         except Exception as exc:
             self.error.emit(f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
@@ -968,22 +1013,35 @@ class MainWindow(QMainWindow):
         else:
             self._ribbon.set_direction(self._ribbon.get_direction(), lock=False)
 
+    def _is_mesh_flow_mode(self) -> bool:
+        return self._ribbon.get_path_target() == 'mesh_flow'
+
+    def _region_selection_status(self) -> str:
+        """Mesh Flow's selection is inverted (clicked = excluded), so the status
+        bar must say so — everywhere else it's a normal inclusive selection."""
+        n = len(self._selected_regions)
+        verb, empty_msg = (
+            ('excluded', 'Click a bounding box face to exclude it (e.g. a hanger/mount point).')
+            if self._is_mesh_flow_mode() else
+            ('selected', 'Click a bounding box face to select it.')
+        )
+        if not n:
+            return empty_msg
+        return f'{n} region(s) {verb}: {", ".join(sorted(self._selected_regions))}'
+
     def _on_bbox_region_clicked(self, region: str) -> None:
         if self._viewer is None:
             return
+        negative = self._is_mesh_flow_mode()
         if region in self._selected_regions:
             self._selected_regions.discard(region)
             self._viewer.highlight_bbox_region(region, False)
             self._ribbon.set_region_checked(region, False)
         else:
             self._selected_regions.add(region)
-            self._viewer.highlight_bbox_region(region, True)
+            self._viewer.highlight_bbox_region(region, True, negative=negative)
             self._ribbon.set_region_checked(region, True)
-        n = len(self._selected_regions)
-        self.statusBar().showMessage(
-            f'{n} region(s) selected: {", ".join(sorted(self._selected_regions))}'
-            if n else 'Click a bounding box face to select it.'
-        )
+        self.statusBar().showMessage(self._region_selection_status())
         self._auto_set_direction()
         self._update_grid()
 
@@ -996,12 +1054,8 @@ class MainWindow(QMainWindow):
             self._selected_regions.add(region_id)
         else:
             self._selected_regions.discard(region_id)
-        self._viewer.highlight_bbox_region(region_id, checked)
-        n = len(self._selected_regions)
-        self.statusBar().showMessage(
-            f'{n} region(s) selected: {", ".join(sorted(self._selected_regions))}'
-            if n else 'Click a bounding box face to select it.'
-        )
+        self._viewer.highlight_bbox_region(region_id, checked, negative=self._is_mesh_flow_mode())
+        self.statusBar().showMessage(self._region_selection_status())
         self._auto_set_direction()
         self._update_grid()
 
@@ -1018,6 +1072,8 @@ class MainWindow(QMainWindow):
             mode = 'Face Grid / Adaptive'
         elif path_target == 'face_grid' and submode == 'mesh_standoff':
             mode = 'Face Grid / Conform'
+        elif path_target == 'mesh_flow':
+            mode = 'Mesh Flow'
         else:
             mode = 'Mesh Surface'
 
@@ -1054,6 +1110,8 @@ class MainWindow(QMainWindow):
             self._generate_bbox(spray_mm)
         elif path_target == 'face_grid':
             self._generate_face_grid(spray_mm)
+        elif path_target == 'mesh_flow':
+            self._generate_mesh_flow(spray_mm)
         else:
             self._generate_mesh(spray_mm)
 
@@ -1268,6 +1326,40 @@ class MainWindow(QMainWindow):
                              standoff_mm=self._ribbon.get_standoff_mm(),
                              direction=self._ribbon.get_direction(),
                              robot_profile=None)   # always slice+stitch, never geodesic
+        self._face_grid_planes_cache = None
+        self._adaptive_grid_cache    = None
+        self._viewer.clear_face_grid_planes()
+        self._viewer.show_bbox(True)
+        worker.finished.connect(self._on_route_ready)
+        worker.error.connect(self._on_route_error)
+        self._worker = worker
+        worker.start()
+
+    def _generate_mesh_flow(self, spray_mm: float) -> None:
+        """Mesh Flow (Phase 3, beta — see convertmdfiles' Mesh Flow implementation
+        plan). Selection is INVERTED relative to Boundary Box/Face Grid: the
+        face(s) the user clicks are excluded (e.g. a hanger/mount point), and
+        generation runs on the complement — every other region, merged into one
+        path by _on_route_ready's existing merge_routes call. Regions the region
+        manager rejects (e.g. no faces classified) are silently skipped, not
+        generated."""
+        if not self._selected_regions:
+            QMessageBox.warning(self, 'No exclusion selected',
+                'Mesh Flow generates on every region except the one(s) you select.\n'
+                'Click a bounding box face to exclude it (e.g. a hanger/mount point), then generate.')
+            return
+        positive_regions = sorted(_ALL_REGIONS - self._selected_regions)
+        if not positive_regions:
+            QMessageBox.warning(self, 'Nothing to generate',
+                'All regions are excluded — nothing remains to generate a path on.')
+            return
+        wpt_mm = self._ribbon.get_waypoint_spacing_mm()
+        self._ribbon.set_generating(True)
+        self.statusBar().showMessage('Generating Mesh Flow paths…')
+        worker = _MeshFlowWorker(
+            self._model.data, positive_regions, spray_mm,
+            waypoint_spacing_mm=wpt_mm,
+        )
         self._face_grid_planes_cache = None
         self._adaptive_grid_cache    = None
         self._viewer.clear_face_grid_planes()
@@ -1768,6 +1860,74 @@ with JSON / CSV / OLP export.</p>
                 'gcode':     export_gcode,
             }[fmt_key]
             fn(self._current_routes, path, params=params, speeds_map=speeds_map)
+            self.statusBar().showMessage(f'Exported: {path}')
+        except Exception as exc:
+            QMessageBox.critical(self, 'Export error', str(exc))
+            self.statusBar().showMessage('Export failed.')
+
+    def _export_olp_mesh_flow(self) -> None:
+        """Mesh Flow (beta) export — a sibling to _export_olp; Mesh Surface's
+        export path above is untouched. Every Mesh Flow route must pass
+        app.meshflow.export_gate.enforce_export_gate before any exporter
+        function is called — there is no code path from a mesh_flow route to
+        a written robot-executable file that skips this gate."""
+        if not self._current_routes:
+            QMessageBox.warning(self, 'Nothing to export', 'Generate a Mesh Flow path first.')
+            return
+
+        from app.meshflow.export_gate import ExportBlocked, _FORMAT_EXPORT_KIND, enforce_export_gate
+        from app.meshflow.open_decisions import (
+            AcceptanceTolerances, OpenDecisionBlocked, ToolAxisConvention, tool_axis_convention_for,
+        )
+
+        dlg = _OlpExportDialog(self._OLP_FORMATS, profile_speed_mmpm=None, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        fmt_label, speed_mode, custom_speed = dlg.values()
+        fmt_key, file_filter, ext = self._OLP_FORMATS[fmt_label]
+        export_kind = _FORMAT_EXPORT_KIND[fmt_key]
+
+        controller_by_format = {'abb_rapid': 'ABB', 'fanuc_ls': 'FANUC', 'durr': 'DURR'}
+        if fmt_key in controller_by_format:
+            try:
+                convention = tool_axis_convention_for(controller_by_format[fmt_key])
+            except OpenDecisionBlocked as exc:
+                QMessageBox.warning(self, 'Export blocked', str(exc))
+                return
+        else:
+            # No defined controller for this format (generic/CAD) — unverified
+            # by construction; only matters for ROBOT_EXECUTABLE formats.
+            convention = ToolAxisConvention(controller=fmt_key.upper(), verified=False)
+
+        mesh = self._model.data.trimesh_mesh
+        tolerances = AcceptanceTolerances()   # decisions #4/#5 not yet configurable in the UI
+        try:
+            for route in self._current_routes:
+                enforce_export_gate(route, mesh, tolerances, convention, export_kind)
+        except ExportBlocked as exc:
+            findings_text = '\n'.join(
+                f'[{f.severity}] {f.rule_or_formula}: {f.message}' for f in exc.report.findings
+            )
+            QMessageBox.warning(
+                self, 'Export blocked',
+                f'This Mesh Flow route is not yet validated for robot-executable export:\n\n{findings_text}',
+            )
+            return
+
+        path, _ = QFileDialog.getSaveFileName(self, f'Export {fmt_label}', '', file_filter)
+        if not path:
+            return
+        if not path.lower().endswith(ext):
+            path += ext
+
+        params = self._last_params
+        fn = {
+            'abb_rapid': export_abb_rapid, 'fanuc_ls': export_fanuc_ls, 'durr': export_durr,
+            'cad_dxf': export_cad_dxf, 'robodk': export_robodk, 'vc': export_vc,
+            'delmia': export_delmia_apt, 'gcode': export_gcode,
+        }[fmt_key]
+        try:
+            fn(self._current_routes, path, params=params, speeds_map=None)
             self.statusBar().showMessage(f'Exported: {path}')
         except Exception as exc:
             QMessageBox.critical(self, 'Export error', str(exc))
