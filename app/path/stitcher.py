@@ -48,8 +48,11 @@ def stitch_segments(
     degree = {nid: len(neighbours) for nid, neighbours in adj.items()}
     starts = [nid for nid, d in degree.items() if d == 1]
 
-    # If no degree-1 nodes exist all chains are closed loops; start anywhere
+    # If no degree-1 nodes exist all chains are closed loops; start anywhere.
+    # adj can be empty when every segment quantized to a zero-length edge (a==b).
     if not starts:
+        if not adj:
+            return []
         starts = [next(iter(adj))]
 
     # --- Step 5: Walk chains ---

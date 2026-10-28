@@ -35,7 +35,7 @@ def _arc_length(pts: np.ndarray) -> float:
 _MIN_CHAIN_LENGTH_FRACTION = 0.1   # vs. this plane's own longest chain — see _significant_polylines
 
 
-def _significant_polylines(polylines: list[np.ndarray]) -> list[np.ndarray]:
+def _significant_polylines(polylines: list[np.ndarray], cover_all: bool = False) -> list[np.ndarray]:
     """Keep every stitched chain substantial enough to be a real pass on this plane,
     not just the single longest.
 
@@ -53,13 +53,13 @@ def _significant_polylines(polylines: list[np.ndarray]) -> list[np.ndarray]:
     candidates = [np.asarray(p, dtype=float) for p in polylines if len(p) >= 2]
     if not candidates:
         return []
+    if cover_all:
+        return candidates
     lengths = [_arc_length(p) for p in candidates]
     cutoff = max(lengths) * _MIN_CHAIN_LENGTH_FRACTION
     return [p for p, length in zip(candidates, lengths) if length >= cutoff]
 
 
-_MIN_COMPONENT_FACES_FOR_OWN_FRAME = 15   # below this, a PCA/mean-normal fit is too
-# noisy to trust on its own — borrow the region's largest component's frame instead.
 
 
 def _region_components(mesh: trimesh.Trimesh, face_indices: np.ndarray) -> list[np.ndarray]:
@@ -100,6 +100,7 @@ def generate_mesh_flow_route(
     waypoint_spacing_mm: float = 0.0,
     user_direction: np.ndarray | None = None,
     standoff_mm: float = 0.0,
+    cover_all: bool = False,
 ) -> PaintRoute:
     """R1/R3/R4/R5 — generate a boustrophedon PaintRoute for one region.
 
@@ -146,9 +147,13 @@ def generate_mesh_flow_route(
     region.primary_direction = largest_direction
     region.spacing_direction = largest_spacing
 
-    mean_normal = mesh.face_normals[region.face_indices].mean(axis=0)
-    mean_normal_norm = np.linalg.norm(mean_normal)
-    spray_normal = mean_normal / mean_normal_norm if mean_normal_norm > 1e-9 else np.zeros(3)
+    # Outward normal derived from the LARGEST component only, not all region faces.
+    # Interior faces (cabin floor, cavity walls) contaminate the whole-region mean
+    # and can flip it, causing the hemisphere filter to invert and drop exterior faces.
+    # The largest component is the dominant exterior panel — its mean is reliable.
+    largest_mean_n = mesh.face_normals[components[0]].mean(axis=0)
+    largest_mean_n_norm = np.linalg.norm(largest_mean_n)
+    spray_normal = largest_mean_n / largest_mean_n_norm if largest_mean_n_norm > 1e-9 else np.zeros(3)
 
     pitch_mm = _lane_planner.resolve_lane_pitch(explicit_pitch_mm, lane_pitch_strategy)
     region.lane_pitch_mm = pitch_mm
@@ -163,13 +168,20 @@ def generate_mesh_flow_route(
     visible_count = 0   # counts planes that actually produced a pass — drives alternation (F41)
 
     for component_faces in components:
-        if len(component_faces) < _MIN_COMPONENT_FACES_FOR_OWN_FRAME:
-            d_hat, s_hat = largest_direction, largest_spacing
-        else:
-            d_hat, s_hat = _direction_estimator.local_scan_frame(
-                MeshFlowRegion(region_id=region.region_id, face_indices=component_faces),
-                mesh, user_direction,
-            )
+        # Drop faces pointing strongly away from the region's outward direction —
+        # true interior surfaces (cavity walls, underside panels) have normals at
+        # 120°–180° from the outward direction (dot < -0.5). Edge/transition faces
+        # (door frames, window sills) are at ~90° (dot ≈ 0) and must be kept.
+        # Threshold -0.5 removes only genuinely inward-pointing faces, not edges.
+        outward_mask = mesh.face_normals[component_faces] @ spray_normal > -0.5
+        component_faces = component_faces[outward_mask]
+        if len(component_faces) == 0:
+            continue
+
+        # All components share the largest component's scan frame so every pass
+        # in the region is parallel — same angle, same spacing direction.
+        # Per-component frames caused angle drift between panels (issue 3).
+        d_hat, s_hat = largest_direction, largest_spacing
 
         sub_region = MeshFlowRegion(
             region_id=region.region_id, face_indices=component_faces,
@@ -179,7 +191,7 @@ def generate_mesh_flow_route(
 
         for plane_normal, plane_origin, position in planes:
             polylines = _surface_intersector.intersect_region(mesh, sub_region, plane_normal, plane_origin)
-            chains = _significant_polylines(polylines)
+            chains = _significant_polylines(polylines, cover_all=cover_all)
             if not chains:
                 continue
 

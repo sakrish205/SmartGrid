@@ -52,22 +52,46 @@ def generate_lane_planes(
         raise ValueError("pitch_mm must be positive")
 
     s_hat = region.spacing_direction
-    verts = mesh.vertices[mesh.faces[region.face_indices].ravel()]
-    p0 = verts.mean(axis=0)
+    face_centroids = mesh.triangles_center[region.face_indices]
+    face_normals = mesh.face_normals[region.face_indices]
+    p0 = face_centroids.mean(axis=0)
 
-    s_coords = (verts - p0) @ s_hat
+    s_coords = (face_centroids - p0) @ s_hat
     s_min = float(s_coords.min())
     s_max = float(s_coords.max())
     span = s_max - s_min
 
-    n = int(np.floor(span / pitch_mm)) + 1   # F12
-    n = max(1, n)
-    step = span / n
-    first = s_min + step / 2.0
+    # F11/F12 with curvature-adaptive pitch:
+    #   pitch(s) = base_pitch × |s_hat × n(s)|
+    # |s_hat × n| = sin(angle between spacing direction and local surface normal).
+    # On a flat region perpendicular to s_hat this equals 1 (no change).
+    # Where the surface tilts toward s_hat (curved hump peak), sin shrinks → denser
+    # planes → on-surface gap stays ≤ spray_width everywhere.
+    # Floor at 0.15 × base_pitch prevents infinite density on near-degenerate geometry.
+    # n_min from F12 is preserved as a lower bound — adaptive pitch only adds planes.
+    _PITCH_FLOOR = 0.15
+
+    n_min = max(1, int(np.floor(span / pitch_mm)) + 1)   # F12 floor
+    cell = span / n_min   # uniform cell width used only for initial centering offset
+
+    def _local_factor(s: float) -> float:
+        mask = np.abs(s_coords - s) <= (pitch_mm / 2.0)
+        if not mask.any():
+            return 1.0
+        mean_n = face_normals[mask].mean(axis=0)
+        norm = np.linalg.norm(mean_n)
+        if norm < 1e-9:
+            return 1.0
+        f = float(np.linalg.norm(np.cross(s_hat, mean_n / norm)))
+        return max(f, _PITCH_FLOOR)
 
     planes: list[tuple[np.ndarray, np.ndarray, float]] = []
-    for k in range(n):
-        pos = first + k * step
-        origin = p0 + pos * s_hat
-        planes.append((s_hat.copy(), origin, pos))
+    s = s_min + cell / 2.0   # centre first plane in its cell (same as original F12)
+    while True:
+        origin = p0 + s * s_hat
+        planes.append((s_hat.copy(), origin, s))
+        s += pitch_mm * _local_factor(s)
+        if s > s_max and len(planes) >= n_min:
+            break
+
     return planes

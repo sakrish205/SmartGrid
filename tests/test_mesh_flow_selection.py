@@ -34,6 +34,9 @@ class _FakeRibbon:
     def get_standoff_mm(self) -> float:
         return 15.0
 
+    def get_cover_all(self) -> bool:
+        return False
+
     def set_generating(self, generating: bool) -> None:
         pass
 
@@ -50,7 +53,7 @@ class _FakeWorker:
     """Stand-in for _MeshFlowWorker: captures constructor args, never runs."""
     instances: list['_FakeWorker'] = []
 
-    def __init__(self, mesh_data, selected_region_ids, spray_mm, waypoint_spacing_mm=0.0, standoff_mm=0.0):
+    def __init__(self, mesh_data, selected_region_ids, spray_mm, waypoint_spacing_mm=0.0, standoff_mm=0.0, cover_all=False):
         self.selected_region_ids = selected_region_ids
         self.standoff_mm = standoff_mm
         self.finished = types.SimpleNamespace(connect=lambda *_a, **_k: None)

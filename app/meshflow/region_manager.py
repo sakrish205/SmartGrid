@@ -28,7 +28,7 @@ _ACCEPT_MEAN_SCORE = 0.6
 _MIN_COMPONENT_AREA_FRACTION = 0.02
 
 
-def _significant_connected_components(mesh: trimesh.Trimesh, face_indices: np.ndarray) -> np.ndarray:
+def _significant_connected_components(mesh: trimesh.Trimesh, face_indices: np.ndarray, cover_all: bool = False) -> np.ndarray:
     """Restrict face_indices to every connected patch substantial enough to be a
     real panel, dropping only classification noise.
 
@@ -52,6 +52,8 @@ def _significant_connected_components(mesh: trimesh.Trimesh, face_indices: np.nd
     above that cliff restores full real coverage while still excluding the
     unrelated small parts that caused the original inside-the-mesh defect.
     """
+    if cover_all:
+        return face_indices
     if len(face_indices) <= 1:
         return face_indices
     adjacency = mesh.face_adjacency
@@ -73,6 +75,7 @@ def build_regions(
     selected_region_ids: list[str],
     boundary_policy: RegionBoundaryPolicy = RegionBoundaryPolicy.EXPLICIT_FACE_SELECTION,
     classification_threshold: float = 0.42,
+    cover_all: bool = False,
 ) -> list[MeshFlowRegion]:
     """Build MeshFlowRegion records for the selected named regions (R1).
 
@@ -102,7 +105,7 @@ def build_regions(
             continue
 
         raw_count = len(face_indices)
-        face_indices = _significant_connected_components(mesh, face_indices)
+        face_indices = _significant_connected_components(mesh, face_indices, cover_all=cover_all)
         dropped_note = (
             f"; restricted to significant connected surface patches "
             f"({len(face_indices)}/{raw_count} faces kept)"

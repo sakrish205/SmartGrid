@@ -12,7 +12,7 @@ SmartGrid solves the **manufacturing process-planning problem** of generating sy
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green)](https://pypi.org/project/PySide6/)
-[![Version](https://img.shields.io/badge/version-1.8.0-informational)]()
+[![Version](https://img.shields.io/badge/version-1.9.0-informational)]()
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
 ---
@@ -53,6 +53,64 @@ Export
         ├── JSON   (waypoints + normals + speed)
         ├── CSV    (flat table)
         └── OLP    (RoboDK / VC / Delmia / G-code)
+```
+
+---
+
+## Improvements (v1.9 — Mesh Flow: Coverage Fixes, Adaptive Pitch, Cover All Toggle)
+
+### 1. Interior-face filter — `core_generator.py`
+
+Faces pointing strongly away from the region's outward direction (interior cavity walls, underside panels — dot product < −0.5 with the outward normal) are now filtered out before lane generation. The outward reference normal is derived from the **largest connected component only** — not all region faces — so interior faces cannot contaminate the reference and flip the filter.
+
+```python
+# spray_normal derived from largest component only (never all region faces)
+largest_mean_n = mesh.face_normals[components[0]].mean(axis=0)
+spray_normal = largest_mean_n / np.linalg.norm(largest_mean_n)
+
+# threshold -0.5: removes faces at >120° from outward, keeps edge/transition faces at ~90°
+outward_mask = mesh.face_normals[component_faces] @ spray_normal > -0.5
+```
+
+### 2. Curvature-adaptive lane pitch — `lane_planner.py`
+
+Lane spacing now adapts to local surface curvature. On a flat surface the spacing equals the configured pitch; on a curved hump (where the spacing direction `s_hat` and the local normal diverge) the spacing tightens to maintain true arc-length coverage:
+
+```
+pitch(s) = base_pitch × |s_hat × n(s)|   =   base_pitch × sin(φ)
+```
+
+where `φ` is the angle between the spacing direction and the local surface normal. A floor `_PITCH_FLOOR = 0.15` prevents degenerate collapse. The F12 minimum plane count `n_min = max(1, floor(span/pitch) + 1)` is preserved as a hard floor — the loop continues until both `s > s_max` and `len(planes) >= n_min`.
+
+### 3. Unified scan frame across all components — `core_generator.py`
+
+All connected components in a region now share the **largest component's** `d_hat` / `s_hat` scan frame instead of computing a separate frame per component. This eliminates angle drift between adjacent panels (door → sill → roof) that caused visually inconsistent pass angles:
+
+```python
+# All components use the largest component's frame — parallel passes, consistent angle
+d_hat, s_hat = largest_direction, largest_spacing
+```
+
+### 4. Cover All Regions toggle — `ribbon.py`, `region_manager.py`, `core_generator.py`, `main_window.py`
+
+A **Cover All Regions** checkbox (below the Mesh Flow radio button) bypasses the two noise-rejection filters that can leave gaps on simple single-body parts:
+
+| Filter | Normal behaviour | Cover All ON |
+|---|---|---|
+| Region 2% area filter (`region_manager`) | Drops components < 2% of largest component's area | All components kept |
+| 10% chain-length filter (`core_generator`) | Drops intersection chains < 10% of plane's longest chain | All chains kept |
+
+Use on simple single-body parts or when coverage gaps appear. Leave off on real multi-part meshes with bracket/liner noise.
+
+### 5. StopIteration crash fix — `stitcher.py`
+
+When a lane plane intersects a region at a near-degenerate angle, all segments quantize to zero-length edges (`a == b`) and are skipped during adjacency construction, leaving the `adj` dict empty. `next(iter(adj))` then raised `StopIteration`. Fixed with an early `return []` guard:
+
+```python
+if not starts:
+    if not adj:      # all segments were zero-length after quantisation
+        return []
+    starts = [next(iter(adj))]
 ```
 
 ---
@@ -855,9 +913,9 @@ for pts in chains:
     normals[wrong_side] *= -1.0                           # self-correct, then re-offset
 ```
 
-**Strengths:** Exclude-then-complement selection matches how a hanger/fixture is specified in practice. Region- and component-aware face selection plus per-point, region-restricted standoff keep waypoints on the correct physical surface even on multi-part, non-watertight real-world meshes. Mandatory hard-gate validation before export (no other mode validates this strictly).  
-**Limitation:** Beta. Lane pitch from spray width/reference (F39/F40) and region boundary policies beyond explicit face selection are still open decisions. The scan frame (step 2) is still fit once per *region*, not per connected component — a compound-curved sub-panel whose orientation diverges sharply from the region's blended average can be under-covered until that's fit per-component.  
-**Best for:** excluding a known hanger/fixture region and painting everything else in one route, on real multi-part meshes — not yet a drop-in replacement for the other four modes on production jobs.
+**Strengths:** Exclude-then-complement selection matches how a hanger/fixture is specified in practice. Region- and component-aware face selection plus per-point, region-restricted standoff keep waypoints on the correct physical surface even on multi-part, non-watertight real-world meshes. Unified scan frame across all components ensures consistent parallel pass angles. Curvature-adaptive pitch maintains coverage on curved humps. Interior-face hemisphere filter prevents cavity walls from being painted. Mandatory hard-gate validation before export (no other mode validates this strictly).  
+**Limitation:** Beta. Lane pitch from spray width/reference (F39/F40) and region boundary policies beyond explicit face selection are still open decisions.  
+**Best for:** excluding a known hanger/fixture region and painting everything else in one route, on real multi-part meshes.
 
 ---
 
@@ -1035,6 +1093,7 @@ Connector (air) moves are always written as rapid/travel — speed control appli
 | **Interval** | Waypoint resampling spacing |
 | **Grid** | Display pitch-division lines |
 | **Arrows** | Show travel direction as chevron tick marks |
+| **Cover All Regions** | (Mesh Flow only) Bypass the 2% area and 10% chain-length noise filters — every surface patch is painted regardless of size |
 | **Generate Path** | Generate the selected toolpath |
 | **Clear Path** | Remove generated paths |
 | **View Settings** | Configure 3D display and mesh rendering colours |
@@ -1287,10 +1346,19 @@ SmartGrid/
 │   │   ├── generator.py       — Mesh Surface: thin delegation to generate_conform_route
 │   │   ├── local_normals.py   — interpolate_normals, build_tcp_frames (Noether createTransform)
 │   │   ├── slicer.py
-│   │   ├── stitcher.py
-│   │   ├── connector.py
+│   │   ├── stitcher.py        — segment-graph polyline stitcher; StopIteration guard
+│   │   ├── connector.py       — greedy nearest-neighbour pass reorder + air-move connectors
 │   │   ├── resampler.py
 │   │   └── collision.py       — detect_collisions() — hard collision + near-miss
+│   ├── meshflow/              — Mesh Flow (beta) parallel pipeline
+│   │   ├── core_generator.py  — per-component scan frame, adaptive pitch, outward filter
+│   │   ├── lane_planner.py    — curvature-adaptive lane planes (F11/F12)
+│   │   ├── region_manager.py  — significant-component filter, cover_all bypass
+│   │   ├── direction_estimator.py
+│   │   ├── surface_intersector.py
+│   │   ├── transition_planner.py
+│   │   ├── open_decisions.py
+│   │   └── safety_validator.py
 │   └── export/
 │       ├── json_export.py
 │       ├── csv_export.py

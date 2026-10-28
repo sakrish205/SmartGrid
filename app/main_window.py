@@ -444,6 +444,7 @@ class _MeshFlowWorker(QThread):
         spray_mm: float,
         waypoint_spacing_mm: float = 0.0,
         standoff_mm: float = 0.0,
+        cover_all: bool = False,
     ) -> None:
         super().__init__()
         self._mesh_data           = mesh_data
@@ -451,6 +452,7 @@ class _MeshFlowWorker(QThread):
         self._spray_mm            = spray_mm
         self._waypoint_spacing    = waypoint_spacing_mm
         self._standoff_mm         = standoff_mm
+        self._cover_all           = cover_all
 
     def run(self) -> None:
         try:
@@ -459,7 +461,7 @@ class _MeshFlowWorker(QThread):
             from app.meshflow.open_decisions import LanePitchStrategy
             from app.path.path_model import RegionConfidence
 
-            regions = build_regions(self._mesh_data, self._selected_region_ids)
+            regions = build_regions(self._mesh_data, self._selected_region_ids, cover_all=self._cover_all)
             routes = []
             dropped: list[str] = []
             for region in regions:
@@ -472,6 +474,7 @@ class _MeshFlowWorker(QThread):
                     explicit_pitch_mm=self._spray_mm,
                     waypoint_spacing_mm=self._waypoint_spacing,
                     standoff_mm=self._standoff_mm,
+                    cover_all=self._cover_all,
                 )
                 if route.total_passes == 0:
                     dropped.append(region.region_id)
@@ -1369,6 +1372,7 @@ class MainWindow(QMainWindow):
             self._model.data, positive_regions, spray_mm,
             waypoint_spacing_mm=wpt_mm,
             standoff_mm=self._ribbon.get_standoff_mm(),
+            cover_all=self._ribbon.get_cover_all(),
         )
         self._face_grid_planes_cache = None
         self._adaptive_grid_cache    = None
@@ -1709,15 +1713,22 @@ checkboxes in the ribbon. Multiple regions may be selected simultaneously.</p>
   <li><b>Mesh Surface</b> – axis-aligned slices through the mesh. Good for
       organic shapes with complex topology.</li>
   <li><b>Mesh Flow (beta)</b> – selection is <em>inverted</em>: the region(s) you
-      click are excluded (e.g. a hanger mount); every other region is painted
-      as one route. Best for real multi-part meshes. See
-      <b>Help › Path Generation Formulas...</b> for the full algorithm.</li>
+      click are excluded (e.g. a hanger/jig mount); every other region is painted
+      as one route. Interior faces are filtered automatically; lane spacing adapts
+      to surface curvature; all panels share a consistent sweep angle.<br>
+      <b>Cover All Regions</b> checkbox: bypass the noise filters when you want
+      every surface patch painted regardless of size. Best for real multi-part meshes.
+      See <b>Help › Path Generation Formulas…</b> for the full algorithm.</li>
 </ul>
 
 <h3>4 · Tune parameters</h3>
-<p>Adjust <b>Spray Width</b>, <b>Standoff</b>, <b>Waypoint Spacing</b>,
-<b>Direction</b> (H / V / Both), and <b>Sweep</b> direction in the ribbon.
-Press <b>Generate</b> (Ctrl+G / F5) to compute the toolpath.</p>
+<p>Adjust <b>Spray Width</b>, <b>Standoff</b>, <b>Direction</b> (H / V / Both), and
+<b>Sweep</b> direction in the ribbon. Press <b>Generate</b> (Ctrl+G / F5) to compute
+the toolpath.</p>
+<p><b>Waypoint spacing:</b> by default every pass is resampled at
+<code>spray_width / 5</code> — evenly-spaced waypoints scaled to the current pitch.
+Tick <b>Custom</b> and enter an explicit interval (mm) to override. Set to 0 to keep
+the raw mesh-intersection point spacing.</p>
 
 <h3>5 · Inspect the result</h3>
 <p><b>Blue</b> passes = forward; <b>Green</b> passes = reverse;
@@ -1761,6 +1772,26 @@ For updates and full documentation visit the
 <p style="color:#555">Per-mode algorithm summary. Full derivations and code excerpts are in
 <code>README.md</code> &rarr; <b>Path Generation</b>.</p>
 
+<h3>Standoff &amp; TCP Frame (all modes)</h3>
+<p>Every waypoint P on the mesh surface is offset outward:<br>
+<code>P&prime; = P + standoff_mm &times; n&#x0302;</code><br>
+where <code>n&#x0302;</code> is the relevant outward normal (region mean for BBox/Adaptive/Conform;
+per-point interpolated surface normal for Mesh Flow).</p>
+<p>The robot tool frame at each waypoint follows the Noether <code>createTransform</code> convention:<br>
+<code>Z = &minus;n&#x0302;</code> &nbsp;(gun approach direction, into surface)<br>
+<code>X = normalize(v<sub>travel</sub> &minus; (v<sub>travel</sub>&middot;Z)Z)</code> &nbsp;(travel direction projected onto surface plane)<br>
+<code>Y = Z &times; X</code> &nbsp;(right-hand rule)<br>
+These map to <code>NX/NY/NZ</code> (Z-axis) and <code>TX/TY/TZ</code> (X-axis) in all exports.</p>
+
+<h3>Segment Stitching (all surface modes)</h3>
+<p>Raw plane-intersection output is a bag of unordered <code>(N, 2, 3)</code> segments.
+Stitcher builds a graph: endpoints are quantized to a 0.1&nbsp;&micro;m grid (tolerance
+<code>1e&minus;4</code>&nbsp;mm) and assigned node IDs via <code>np.unique</code>. Degree-1 nodes
+are open endpoints (chain starts); degree-2 nodes are interior; degree-0 or empty graph returns
+<code>[]</code> immediately (degenerate plane, no crash). A depth-first walk visits every edge once
+and collects ordered polylines. Multiple chains per plane (holes, disconnected panels) are all
+returned — <code>_significant_polylines</code> then keeps every chain &ge; 10% of the longest.</p>
+
 <h3>Boundary Box</h3>
 <p>Flat plane fixed at <code>bbox_max[face_axis] + standoff_mm</code>. Pass positions evenly
 spaced <code>step_min + pitch/2 … step_max</code> at interval <code>pitch</code>; passes
@@ -1792,29 +1823,40 @@ zero offset — every waypoint lies on the mesh surface.</p>
 clicked region(s) are excluded; everything else is painted as one route.</p>
 <ol>
 <li><b>Region membership.</b> Each face scored by normal alignment (60%) + bbox-side position
-(40%) against the 6 named directions — a per-face test with no connectivity term, so it can
-merge unrelated surfaces that happen to share a rough direction/position. Restricted to every
-<i>connected</i> surface patch whose area is &ge; 2% of that region's largest patch — real
-panels survive, decoy slivers (trim, nearby small parts) are dropped.</li>
-<li><b>Scan direction (F06/F07).</b> <code>n0</code> = region mean normal; <code>d0</code> =
-PCA principal axis of face centroids (or user direction). <code>d' = d0 &minus; (d0&middot;n0)n0</code>,
-<code>d_hat = normalize(d')</code>, <code>s_hat = normalize(n0 &times; d_hat)</code>.</li>
-<li><b>Lane planes (F11/F12).</b> Planes spaced <code>pitch_mm</code> apart along
-<code>s_hat</code>: <code>N = floor((s_max &minus; s_min)/&Delta;) + 1</code>.</li>
+(40%). Restricted to every connected surface patch whose area is &ge; 2% of the region's largest
+patch — real panels survive, decoy slivers are dropped. <b>Cover All Regions</b> toggle bypasses
+this filter.</li>
+<li><b>Outward-hemisphere filter.</b> Faces with
+<code>face_normal &middot; spray_normal &lt; &minus;0.5</code> are dropped — interior cavity walls
+and underside panels are excluded. <code>spray_normal</code> is derived from the largest component
+only (never all region faces) so interior faces cannot contaminate and flip the reference.</li>
+<li><b>Scan direction &amp; unified frame (F06/F07).</b> Scan frame derived from the largest
+component: <code>n0</code> = mean normal; <code>d0</code> = PCA principal axis of face centroids
+(or user direction). Project out the normal component:
+<code>d&prime; = d0 &minus; (d0&middot;n0)n0</code>,
+<code>d_hat = normalize(d&prime;)</code>,
+<code>s_hat = normalize(n0 &times; d_hat)</code>.
+All components in the region share this frame — parallel passes, consistent angle. Per-component
+frames caused visible angle drift and have been removed.</li>
+<li><b>Curvature-adaptive lane pitch (F11/F12).</b> Lane spacing adapts to local curvature:
+<code>pitch(s) = base_pitch &times; |s_hat &times; n(s)| = base_pitch &times; sin(&phi;)</code>
+where <code>&phi;</code> is the angle between the spacing direction and the local surface normal.
+F12 floor is preserved: <code>n_min = max(1, floor(span/pitch) + 1)</code>.</li>
 <li><b>Intersection.</b> Strict region-face-membership plane cut, segments stitched into
-polylines. Every chain &ge; 10% of that plane's own longest chain becomes its own pass — not
-just the longest — so one plane crossing two real panels keeps coverage on both.</li>
-<li><b>Alternation (F41).</b> Same boustrophedon parity rule as every other mode.</li>
+polylines. Every chain &ge; 10% of that plane's own longest chain is kept (not just the longest)
+so a plane crossing two real panels covers both. <b>Cover All Regions</b> also bypasses this
+chain filter.</li>
+<li><b>Alternation (F41).</b> Same <code>visible_count</code>-parity boustrophedon rule as every
+other mode. Passes are reordered by greedy nearest-neighbour walk before connector planning.</li>
 <li><b>Standoff (F59/C1).</b> Each point offset along its own interpolated normal, looked up
 against a submesh of just this region's own faces (never the full mesh), then self-corrected
 via a local signed-distance test against its nearest triangle.</li>
 <li><b>Pre-export validation.</b> Mandatory hard gates, in order: target-surface membership
-(F56), inside/outside (F57, indeterminate on non-watertight meshes), segment penetration (F58),
-standoff range (F59), orientation jump (F45), collision (F47). Any hard finding blocks export.</li>
+(F56), inside/outside (F57), segment penetration (F58), standoff range (F59), orientation jump
+(F45), collision (F47). Any hard finding blocks export.</li>
 </ol>
 <p style="color:#555">Beta: lane pitch from spray width/reference and region boundary policies
-beyond explicit face selection are still open decisions; the scan frame is still fit once per
-region rather than per connected component.</p>
+beyond explicit face selection are still open decisions.</p>
 
 <hr>
 <p style="color:#555;font-size:11px">
@@ -1844,10 +1886,10 @@ boustrophedon decomposition; Ramer-Douglas-Peucker simplification; Trimesh plane
         tb.setFrameShape(QFrame.Shape.NoFrame)
         tb.setStyleSheet('font-family:"Segoe UI",Arial;font-size:12px;background:transparent;')
         tb.setHtml('''
-<h2 style="margin:0 0 4px 0">SmartGrid  <span style="font-weight:normal;font-size:13px;color:#555">v1.5</span></h2>
+<h2 style="margin:0 0 4px 0">SmartGrid  <span style="font-weight:normal;font-size:13px;color:#555">v1.9</span></h2>
 <p style="margin:0 0 12px 0;color:#555">3D Surface Grid &amp; Pitch Mapper</p>
 <p>Robotic spray-paint toolpath planner for STL, OBJ and STEP meshes.<br>
-Supports Boundary Box, Adaptive, Conform and Mesh Surface path modes
+Supports Boundary Box, Adaptive, Conform, Mesh Surface and Mesh Flow (beta) path modes
 with JSON / CSV / OLP export.</p>
 <p><a href="https://github.com/sakrish205/SmartGrid">github.com/sakrish205/SmartGrid</a></p>
 ''')

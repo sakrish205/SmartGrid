@@ -529,6 +529,13 @@ class SmartRibbon(QWidget):
         target_vl.addWidget(self._mesh_radio)
         target_vl.addWidget(self._mesh_flow_radio)
         self._mesh_flow_radio.setVisible(MESH_FLOW_UI_ENABLED)
+        self._cover_all_check = QCheckBox('Cover All Regions')
+        self._cover_all_check.setToolTip(
+            'When on, bypasses the area and chain-length noise filters.\n'
+            'Every surface patch and intersection chain is painted regardless of size.\n'
+            'Use on simple single-body parts or when coverage gaps appear.')
+        self._cover_all_check.setVisible(MESH_FLOW_UI_ENABLED)
+        target_vl.addWidget(self._cover_all_check)
         target_w = QWidget()
         target_w.setLayout(target_vl)
         target_w.setMinimumWidth(100)
@@ -873,6 +880,9 @@ class SmartRibbon(QWidget):
         if self._mesh_flow_radio.isChecked():
             return 'mesh_flow'
         return 'mesh'
+
+    def get_cover_all(self) -> bool:
+        return self._cover_all_check.isChecked()
 
     def get_standoff_mm(self) -> float:
         return self._standoff_spin.value() * UNIT_TO_MM.get(self._current_unit, 1.0)
