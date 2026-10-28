@@ -161,24 +161,61 @@ def test_interpolate_normals_restricted_to_region_ignores_a_closer_decoy_part():
     )
 
 
-def test_generate_mesh_flow_route_self_corrects_flipped_region_normals(flat_panel_mesh):
-    """Fix C: even when the region's own nearest-triangle normal is wrong
-    (winding flipped directly on the mesh here, bypassing loader-level
-    repair entirely, to isolate Fix C from Fix A), the self-check against
-    the full watertight mesh must still land every waypoint outside."""
+def test_generate_mesh_flow_route_self_corrects_a_partially_flipped_curved_region():
+    """Fix C, honestly scoped: a local signed-distance check can only ever
+    correct a normal that DISAGREES with its geometric neighborhood — on flat
+    geometry, offsetting straight along even a wrong normal re-finds the same
+    triangle (no disagreement possible, proven by direct reproduction: a
+    whole-region flip on a flat box left every point ~10mm inside, undetected,
+    because the points landed inside is_watertight's own boundary-tie blind
+    spot, not because Fix C worked). Curvature is what breaks that symmetry —
+    flip a PARTIAL subset of a curved region's faces (leaving real,
+    correctly-oriented neighbors nearby) and confirm the large majority of
+    waypoints end up correctly radially-outward anyway."""
+    cyl = trimesh.creation.cylinder(radius=50.0, height=200.0, sections=64)
+    data = preprocess(cyl, 'cyl.stl', up_axis=2)
+    region = build_regions(data, ['FRONT'])[0]
+    face_indices = region.face_indices.copy()
+
+    faces = cyl.faces.copy()
+    flip_set = face_indices[::4]   # flip 25% -- enough to prove real correction,
+    faces[flip_set] = faces[flip_set][:, ::-1]   # not so much the mean normal degenerates
+    flipped_cyl = trimesh.Trimesh(vertices=cyl.vertices, faces=faces, process=False)
+
+    data_flipped = preprocess(flipped_cyl, 'cyl.stl', up_axis=2)
+    region_flipped = MeshFlowRegion(region_id='FRONT', face_indices=face_indices)
+
+    route = generate_mesh_flow_route(
+        data_flipped, region_flipped,
+        lane_pitch_strategy=LanePitchStrategy.EXPLICIT_SETTING,
+        explicit_pitch_mm=20.0, standoff_mm=10.0,
+    )
+    assert route.total_passes > 0
+    bad, total = 0, 0
+    for p in route.passes:
+        radial = p.points[:, :2] / np.linalg.norm(p.points[:, :2], axis=1, keepdims=True)
+        dots = np.einsum('ij,ij->i', p.normals[:, :2], radial)
+        bad += int((dots < 0.5).sum())
+        total += len(dots)
+    assert bad / total < 0.25, (
+        f"Fix C corrected too few of the partially-flipped waypoints: {bad}/{total} still wrong"
+    )
+
+
+def test_generate_mesh_flow_route_whole_flat_region_flip_is_fix_as_job_not_fix_c(flat_panel_mesh):
+    """Documents the honest boundary of Fix C, as a regression guard against
+    ever claiming more than it delivers: a WHOLE flat region flipped, with no
+    correctly-oriented local neighbor to disagree with, is NOT something a
+    local check can catch — app.mesh.loader's load-time repair (Fix A,
+    tests/test_mesh_loader.py) is what actually has to prevent this, by
+    construction, before core_generator ever sees the mesh."""
     data = preprocess(flat_panel_mesh, 'panel.stl', up_axis=2)
     region = build_regions(data, ['TOP'])[0]
-    face_indices = region.face_indices.copy()   # fixed before any winding change
+    face_indices = region.face_indices.copy()
 
     faces = flat_panel_mesh.faces.copy()
-    faces[face_indices] = faces[face_indices][:, ::-1]   # flip TOP's winding
+    faces[face_indices] = faces[face_indices][:, ::-1]
     flipped_mesh = trimesh.Trimesh(vertices=flat_panel_mesh.vertices, faces=faces, process=False)
-    assert flipped_mesh.is_watertight
-
-    # Reuse the ORIGINAL (correct) face membership directly instead of
-    # re-classifying the flipped mesh -- classify_regions_with_confidence
-    # would reject these faces from TOP entirely once their normals point
-    # the wrong way, which would test the classifier, not core_generator.
     data_flipped = preprocess(flipped_mesh, 'panel.stl', up_axis=2)
     region_flipped = MeshFlowRegion(region_id='TOP', face_indices=face_indices)
 
@@ -188,10 +225,12 @@ def test_generate_mesh_flow_route_self_corrects_flipped_region_normals(flat_pane
         explicit_pitch_mm=30.0, standoff_mm=10.0,
     )
     assert route.total_passes > 0
-    all_points = np.concatenate([p.points for p in route.passes], axis=0)
-    inside = surface_safety.inside_mesh_mask(all_points, flipped_mesh)
-    assert inside is not None
-    assert not inside.any(), "Fix C failed to self-correct flipped region normals"
+    for p in route.passes:
+        assert np.all(p.normals[:, 2] < 0), (
+            "if this ever starts failing, Fix C's local check started correcting "
+            "whole-flat-region flips somehow -- re-verify the mechanism before "
+            "treating that as good news, since the geometry says it shouldn't be possible"
+        )
 
 
 def test_resolve_lane_pitch_from_width_overlap_raises_open_decision_blocked():
