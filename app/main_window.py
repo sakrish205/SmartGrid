@@ -761,6 +761,7 @@ class MainWindow(QMainWindow):
 
         help_menu = mb.addMenu('Help')
         help_menu.addAction('How to Use SmartGrid...', self._show_help)
+        help_menu.addAction('Path Generation Formulas...', self._show_formulas)
         help_menu.addSeparator()
         help_menu.addAction('GitHub Repository',
             lambda: QDesktopServices.openUrl(QUrl('https://github.com/sakrish205/SmartGrid')))
@@ -1707,6 +1708,10 @@ checkboxes in the ribbon. Multiple regions may be selected simultaneously.</p>
       hug the mesh. Use with a standoff distance.</li>
   <li><b>Mesh Surface</b> – axis-aligned slices through the mesh. Good for
       organic shapes with complex topology.</li>
+  <li><b>Mesh Flow (beta)</b> – selection is <em>inverted</em>: the region(s) you
+      click are excluded (e.g. a hanger mount); every other region is painted
+      as one route. Best for real multi-part meshes. See
+      <b>Help › Path Generation Formulas...</b> for the full algorithm.</li>
 </ul>
 
 <h3>4 · Tune parameters</h3>
@@ -1737,6 +1742,91 @@ For updates and full documentation visit the
         btns.rejected.connect(dlg.reject)
         btns.accepted.connect(dlg.accept)
         # Close button maps to rejected; wire accepted too for safety
+        btns.button(QDialogButtonBox.StandardButton.Close).clicked.connect(dlg.accept)
+        vl.addWidget(btns)
+        dlg.exec()
+
+    def _show_formulas(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle('Path Generation Formulas')
+        dlg.setMinimumSize(640, 560)
+        vl = QVBoxLayout(dlg)
+        vl.setContentsMargins(16, 16, 16, 12)
+
+        tb = QTextBrowser()
+        tb.setOpenExternalLinks(True)
+        tb.setStyleSheet('font-family:"Segoe UI",Arial;font-size:12px;')
+        tb.setHtml('''
+<h2 style="margin-top:0">Path Generation — Formulas &amp; Logic</h2>
+<p style="color:#555">Per-mode algorithm summary. Full derivations and code excerpts are in
+<code>README.md</code> &rarr; <b>Path Generation</b>.</p>
+
+<h3>Boundary Box</h3>
+<p>Flat plane fixed at <code>bbox_max[face_axis] + standoff_mm</code>. Pass positions evenly
+spaced <code>step_min + pitch/2 … step_max</code> at interval <code>pitch</code>; passes
+alternate direction (boustrophedon, even index = forward).</p>
+
+<h3>Face Grid — Adaptive</h3>
+<p><code>mean_n</code> = mean normal of forward-facing faces. Orthonormal basis
+<code>pass_vec = normalize(mean_n &times; up)</code>,
+<code>step_vec = normalize(pass_vec &times; mean_n)</code>. Per step position, the outermost
+depth of a &plusmn;<code>pitch&times;0.65</code> vertex band sets that row's spray-plane depth
+(<code>mean_n</code>-tilted, not world-axis). Each pass is a straight polyline through the
+H&times;V grid intersections.</p>
+
+<h3>Face Grid — Conform</h3>
+<p>Same <code>mean_n</code>/<code>pass_vec</code>/<code>step_vec</code> basis as Adaptive, but
+cutting planes (<code>plane_normal = step_vec</code>) are intersected against the actual mesh
+via <code>trimesh.intersections.mesh_plane</code> — paths lie exactly on the surface. Segments
+pass a forward-hemisphere filter (<code>face_normals &middot; mean_n &ge; 0</code>, not the
+region classifier) so boundary/transition faces are included, then are stitched into polylines
+and RDP-simplified (&epsilon; = 0.3&nbsp;mm). Standoff is a uniform shift
+<code>pts += standoff_mm &times; mean_n</code>.</p>
+
+<h3>Mesh Surface</h3>
+<p>Delegates to Face Grid — Conform with <code>standoff_mm = 0</code>. Identical algorithm,
+zero offset — every waypoint lies on the mesh surface.</p>
+
+<h3>Mesh Flow (beta)</h3>
+<p>A fully parallel pipeline (not a variant of the other three). <b>Selection is inverted</b> —
+clicked region(s) are excluded; everything else is painted as one route.</p>
+<ol>
+<li><b>Region membership.</b> Each face scored by normal alignment (60%) + bbox-side position
+(40%) against the 6 named directions — a per-face test with no connectivity term, so it can
+merge unrelated surfaces that happen to share a rough direction/position. Restricted to every
+<i>connected</i> surface patch whose area is &ge; 2% of that region's largest patch — real
+panels survive, decoy slivers (trim, nearby small parts) are dropped.</li>
+<li><b>Scan direction (F06/F07).</b> <code>n0</code> = region mean normal; <code>d0</code> =
+PCA principal axis of face centroids (or user direction). <code>d' = d0 &minus; (d0&middot;n0)n0</code>,
+<code>d_hat = normalize(d')</code>, <code>s_hat = normalize(n0 &times; d_hat)</code>.</li>
+<li><b>Lane planes (F11/F12).</b> Planes spaced <code>pitch_mm</code> apart along
+<code>s_hat</code>: <code>N = floor((s_max &minus; s_min)/&Delta;) + 1</code>.</li>
+<li><b>Intersection.</b> Strict region-face-membership plane cut, segments stitched into
+polylines. Every chain &ge; 10% of that plane's own longest chain becomes its own pass — not
+just the longest — so one plane crossing two real panels keeps coverage on both.</li>
+<li><b>Alternation (F41).</b> Same boustrophedon parity rule as every other mode.</li>
+<li><b>Standoff (F59/C1).</b> Each point offset along its own interpolated normal, looked up
+against a submesh of just this region's own faces (never the full mesh), then self-corrected
+via a local signed-distance test against its nearest triangle.</li>
+<li><b>Pre-export validation.</b> Mandatory hard gates, in order: target-surface membership
+(F56), inside/outside (F57, indeterminate on non-watertight meshes), segment penetration (F58),
+standoff range (F59), orientation jump (F45), collision (F47). Any hard finding blocks export.</li>
+</ol>
+<p style="color:#555">Beta: lane pitch from spray width/reference and region boundary policies
+beyond explicit face selection are still open decisions; the scan frame is still fit once per
+region rather than per connected component.</p>
+
+<hr>
+<p style="color:#555;font-size:11px">
+See <code>README.md</code> for full derivations, code excerpts, and references (Choset 2000
+boustrophedon decomposition; Ramer-Douglas-Peucker simplification; Trimesh plane intersection).
+</p>
+''')
+        vl.addWidget(tb)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btns.rejected.connect(dlg.reject)
+        btns.accepted.connect(dlg.accept)
         btns.button(QDialogButtonBox.StandardButton.Close).clicked.connect(dlg.accept)
         vl.addWidget(btns)
         dlg.exec()

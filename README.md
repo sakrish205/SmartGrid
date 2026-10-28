@@ -672,7 +672,7 @@ The **Select Faces** toolbar button suspends camera rotation (replaces the VTK i
 
 ## Path Generation
 
-SmartGrid provides four toolpath generation modes for different workpiece geometries. Each mode makes a different trade-off between speed, accuracy, and surface fidelity.
+SmartGrid provides five toolpath generation modes for different workpiece geometries. Each mode makes a different trade-off between speed, accuracy, and surface fidelity.
 
 ### Mode comparison
 
@@ -682,8 +682,9 @@ SmartGrid provides four toolpath generation modes for different workpiece geomet
 | **Face Grid — Adaptive** | Normal stats + BVH clip | Tilted plane, per-row depth tracking; penetrating waypoints snapped to surface | Fast | Bonnets, doors, gently curved panels |
 | **Face Grid — Conform** | Trimesh plane intersection | On-surface, tilted cutting planes | Medium | Blended edges, compound curves |
 | **Mesh Surface** | Trimesh plane intersection | On-surface, tilted cutting planes (delegates to Conform, standoff=0) | Medium | Complex surfaces, parts with holes |
+| **Mesh Flow (beta)** | Region-restricted plane intersection + per-point normals | On-surface, per-point standoff with self-correction; mandatory pre-export validation | Medium | Excluding a hanger/fixture region, real multi-part meshes |
 
-All four modes produce the same output format (`PaintRoute` / `PaintPass`), support multi-region selection, and export identically.
+All five modes produce the same output format (`PaintRoute` / `PaintPass`), support multi-region selection, and export identically. Mesh Flow additionally inverts selection semantics — see below.
 
 ---
 
@@ -822,6 +823,41 @@ def generate_route(mesh_data, region_id, region_face_indices,
 **Strengths:** Surface-accurate paths, correct arc-length step spacing, handles holes and discontinuities. Substantially faster than the previous axis-aligned implementation (under 9 s vs 65+ s on dense bumper geometry).  
 **Limitation:** No standoff — the spray gun touches the surface. Use Conform mode when standoff is required.  
 **Best for:** complex curved surfaces and parts with holes or cutouts where the gun should follow the surface exactly at zero offset.
+
+---
+
+### Mesh Flow (beta)
+
+A fully parallel pipeline (`app/meshflow/`) — not a variant of the other three. **Selection is inverted:** the region(s) you click are the *excluded* side (e.g. a hanger/fixture mount); every other eligible region is merged into one route. Opt-in via the "Mesh Flow (beta)" radio — several production decisions are still open (see Limitation).
+
+**How it works:**
+
+1. **Region membership.** Each face is scored by normal alignment (60%) + bounding-box-side position (40%) against the 6 named directions (`app/mesh/regions.py`). This per-face test has no connectivity term, so on a real multi-part mesh it can merge physically unrelated surfaces (an interior liner, a nearby small part) into one region whenever their rough normal/position coincides. `region_manager._significant_connected_components` filters that down to every connected surface patch whose area is ≥2% of that region's largest patch — real panels survive, decoy slivers are dropped.
+2. **Scan direction (F06/F07).** `n0` = region mean normal; `d0` = PCA principal axis of face centroids (or a user-supplied direction). `d' = d0 − (d0·n0)n0`, `d_hat = normalize(d')`, `s_hat = normalize(n0 × d_hat)`.
+3. **Lane planes (F11/F12).** A family of planes spaced `pitch_mm` apart along `s_hat`, spanning the region's extent: `N = floor((s_max − s_min)/Δ) + 1`.
+4. **Intersection.** Each plane is cut against the region's own faces (strict membership, not a hemisphere filter) and segments are stitched into polylines. Every chain whose arc length is ≥10% of that plane's own longest chain becomes its own pass — not just the longest — so a plane crossing two real panels (e.g. hood and roof) keeps coverage on both.
+5. **Alternation (F41).** Same `visible_count`-parity boustrophedon rule as every other mode.
+6. **Standoff (F59/C1).** Each point is offset along its *own* interpolated normal, looked up against a submesh of just this region's own faces (never the full mesh — a nearby unrelated part's normal can never be picked up), then checked with a local signed-distance test against its nearest triangle and flipped if it landed on the wrong side.
+7. **Pre-export validation.** `safety_validator.validate_route_hard_gates` runs mandatory checks in order: target-surface membership (F56), inside/outside via `mesh.contains` (F57 — indeterminate on a non-watertight mesh, never assumed safe), segment/triangle penetration (F58), standoff range (F59), orientation jump (F45), collision (F47). Any hard finding blocks export.
+
+```python
+# region_manager.py — keep every substantial connected surface patch, not just one
+components = trimesh.graph.connected_components(adjacency[in_region], nodes=face_indices)
+cutoff = max(area(c) for c in components) * 0.02
+face_indices = union(c for c in components if area(c) >= cutoff)
+
+# core_generator.py — keep every substantial intersection chain per plane
+chains = [c for c in stitched if arc_length(c) >= max(arc_length(x) for x in stitched) * 0.1]
+for pts in chains:
+    normals = interpolate_normals(pts, region_mesh)      # region-restricted, never full-mesh
+    offset  = pts + normals * standoff_mm
+    wrong_side = local_signed_distance(offset, region_mesh) < 0
+    normals[wrong_side] *= -1.0                           # self-correct, then re-offset
+```
+
+**Strengths:** Exclude-then-complement selection matches how a hanger/fixture is specified in practice. Region- and component-aware face selection plus per-point, region-restricted standoff keep waypoints on the correct physical surface even on multi-part, non-watertight real-world meshes. Mandatory hard-gate validation before export (no other mode validates this strictly).  
+**Limitation:** Beta. Lane pitch from spray width/reference (F39/F40) and region boundary policies beyond explicit face selection are still open decisions. The scan frame (step 2) is still fit once per *region*, not per connected component — a compound-curved sub-panel whose orientation diverges sharply from the region's blended average can be under-covered until that's fit per-component.  
+**Best for:** excluding a known hanger/fixture region and painting everything else in one route, on real multi-part meshes — not yet a drop-in replacement for the other four modes on production jobs.
 
 ---
 
