@@ -21,6 +21,9 @@ from scipy.spatial.transform import Rotation
 from app.path.path_model import PaintRoute, GenerationParams
 
 
+_APPROACH_RETREAT_MARGIN_MM = 150.0
+
+
 def _part_identifier(params: GenerationParams | None, max_len: int = 16, fallback: str = 'PART') -> str:
     """Short identifier derived from the source mesh filename (e.g. SETOBJECT(B05) in
     Aleta_Ptras.tip, wobjMazdaMX5 in Exercise_2.mod) — real OEM references name the
@@ -478,27 +481,30 @@ def export_fanuc_ls(
 
     Generates:
       - /PROG, /ATTR, /APPL headers
-      - /MN motion sequence with Gun=ON on pass start, Gun=OFF on pass end
+      - /MN motion sequence bracketed by synthetic J approach/retract moves
+        (see _APPROACH_RETREAT_MARGIN_MM), Gun=ON on pass start, Gun=OFF on pass end
       - /POS Cartesian positions (X,Y,Z in mm) and Euler angles (W,P,R in degrees)
     """
     fixed = params.paint_speed_mmpm if params else 1000.0
     preset_by_route = _route_preset_numbers(routes)
 
     points_data: list[tuple[int, tuple[float, float, float], tuple[float, float, float]]] = []
-    mn_lines: list[str] = []
+    # (content, is_gun_off) pairs — line numbers are assigned once the full sequence
+    # (including the approach/retract bracketing below) is known.
+    mn_entries: list[tuple[str, bool]] = []
 
-    pt_num = 1
-    mn_line_num = 1
+    pt_num = 2   # P[1] reserved for the synthetic joint approach point
 
     cycle_time_sec = 0.0
     gun_on_time_sec = 0.0
     preset_gun_on_sec: dict[int, float] = {n: 0.0 for n in preset_by_route.values()}
     prev_xyz: np.ndarray | None = None
+    first_xyz = first_wpr = first_normal = None
+    last_xyz = last_wpr = last_normal = None
 
     for route in routes:
         preset_n = preset_by_route[id(route)]
-        mn_lines.append(f'   {mn_line_num}:  Preset[{preset_n}] ;')
-        mn_line_num += 1
+        mn_entries.append((f'  Preset[{preset_n}] ;', False))
 
         conn_by_from = {c.from_pass_id: c for c in route.connections}
         for p in route.passes:
@@ -506,9 +512,14 @@ def export_fanuc_ls(
             n_pts = len(p.points)
             for i, pt in enumerate(p.points):
                 _, wpr, _ = _get_tcp_orientation(route, p, i)
+                normal = np.array(_get_normal(route, p, i))
                 xyz = np.array([float(pt[0]), float(pt[1]), float(pt[2])])
                 points_data.append((pt_num, (xyz[0], xyz[1], xyz[2]), wpr))
                 sp_mmps = int(round(float(speeds[i]) / 60.0)) if float(speeds[i]) > 0 else 500
+
+                if first_xyz is None:
+                    first_xyz, first_wpr, first_normal = xyz, wpr, normal
+                last_xyz, last_wpr, last_normal = xyz, wpr, normal
 
                 if prev_xyz is not None and sp_mmps > 0:
                     seg_sec = float(np.linalg.norm(xyz - prev_xyz)) / sp_mmps
@@ -525,8 +536,7 @@ def export_fanuc_ls(
                     trigger_str = ''
 
                 cnt = _corner_cnt(p.points, i)
-                mn_lines.append(f'   {mn_line_num}:L P[{pt_num}] {sp_mmps}mm/sec CNT{cnt}{trigger_str}    ;')
-                mn_line_num += 1
+                mn_entries.append((f'L P[{pt_num}] {sp_mmps}mm/sec CNT{cnt}{trigger_str}    ;', i == n_pts - 1))
                 pt_num += 1
 
             conn = conn_by_from.get(p.id)
@@ -538,9 +548,32 @@ def export_fanuc_ls(
                     if prev_xyz is not None:
                         cycle_time_sec += float(np.linalg.norm(xyz - prev_xyz)) / 25.0   # 1500mm/min travel
                     prev_xyz = xyz
-                    mn_lines.append(f'   {mn_line_num}:L P[{pt_num}] 1500mm/sec CNT100    ;')
-                    mn_line_num += 1
+                    mn_entries.append((f'L P[{pt_num}] 1500mm/sec CNT100    ;', False))
                     pt_num += 1
+
+    # Synthetic J approach/retract (S1_100.LS: J P[1] ... Gun=ON ... J P[63]) —
+    # S1_100.LS opens and closes with a joint move to a point further back than
+    # any real paint point, not the first/last paint waypoint itself.
+    # ponytail: fixed retreat distance beyond the already-applied standoff, along
+    # the real surface normal at the first/last waypoint (not fabricated geometry —
+    # derived from the route's own data); not yet configurable. Upgrade: expose as
+    # RobotProfile.approach_distance_mm once that field exists.
+    if first_xyz is not None:
+        f_n = first_normal / (np.linalg.norm(first_normal) or 1.0)
+        l_n = last_normal / (np.linalg.norm(last_normal) or 1.0)
+        approach_xyz = first_xyz + f_n * _APPROACH_RETREAT_MARGIN_MM
+        retreat_xyz = last_xyz + l_n * _APPROACH_RETREAT_MARGIN_MM
+        retreat_pt_num = pt_num
+
+        points_data.insert(0, (1, (approach_xyz[0], approach_xyz[1], approach_xyz[2]), first_wpr))
+        points_data.append((retreat_pt_num, (retreat_xyz[0], retreat_xyz[1], retreat_xyz[2]), last_wpr))
+        mn_entries.insert(1, (f'J P[1] 50% CNT100    ;', False))
+        mn_entries.append((f'J P[{retreat_pt_num}] 50% CNT100    ;', False))
+
+    mn_lines = [f'   {i}:{content}' for i, (content, _) in enumerate(mn_entries, start=1)]
+    last_gun_off_line = next(
+        (i for i, (_, is_gun_off) in enumerate(mn_entries, start=1) if is_gun_off), len(mn_entries),
+    )
 
     now = datetime.now()
     date_str = now.strftime('%y-%m-%d')
@@ -577,7 +610,7 @@ def export_fanuc_ls(
         f.write('  DEFAULT_USER_FRAME\t: 1;\n')
         f.write('  DEFAULT_TOOL_FRAME\t: 1;\n')
         f.write('  START_DELAY\t\t: 0;\n')
-        f.write(f'  LAST_GUN_OFF_LINE\t: {mn_line_num - 1};\n')
+        f.write(f'  LAST_GUN_OFF_LINE\t: {last_gun_off_line};\n')
         f.write(f'  LAST_PROCESSED_DATE\t: DATE {date_str} TIME {time_str};\n\n')
         for n in range(1, 41):
             sec = preset_gun_on_sec.get(n, 0.0)

@@ -122,6 +122,17 @@ def test_fanuc_ls_export(tmp_path, sample_route):
     assert "Gun=OFF" in content
     assert "Preset[1]" in content
 
+    # Synthetic J approach/retract bracketing (S1_100.LS: J P[1] ... J P[63]) —
+    # the program opens/closes with a joint move to a point retreated along the
+    # first/last waypoint's surface normal, not the first/last paint point itself.
+    j_moves = re.findall(r'J P\[(\d+)\] 50% CNT100', content)
+    assert len(j_moves) == 2, f"expected exactly 2 J moves (approach + retract), got {j_moves}"
+
+    # sample_route's first pass starts at Z=300 with normal [0,0,1] -- the approach
+    # point (P[1]) must be lifted 150mm further along that normal, off the surface.
+    p1_z = float(re.search(r'P\[1\]\{.*?Z =\s*([\-\d\.]+)\s*mm', content, re.DOTALL).group(1))
+    assert p1_z > 300.0 + 100.0, f"approach point not retreated off the surface: Z={p1_z}"
+
     # Verify POS entries
     assert "UF : 1, UT : 1" in content
     assert "CONFIG : 'N U T, 0, 0, 0'" in content
