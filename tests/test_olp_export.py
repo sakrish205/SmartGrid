@@ -5,6 +5,7 @@ and CAD 3D wireframe curve (.dxf) generation.
 """
 from __future__ import annotations
 import re
+import tempfile
 import numpy as np
 import pytest
 
@@ -89,7 +90,8 @@ def test_abb_rapid_export(tmp_path, sample_route):
     assert "MODULE M1" in content
     assert "ENDMODULE" in content
     assert "PERS wobjdata wobjPart" in content
-    assert "PROC mvPath()" in content
+    assert "PROC runJob()" in content
+    assert "PROC mvFront()" in content  # one PROC per region (route.region_id == 'FRONT')
     assert "PaintL" in content
     assert "MoveL" in content
 
@@ -177,6 +179,68 @@ def test_durr_export(tmp_path, sample_route):
     gunoff_pos = tip_content.index('GunOff')
     lin_p3_pos = tip_content.index('LIN(P3)')
     assert lin_p3_pos < gunoff_pos, "GunOff fired before reaching the last pass point"
+
+
+def test_corner_cnt_tightens_at_sharp_turns():
+    """S1_100.LS tightens CNT (75/80/85) at sharp corners and leaves CNT100 on
+    straight runs — _corner_cnt is the geometry-derived rule that reproduces that,
+    replacing the old hardcoded-CNT100-everywhere behaviour."""
+    from app.export.olp_export import _corner_cnt
+
+    straight = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]])
+    assert _corner_cnt(straight, 1) == 100
+
+    sharp_turn = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0]])
+    assert _corner_cnt(sharp_turn, 1) < 100
+
+
+def _two_region_routes() -> list[PaintRoute]:
+    pts = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
+    normals = np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]])
+    front = PaintRoute(
+        region_id='FRONT',
+        passes=[PaintPass(id=0, region_id='FRONT', direction='horizontal', points=pts,
+                           is_forward=True, sub_index=0, slice_position=0.0,
+                           normals=normals, tangent=None)],
+        connections=[], unit='mm', spacing_mm=50.0, total_passes=1,
+        total_length_mm=10.0, spray_normal=np.array([0.0, 0.0, 1.0]),
+    )
+    rear = PaintRoute(
+        region_id='REAR',
+        passes=[PaintPass(id=0, region_id='REAR', direction='horizontal', points=pts,
+                           is_forward=True, sub_index=0, slice_position=0.0,
+                           normals=normals, tangent=None)],
+        connections=[], unit='mm', spacing_mm=50.0, total_passes=1,
+        total_length_mm=10.0, spray_normal=np.array([0.0, 0.0, 1.0]),
+    )
+    return [front, rear]
+
+
+def test_abb_rapid_one_proc_per_region():
+    routes = _two_region_routes()
+    with tempfile.TemporaryDirectory() as tmp:
+        out = f'{tmp}/multi.mod'
+        export_abb_rapid(routes, out)
+        content = open(out, encoding='utf-8').read()
+    assert 'PROC mvFront()' in content
+    assert 'PROC mvRear()' in content
+    assert '    mvFront;' in content and '    mvRear;' in content
+
+
+def test_durr_part_name_and_pattern_vary_per_region():
+    routes = _two_region_routes()
+    params = GenerationParams(
+        source_file='Mazda MX5.wrl', path_mode='Mesh Surface', regions=['FRONT', 'REAR'],
+        up_axis='Z', spray_width_mm=50.0, standoff_mm=0.0, waypoint_spacing_mm=0.0,
+        direction='horizontal', sweep='CW',
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        out = f'{tmp}/Aleta_Ptras.tid'
+        export_durr(routes, out, params=params)
+        tip_content = open(f'{tmp}/Aleta_Ptras.tip', encoding='utf-8').read()
+    assert 'SETOBJECT(MAZDA_MX5)' in tip_content
+    assert 'SETBRUSH(GUN1, 1,' in tip_content
+    assert 'SETBRUSH(GUN1, 2,' in tip_content
 
 
 def test_cad_dxf_export(tmp_path, sample_route):
