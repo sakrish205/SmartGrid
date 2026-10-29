@@ -9,7 +9,7 @@ import trimesh
 
 from app.mesh.preprocessor import preprocess
 from app.meshflow.core_generator import generate_mesh_flow_route
-from app.meshflow.lane_planner import resolve_lane_pitch
+from app.meshflow.lane_planner import generate_lane_planes, resolve_lane_pitch
 from app.meshflow.open_decisions import LanePitchStrategy, OpenDecisionBlocked
 from app.meshflow.region_manager import build_regions
 from app.path import local_normals, surface_safety
@@ -58,6 +58,38 @@ def test_generate_mesh_flow_route_on_curved_region():
         explicit_pitch_mm=20.0,
     )
     assert route.total_passes > 0
+
+
+def test_generate_lane_planes_pitch_is_uniform():
+    """Regression guard: lane spacing must be constant across the region —
+    curvature-adaptive pitch (which varied 15%-100%+ of pitch_mm) broke the
+    'path follows spray width' requirement and was reverted."""
+    box = trimesh.creation.box(extents=[200, 300, 100]).subdivide().subdivide()
+    region = MeshFlowRegion(
+        region_id='TOP', face_indices=np.arange(len(box.faces)),
+        primary_direction=np.array([1.0, 0.0, 0.0]),
+        spacing_direction=np.array([0.0, 1.0, 0.0]),
+    )
+    planes = generate_lane_planes(region, box, pitch_mm=30.0)
+    positions = np.array([p[2] for p in planes])
+    deltas = np.diff(positions)
+    assert len(deltas) >= 2
+    assert np.allclose(deltas, deltas[0]), f"non-uniform spacing: {deltas}"
+
+
+def test_generate_mesh_flow_route_passes_stay_in_plane_order():
+    """Regression guard: passes must stay in plane-generation order (no
+    greedy nearest-neighbor reorder), or connectors cross the part."""
+    cyl = trimesh.creation.cylinder(radius=50.0, height=200.0, sections=64)
+    data = preprocess(cyl, 'cyl.stl', up_axis=2)
+    region = build_regions(data, ['FRONT'])[0]
+    route = generate_mesh_flow_route(
+        data, region,
+        lane_pitch_strategy=LanePitchStrategy.EXPLICIT_SETTING,
+        explicit_pitch_mm=20.0,
+    )
+    positions = [p.slice_position for p in route.passes]
+    assert positions == sorted(positions)
 
 
 def test_generate_mesh_flow_route_applies_standoff_and_normals(flat_panel_mesh):

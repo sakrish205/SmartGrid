@@ -1760,7 +1760,7 @@ boustrophedon decomposition; Ramer-Douglas-Peucker simplification; Trimesh plane
         tb.setFrameShape(QFrame.Shape.NoFrame)
         tb.setStyleSheet('font-family:"Segoe UI",Arial;font-size:12px;background:transparent;')
         tb.setHtml('''
-<h2 style="margin:0 0 4px 0">SmartGrid  <span style="font-weight:normal;font-size:13px;color:#555">v1.10</span></h2>
+<h2 style="margin:0 0 4px 0">SmartGrid  <span style="font-weight:normal;font-size:13px;color:#555">v1.11</span></h2>
 <p style="margin:0 0 12px 0;color:#555">3D Surface Grid &amp; Pitch Mapper</p>
 <p>Robotic spray-paint toolpath planner for STL, OBJ and STEP meshes.<br>
 Supports Boundary Box, Adaptive, Conform and Mesh Flow (beta) path modes

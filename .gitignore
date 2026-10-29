@@ -17,3 +17,9 @@ settings.json
 brag-output/
 smartgrid.log*
 olp review details/
+.agents/
+.claude/
+convertmdfiles/
+graphify-out/
+.graphify_python
+

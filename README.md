@@ -12,7 +12,7 @@ SmartGrid solves the **manufacturing process-planning problem** of generating sy
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green)](https://pypi.org/project/PySide6/)
-[![Version](https://img.shields.io/badge/version-1.10.0-informational)]()
+[![Version](https://img.shields.io/badge/version-1.11.0-informational)]()
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
 ---
@@ -55,6 +55,31 @@ Export
         ├── OLP    (RoboDK / VC / Delmia / G-code)
         └── Mesh   (.stl tube geometry of the path itself)
 ```
+
+---
+
+## Improvements (v1.11 — Mesh Flow Pattern Regression Fix)
+
+### Reverted per-component plane generation and pass reordering — `core_generator.py`, `connector.py`
+
+A chaotic, crisscrossing connector pattern on real multi-panel parts (e.g. a sculpted bumper) traced back to two behaviors that quietly replaced Mesh Flow's original single-pass-per-plane structure: `core_generator._region_components` was generating an independent lane-plane family per connected surface patch instead of one family for the whole region, and the resulting list — "all of component A's passes, then component B's" — was patched up with a greedy nearest-neighbor reorder (`connector.reorder_passes_nearest_neighbor`). With many short multi-chain passes in play, that greedy walk produced exactly the short diagonal connectors crossing the part.
+
+**Fix:** one lane-plane family per region again (like the original implementation), applying the interior-face filter once across the whole region instead of per component. `_significant_polylines`'s multi-chain-per-plane coverage (the genuine fix for sculpted surfaces where one cutting plane crosses the part in 2-3 separate arcs) is unchanged and still runs — it no longer needs a reorder step afterward because a single unified plane sweep is already spatially coherent. `reorder_passes_nearest_neighbor` had no other caller and was deleted.
+
+### Reverted curvature-adaptive lane pitch — `lane_planner.py`
+
+Lane spacing had been made to shrink on curved surfaces (`pitch(s) = base_pitch × sin(angle to surface normal)`, floored at 15% of the configured spray width) to maintain arc-length coverage on humps — but that meant the actual spacing could drift to under a fifth of the configured spray width on strongly curved geometry. Reverted to the original fixed, uniform F12 step (`step = span / n`) — spacing is now constant across the region and always targets the configured spray width, same as every other path mode.
+
+```python
+# lane_planner.py — generate_lane_planes, back to uniform F12 stepping
+n = max(1, int(np.floor(span / pitch_mm)) + 1)   # F12
+step = span / n
+for k in range(n):
+    pos = first + k * step
+    planes.append((s_hat.copy(), p0 + pos * s_hat, pos))
+```
+
+Everything else added to Mesh Flow since the regression — the region-level connected-component noise filter (`region_manager._significant_connected_components`), the largest-component-only outward normal, the local signed-distance standoff self-correction, and the `stitcher.py` `StopIteration` crash guard — is unchanged; none of it contributed to the pattern regression.
 
 ---
 
