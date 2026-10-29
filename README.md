@@ -58,17 +58,15 @@ Export
 
 ---
 
-## Improvements (v1.11 — Mesh Flow Pattern Regression Fix)
+## Improvements (v1.11 — Mesh Flow Baseline Restore & Line Quality Smoothing)
 
-### Reverted per-component plane generation and pass reordering — `core_generator.py`, `connector.py`
+### 1. Restored golden path generation baseline — `core_generator.py`, `lane_planner.py`, `region_manager.py`
 
-A chaotic, crisscrossing connector pattern on real multi-panel parts (e.g. a sculpted bumper) traced back to two behaviors that quietly replaced Mesh Flow's original single-pass-per-plane structure: `core_generator._region_components` was generating an independent lane-plane family per connected surface patch instead of one family for the whole region, and the resulting list — "all of component A's passes, then component B's" — was patched up with a greedy nearest-neighbor reorder (`connector.reorder_passes_nearest_neighbor`). With many short multi-chain passes in play, that greedy walk produced exactly the short diagonal connectors crossing the part.
-
-**Fix:** one lane-plane family per region again (like the original implementation), applying the interior-face filter once across the whole region instead of per component. `_significant_polylines`'s multi-chain-per-plane coverage (the genuine fix for sculpted surfaces where one cutting plane crosses the part in 2-3 separate arcs) is unchanged and still runs — it no longer needs a reorder step afterward because a single unified plane sweep is already spatially coherent. `reorder_passes_nearest_neighbor` had no other caller and was deleted.
-
-### Reverted curvature-adaptive lane pitch — `lane_planner.py`
-
-Lane spacing had been made to shrink on curved surfaces (`pitch(s) = base_pitch × sin(angle to surface normal)`, floored at 15% of the configured spray width) to maintain arc-length coverage on humps — but that meant the actual spacing could drift to under a fifth of the configured spray width on strongly curved geometry. Reverted to the original fixed, uniform F12 step (`step = span / n`) — spacing is now constant across the region and always targets the configured spray width, same as every other path mode.
+Experimental multi-chain loops (`_significant_polylines`), per-component plane slicing, and outward face pre-filtering introduced fragmentation and erratic connectors on real parts. The Mesh Flow generator has been restored to its clean `f8fd0ca` baseline:
+- **Single primary chain per plane:** `_longest_polyline()` selects the main continuous polyline per cutting plane, guaranteeing clean, unbroken passes without short stray fragments.
+- **Fixed, uniform F12 stepping:** Lane planes step uniformly along the region span (`step = span / n`), ensuring stable, predictable pass pitch without curvature drift.
+- **Direct region membership:** Clean region mapping without brittle connected-component pruning or experimental `cover_all` flags.
+- **Stitcher safety guard:** Retained `stitcher.py` empty-adjacency protection (`if not adj: return []`) to prevent `StopIteration` crashes on degenerate edge intersections.
 
 ```python
 # lane_planner.py — generate_lane_planes, back to uniform F12 stepping
@@ -79,7 +77,19 @@ for k in range(n):
     planes.append((s_hat.copy(), p0 + pos * s_hat, pos))
 ```
 
-Everything else added to Mesh Flow since the regression — the region-level connected-component noise filter (`region_manager._significant_connected_components`), the largest-component-only outward normal, the local signed-distance standoff self-correction, and the `stitcher.py` `StopIteration` crash guard — is unchanged; none of it contributed to the pattern regression.
+### 2. Conform-quality line smoothing via `prune_collinear` — `core_generator.py`
+
+Toolpaths in Mesh Flow previously exhibited micro-wobbles on planar or gently curved facets due to CAD mesh tessellation artifacts. 
+- Integrated `prune_collinear` from `app.path.resampler` directly following `rdp_simplify(pts, _RDP_EPSILON)`.
+- Strips intermediate waypoints where direction change is below tolerance, turning jagged facet approximations into true straight runs (matching Conform mode's crisp line quality).
+
+### 3. Native OLP Exporter Standard Overhaul — `app/export/olp_export.py`
+
+Native robot exporters were calibrated directly against OEM reference programs (`Fanuc_Ref/S1_100.LS`, `Durr_Ref/B05.tt/Aleta_Ptras.tip/.tid`, and `Exercise_2.mod`):
+- **Fanuc TP/Karel (`.LS`):** Added synthetic `J` joint approach and retract moves along surface normals (`J P[1] ... J P[last]`); corner-adaptive `CNT` deceleration (tighter smoothing at sharp corners); region-based `Preset[n]` switching; computed `PAINT_PROCESS` block (`LAST_CYCLE_TIME`, `LAST_GUN_ON_TIME`); and `LINE_TRACK` header structure.
+- **Dürr EcoScreen (`.tid` / `.tip`):** Dynamic `SETOBJECT` automatically derived from the mesh file; dynamic `SETBRUSH` pattern IDs per region; `//REGION <name>` zone comments; and strict PT/TR sequence indices.
+- **ABB RAPID (`.mod`):** Modular subroutines: generates one `PROC` per region (`mvFront()`, `mvRear()`, etc.) dispatched from `runJob()`, matching automotive plant structure; work object (`wobj`) derived from CAD part name.
+- **Industrial Process CSV:** Standard shop-floor tabular format (`seq_id`, `Trigger`, `segment_type`, `pass_id`, `x,y,z`, `nx,ny,nz`, `speed`).
 
 ---
 
@@ -91,7 +101,7 @@ The Path Mode panel previously nested Adaptive/Conform under a "Face Grid" radio
 
 - **Mesh Surface removed from the UI.** Its algorithm (`generator.py: generate_route()`) is unchanged and kept in the codebase as the Phase-0 golden-baseline implementation that Mesh Flow's regression tests (`test_mesh_surface_baseline.py`, `test_meshflow_core.py`) compare against — it is simply no longer selectable from the ribbon. Conform already produces the same on-surface result at `standoff_mm=0`.
 - **Face Grid wrapper removed.** Adaptive and Conform are no longer sub-modes of a "Face Grid" parent — they're direct, equal-weight path modes, same as Boundary Box and Mesh Flow.
-- **Cover All Regions checkbox removed.** It toggled `build_regions(..., cover_all=True)` to bypass Mesh Flow's 2% area / 10% chain-length noise filters on simple single-body parts. The underlying `cover_all` parameter still exists (defaults to `False`, unchanged behaviour) — only the UI control was removed.
+- **Cover All Regions checkbox removed.** It toggled experimental noise filters on simple single-body parts. The generator was restored to its clean baseline, eliminating the need for this toggle or parameter entirely.
 
 ```python
 # ribbon.py — get_path_target() now returns one of 4 direct values
@@ -156,7 +166,7 @@ d_hat, s_hat = largest_direction, largest_spacing
 
 ### 4. Cover All Regions toggle — `ribbon.py`, `region_manager.py`, `core_generator.py`, `main_window.py`
 
-> **Note (v1.10):** this checkbox was later removed from the UI — see the "Improvements (v1.10)" section above. The underlying `cover_all` parameter described below still exists and still defaults to `False`.
+> **Note (v1.11):** In v1.11, the underlying experimental `cover_all` parameter, area filtering, and multi-chain loops were removed in favor of the golden single-pass-per-plane baseline, making this parameter obsolete.
 
 A **Cover All Regions** checkbox (below the Mesh Flow radio button) bypasses the two noise-rejection filters that can leave gaps on simple single-body parts:
 
@@ -931,31 +941,27 @@ A fully parallel pipeline (`app/meshflow/`) — not a variant of the other three
 
 **How it works:**
 
-1. **Region membership.** Each face is scored by normal alignment (60%) + bounding-box-side position (40%) against the 6 named directions (`app/mesh/regions.py`). This per-face test has no connectivity term, so on a real multi-part mesh it can merge physically unrelated surfaces (an interior liner, a nearby small part) into one region whenever their rough normal/position coincides. `region_manager._significant_connected_components` filters that down to every connected surface patch whose area is ≥2% of that region's largest patch — real panels survive, decoy slivers are dropped.
+1. **Region membership.** Each face is scored by normal alignment (60%) + bounding-box-side position (40%) against the 6 named directions (`app/mesh/regions.py`).
 2. **Scan direction (F06/F07).** `n0` = region mean normal; `d0` = PCA principal axis of face centroids (or a user-supplied direction). `d' = d0 − (d0·n0)n0`, `d_hat = normalize(d')`, `s_hat = normalize(n0 × d_hat)`.
 3. **Lane planes (F11/F12).** A family of planes spaced `pitch_mm` apart along `s_hat`, spanning the region's extent: `N = floor((s_max − s_min)/Δ) + 1`.
-4. **Intersection.** Each plane is cut against the region's own faces (strict membership, not a hemisphere filter) and segments are stitched into polylines. Every chain whose arc length is ≥10% of that plane's own longest chain becomes its own pass — not just the longest — so a plane crossing two real panels (e.g. hood and roof) keeps coverage on both.
+4. **Intersection & Line Smoothing.** Each plane is cut against the region's own faces and stitched into polylines. `_longest_polyline` keeps the primary continuous chain per plane, followed by RDP simplification and `prune_collinear` to eliminate tessellation micro-wobbles and produce clean, straight passes.
 5. **Alternation (F41).** Same `visible_count`-parity boustrophedon rule as every other mode.
-6. **Standoff (F59/C1).** Each point is offset along its *own* interpolated normal, looked up against a submesh of just this region's own faces (never the full mesh — a nearby unrelated part's normal can never be picked up), then checked with a local signed-distance test against its nearest triangle and flipped if it landed on the wrong side.
+6. **Standoff (F59/C1).** Each point is offset along its *own* interpolated normal, looked up against a submesh of just this region's own faces (never the full mesh — a nearby unrelated part's normal can never be picked up), with watertight safety checks.
 7. **Pre-export validation.** `safety_validator.validate_route_hard_gates` runs mandatory checks in order: target-surface membership (F56), inside/outside via `mesh.contains` (F57 — indeterminate on a non-watertight mesh, never assumed safe), segment/triangle penetration (F58), standoff range (F59), orientation jump (F45), collision (F47). Any hard finding blocks export.
 
 ```python
-# region_manager.py — keep every substantial connected surface patch, not just one
-components = trimesh.graph.connected_components(adjacency[in_region], nodes=face_indices)
-cutoff = max(area(c) for c in components) * 0.02
-face_indices = union(c for c in components if area(c) >= cutoff)
-
-# core_generator.py — keep every substantial intersection chain per plane
-chains = [c for c in stitched if arc_length(c) >= max(arc_length(x) for x in stitched) * 0.1]
-for pts in chains:
-    normals = interpolate_normals(pts, region_mesh)      # region-restricted, never full-mesh
-    offset  = pts + normals * standoff_mm
-    wrong_side = local_signed_distance(offset, region_mesh) < 0
-    normals[wrong_side] *= -1.0                           # self-correct, then re-offset
+# core_generator.py — single clean polyline per plane with collinear pruning
+polylines = _surface_intersector.intersect_region(mesh, region, plane_normal, plane_origin)
+pts = _longest_polyline(polylines)
+if pts is not None:
+    pts = rdp_simplify(pts, _RDP_EPSILON)
+    pts = prune_collinear(pts)       # strip facet micro-wobbles
+    if waypoint_spacing_mm > 0.0:
+        pts = resample_arc(pts, waypoint_spacing_mm)
 ```
 
-**Strengths:** Exclude-then-complement selection matches how a hanger/fixture is specified in practice. Region- and component-aware face selection plus per-point, region-restricted standoff keep waypoints on the correct physical surface even on multi-part, non-watertight real-world meshes. Unified scan frame across all components ensures consistent parallel pass angles. Curvature-adaptive pitch maintains coverage on curved humps. Interior-face hemisphere filter prevents cavity walls from being painted. Mandatory hard-gate validation before export (no other mode validates this strictly).  
-**Limitation:** Beta. Lane pitch from spray width/reference (F39/F40) and region boundary policies beyond explicit face selection are still open decisions.  
+**Strengths:** Exclude-then-complement selection matches how a hanger/fixture is specified in practice. Region-restricted standoff prevents picking up normals from adjacent disconnected parts. Collinear pruning provides straight, clean passes on flat panels while preserving true curvature on bends. Mandatory hard-gate validation before export.  
+**Limitation:** Beta. Lane pitch from spray width/reference (F39/F40) and custom region boundary policies are still open decisions.  
 **Best for:** excluding a known hanger/fixture region and painting everything else in one route, on real multi-part meshes.
 
 ---
@@ -1396,9 +1402,9 @@ SmartGrid/
 │   │   ├── resampler.py
 │   │   └── collision.py       — detect_collisions() — hard collision + near-miss
 │   ├── meshflow/              — Mesh Flow (beta) parallel pipeline
-│   │   ├── core_generator.py  — per-component scan frame, adaptive pitch, outward filter
-│   │   ├── lane_planner.py    — curvature-adaptive lane planes (F11/F12)
-│   │   ├── region_manager.py  — significant-component filter, cover_all param (no UI toggle)
+│   │   ├── core_generator.py  — primary chain selection, prune_collinear + RDP, local standoff
+│   │   ├── lane_planner.py    — uniform F12 lane planes along scan frame
+│   │   ├── region_manager.py  — region face membership & build_regions()
 │   │   ├── direction_estimator.py
 │   │   ├── surface_intersector.py
 │   │   ├── transition_planner.py

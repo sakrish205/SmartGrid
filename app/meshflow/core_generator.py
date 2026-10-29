@@ -23,7 +23,7 @@ from app.meshflow.open_decisions import LanePitchStrategy
 from app.path import local_normals as _local_normals
 from app.path import surface_safety as _surface_safety
 from app.path.path_model import MeshFlowRegion, PaintPass, PaintRoute
-from app.path.resampler import rdp_simplify, resample_arc
+from app.path.resampler import rdp_simplify, resample_arc, prune_collinear
 
 _RDP_EPSILON = 0.3   # mm ΓÇö same constant app.path.generator uses, kept consistent
 
@@ -105,6 +105,7 @@ def generate_mesh_flow_route(
             continue
 
         pts = rdp_simplify(pts, _RDP_EPSILON)
+        pts = prune_collinear(pts)           # strip near-collinear tessellation artefacts
         if waypoint_spacing_mm > 0.0:
             pts = resample_arc(pts, waypoint_spacing_mm)
         if len(pts) < 2:
