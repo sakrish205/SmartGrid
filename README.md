@@ -12,7 +12,7 @@ SmartGrid solves the **manufacturing process-planning problem** of generating sy
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green)](https://pypi.org/project/PySide6/)
-[![Version](https://img.shields.io/badge/version-1.9.0-informational)]()
+[![Version](https://img.shields.io/badge/version-1.10.0-informational)]()
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
 ---
@@ -30,7 +30,7 @@ Select Regions ─── TOP / FRONT / REAR / etc.
         │
         ▼
 Set Parameters ─── pitch, direction, path mode, standoff
-        │           BBox │ Face Grid (Shadow/Mesh) │ Mesh Surface
+        │           Boundary Box │ Adaptive │ Conform │ Mesh Flow (beta)
         ▼
 Generate Path
         │
@@ -52,8 +52,46 @@ Collision Check ── gun vs mesh + approach angle vs profile limits
 Export
         ├── JSON   (waypoints + normals + speed)
         ├── CSV    (flat table)
-        └── OLP    (RoboDK / VC / Delmia / G-code)
+        ├── OLP    (RoboDK / VC / Delmia / G-code)
+        └── Mesh   (.stl tube geometry of the path itself)
 ```
+
+---
+
+## Improvements (v1.10 — Simplified Path Mode UI, Export Mesh)
+
+### 1. Path Mode UI simplified — `ribbon.py`, `main_window.py`
+
+The Path Mode panel previously nested Adaptive/Conform under a "Face Grid" radio (a sub-panel that only appeared once Face Grid was selected) and listed a separate "Mesh Surface" mode alongside it. Both are now flattened into one list of four top-level radios: **Boundary Box / Adaptive / Conform / Mesh Flow (beta)**.
+
+- **Mesh Surface removed from the UI.** Its algorithm (`generator.py: generate_route()`) is unchanged and kept in the codebase as the Phase-0 golden-baseline implementation that Mesh Flow's regression tests (`test_mesh_surface_baseline.py`, `test_meshflow_core.py`) compare against — it is simply no longer selectable from the ribbon. Conform already produces the same on-surface result at `standoff_mm=0`.
+- **Face Grid wrapper removed.** Adaptive and Conform are no longer sub-modes of a "Face Grid" parent — they're direct, equal-weight path modes, same as Boundary Box and Mesh Flow.
+- **Cover All Regions checkbox removed.** It toggled `build_regions(..., cover_all=True)` to bypass Mesh Flow's 2% area / 10% chain-length noise filters on simple single-body parts. The underlying `cover_all` parameter still exists (defaults to `False`, unchanged behaviour) — only the UI control was removed.
+
+```python
+# ribbon.py — get_path_target() now returns one of 4 direct values
+def get_path_target(self) -> str:
+    if self._bbox_radio.isChecked():      return 'bbox'
+    if self._fg_mesh_radio.isChecked():   return 'conform'
+    if self._mesh_flow_radio.isChecked(): return 'mesh_flow'
+    return 'adaptive'
+```
+
+### 2. Export Mesh mode — `app/export/mesh_export.py`
+
+A fourth export format alongside JSON/CSV/OLP: **Export Mesh** writes the generated toolpath itself — every spray pass and travel connection, swept into a thin tube — as a standalone `.stl` file. No source-part geometry is included, only the path, so it can be opened in any CAD/mesh viewer (including SmartGrid itself) to inspect or reuse the exact toolpath shape independently of the app.
+
+```python
+# mesh_export.py — tube per pass/connection, merged into one mesh
+def export_route_mesh(routes, filepath, tube_radius_mm=2.0) -> None:
+    tubes = [_tube(seg.points, tube_radius_mm)
+             for route in routes
+             for seg in (*route.passes, *route.connections)]
+    mesh = trimesh.util.concatenate([t for t in tubes if t is not None])
+    mesh.export(filepath)   # format inferred from extension
+```
+
+Built on `trimesh.creation.sweep_polygon`, already available via the `trimesh[easy]` dependency — no new package required.
 
 ---
 
@@ -92,6 +130,8 @@ d_hat, s_hat = largest_direction, largest_spacing
 ```
 
 ### 4. Cover All Regions toggle — `ribbon.py`, `region_manager.py`, `core_generator.py`, `main_window.py`
+
+> **Note (v1.10):** this checkbox was later removed from the UI — see the "Improvements (v1.10)" section above. The underlying `cover_all` parameter described below still exists and still defaults to `False`.
 
 A **Cover All Regions** checkbox (below the Mesh Flow radio button) bypasses the two noise-rejection filters that can leave gaps on simple single-body parts:
 
@@ -644,7 +684,7 @@ Collision Detection
    ↓
 3D Validation
    ↓
-JSON / CSV / OLP / G-code Export
+JSON / CSV / OLP / G-code / Mesh Export
 ```
 
 ---
@@ -657,7 +697,7 @@ JSON / CSV / OLP / G-code Export
 4. **Set parameters** — pitch, unit, standoff, spray speed, sweep direction
 5. **Preview** — enable Grid to verify pass spacing before generating
 6. **Generate Path** — runs in a background thread; collisions highlighted automatically
-7. **Export** — JSON, CSV, OLP (RoboDK / Visual Components / DELMIA APT), or G-code
+7. **Export** — JSON, CSV, OLP (RoboDK / Visual Components / DELMIA APT), G-code, or Mesh (path-only `.stl`)
 
 ---
 
@@ -720,7 +760,7 @@ for face_idx, normal in enumerate(mesh.face_normals):
     region_faces[best].append(face_idx)
 ```
 
-Triangles on sharp edges or 45° blends are assigned to whichever canonical direction wins the dot-product comparison. For complex curved surfaces the assignment is approximate — compound-curve regions like blended edges or fenders may benefit from Mesh Surface or Face Grid — Conform mode, which respect the actual mesh geometry regardless of how regions are classified.
+Triangles on sharp edges or 45° blends are assigned to whichever canonical direction wins the dot-product comparison. For complex curved surfaces the assignment is approximate — compound-curve regions like blended edges or fenders may benefit from Conform mode, which respects the actual mesh geometry regardless of how regions are classified.
 
 ### Select Faces mode
 
@@ -730,19 +770,20 @@ The **Select Faces** toolbar button suspends camera rotation (replaces the VTK i
 
 ## Path Generation
 
-SmartGrid provides five toolpath generation modes for different workpiece geometries. Each mode makes a different trade-off between speed, accuracy, and surface fidelity.
+SmartGrid provides four toolpath generation modes for different workpiece geometries. Each mode makes a different trade-off between speed, accuracy, and surface fidelity.
 
 ### Mode comparison
 
 | Mode | Mesh query | Path accuracy | Speed | Best for |
 |---|---|---|---|---|
 | **Boundary Box** | None — bbox only | Flat plane (floats on curves) | Instant | Flat panels, sheet metal |
-| **Face Grid — Adaptive** | Normal stats + BVH clip | Tilted plane, per-row depth tracking; penetrating waypoints snapped to surface | Fast | Bonnets, doors, gently curved panels |
-| **Face Grid — Conform** | Trimesh plane intersection | On-surface, tilted cutting planes | Medium | Blended edges, compound curves |
-| **Mesh Surface** | Trimesh plane intersection | On-surface, tilted cutting planes (delegates to Conform, standoff=0) | Medium | Complex surfaces, parts with holes |
+| **Adaptive** | Normal stats + BVH clip | Tilted plane, per-row depth tracking; penetrating waypoints snapped to surface | Fast | Bonnets, doors, gently curved panels |
+| **Conform** | Trimesh plane intersection | On-surface, tilted cutting planes | Medium | Blended edges, compound curves, complex surfaces with holes |
 | **Mesh Flow (beta)** | Region-restricted plane intersection + per-point normals | On-surface, per-point standoff with self-correction; mandatory pre-export validation | Medium | Excluding a hanger/fixture region, real multi-part meshes |
 
-All five modes produce the same output format (`PaintRoute` / `PaintPass`), support multi-region selection, and export identically. Mesh Flow additionally inverts selection semantics — see below.
+All four modes produce the same output format (`PaintRoute` / `PaintPass`), support multi-region selection, and export identically. Mesh Flow additionally inverts selection semantics — see below.
+
+> A fifth internal algorithm, `generator.py: generate_route()` (formerly exposed in the UI as "Mesh Surface"), still exists as the Phase-0 golden-baseline implementation Mesh Flow's regression tests compare against — it is not reachable from the UI. Conform already produces the equivalent on-surface result at `standoff_mm=0`.
 
 ---
 
@@ -778,7 +819,7 @@ for i, step_pos in enumerate(step_positions):
 
 ---
 
-### Face Grid — Adaptive
+### Adaptive
 
 Extends Boundary Box by tilting the spray plane to match the actual surface orientation and tracking the outermost surface depth per row. Each pass is still a straight line — no mesh slicing.
 
@@ -818,15 +859,15 @@ for step_pos in step_positions:
 
 ---
 
-### Face Grid — Conform
+### Conform
 
-A hybrid of Adaptive and Mesh Surface. Uses Adaptive's tilted mean-normal basis to compute correct arc-length step spacing, but then cuts actual trimesh plane intersections through the mesh for exact path geometry.
+Uses Adaptive's tilted mean-normal basis to compute correct arc-length step spacing, but then cuts actual trimesh plane intersections through the mesh for exact path geometry.
 
 **How it works:**
 
 1. Same mean-normal basis as Adaptive: `mean_n`, `pass_vec`, `step_vec` computed from forward-facing region faces.
 2. Step extent is measured along `step_vec` from the selected region's vertices (not a world axis), so step spacing is true arc-length distance on a tilted surface.
-3. Cutting planes are oriented with `plane_normal = step_vec` (perpendicular to the step direction) — this is the key difference from Mesh Surface, which always uses a world-axis normal.
+3. Cutting planes are oriented with `plane_normal = step_vec` (perpendicular to the step direction, tilted to match the surface — not world-axis-aligned).
 4. `trimesh.intersections.mesh_plane` intersects the full mesh against each tilted cutting plane. Returned segments are filtered using a forward-hemisphere mask — `face_normals[seg_face_ids] @ mean_n >= 0.0` — rather than the classifier-assigned face set. This ensures boundary and transition faces (which the classifier assigns to adjacent regions) are included, giving complete surface coverage at region edges.
 5. Segments are stitched into ordered polylines via a graph-walk on quantised endpoints (tolerance 10⁻⁶ m). Multiple chains per plane level (holes, discontinuities) are handled naturally.
 6. Short corner fragments and misaligned sub-passes are dropped. RDP simplification (ε = 0.3 mm) removes jaggies from triangle discretisation.
@@ -855,32 +896,7 @@ for plane_idx, step_pos in enumerate(step_positions):
 
 **Strengths:** Paths lie exactly on the mesh surface (not floating). Step spacing is correct arc-length even on tilted surfaces. Handles holes and discontinuities.  
 **Limitation:** Slower than Adaptive (one mesh intersection per pass). Standoff is a uniform vector shift — not per-point nearest-face normal projection, so on highly curved surfaces the standoff direction is approximate.  
-**Best for:** blended edges, compound curves, and parts where Adaptive paths float mid-pass and Mesh Surface paths stop short of the actual surface extent.
-
----
-
-### Mesh Surface
-
-Delegates to Face Grid — Conform with `standoff_mm=0`. Uses the same tilted mean-normal basis, trimesh plane intersections, hemisphere filter, segment stitching, RDP simplification, and TSP-lite pass ordering as Conform — with no standoff offset applied. Every waypoint lies on the actual mesh surface.
-
-**How it works:** identical to [Face Grid — Conform](#face-grid--conform) above, with `standoff_mm=0.0` forced. See that section for the full algorithm description.
-
-```python
-# generator.py — generate_route
-def generate_route(mesh_data, region_id, region_face_indices,
-                   spray_width_mm, waypoint_spacing_mm=0.0, direction='horizontal'):
-    from app.path.face_grid_generator import generate_conform_route
-    return generate_conform_route(
-        region=region_id, face_indices=region_face_indices,
-        mesh=mesh_data.trimesh_mesh, up_axis=mesh_data.up_axis,
-        spray_width_mm=spray_width_mm, waypoint_spacing_mm=waypoint_spacing_mm,
-        standoff_mm=0.0, direction=direction,
-    )
-```
-
-**Strengths:** Surface-accurate paths, correct arc-length step spacing, handles holes and discontinuities. Substantially faster than the previous axis-aligned implementation (under 9 s vs 65+ s on dense bumper geometry).  
-**Limitation:** No standoff — the spray gun touches the surface. Use Conform mode when standoff is required.  
-**Best for:** complex curved surfaces and parts with holes or cutouts where the gun should follow the surface exactly at zero offset.
+**Best for:** blended edges, compound curves, and parts with holes — set `Standoff = 0` for a surface-touching path equivalent to the former "Mesh Surface" mode.
 
 ---
 
@@ -933,9 +949,9 @@ The **Direction** control (H / V / Both) sets the sweep orientation for all path
 
 ---
 
-## Face Grid Reference Planes
+## Adaptive / Conform Reference Planes
 
-When either Face Grid mode (Adaptive or Conform) is active, the 3D viewer shows two semi-transparent reference quads:
+When either Adaptive or Conform mode is active, the 3D viewer shows two semi-transparent reference quads:
 
 | Quad | Colour | Position |
 |---|---|---|
@@ -984,9 +1000,9 @@ Normal selection depends on the path mode:
 | Path Mode | Normal |
 |---|---|
 | Boundary Box | Face-axis unit vector |
-| Face Grid — Adaptive | Mean face normal |
-| Face Grid — Conform | Mean face normal (uniform shift along `mean_n`) |
-| Mesh Surface | No standoff — delegates to Conform with `standoff_mm=0` |
+| Adaptive | Mean face normal |
+| Conform | Mean face normal (uniform shift along `mean_n`) |
+| Mesh Flow (beta) | Per-point interpolated normal, region-restricted and self-corrected |
 
 Default standoff is `0`.
 
@@ -1006,7 +1022,7 @@ After every path generation SmartGrid automatically checks all spray passes agai
 
 The hard collision check (`mesh.contains`) is also skipped when standoff is 0 — surface-touching paths produce false positives from the ray-cast boundary case. The near-miss check is skipped for the same reason.
 
-The collision check (hard + near-miss) is skipped entirely for Face Grid — Adaptive and Face Grid — Conform modes: standoff is baked into the path at generation time, so there is no floating plane to intersect the mesh.
+The collision check (hard + near-miss) is skipped entirely for Adaptive and Conform modes: standoff is baked into the path at generation time, so there is no floating plane to intersect the mesh.
 
 **Algorithm — two-tier check per pass:**
 
@@ -1093,11 +1109,10 @@ Connector (air) moves are always written as rapid/travel — speed control appli
 | **Interval** | Waypoint resampling spacing |
 | **Grid** | Display pitch-division lines |
 | **Arrows** | Show travel direction as chevron tick marks |
-| **Cover All Regions** | (Mesh Flow only) Bypass the 2% area and 10% chain-length noise filters — every surface patch is painted regardless of size |
 | **Generate Path** | Generate the selected toolpath |
 | **Clear Path** | Remove generated paths |
 | **View Settings** | Configure 3D display and mesh rendering colours |
-| **Export JSON / CSV / OLP** | Export the generated trajectory |
+| **Export JSON / CSV / OLP / Mesh** | Export the generated trajectory |
 
 ---
 
@@ -1128,7 +1143,7 @@ The integrated PyVista/VTK viewer provides visual validation of:
 - Orientation arms — blue on forward passes, red on reverse passes; per-waypoint surface normal direction (background-computed BVH, falls back to route spray normal); one arm per spray-width interval
 - Connectors
 - Waypoints (gold dots)
-- Adaptive Face Grid: red curved surface grid and always-visible yellow grid intersection dots (mandatory export anchors)
+- Adaptive mode: red curved surface grid and always-visible yellow grid intersection dots (mandatory export anchors)
 - Mesh rendering and display settings
 
 This allows the generated trajectory to be inspected before export.
@@ -1178,7 +1193,7 @@ Four robot-OLP formats are exported via **Export OLP**:
 CSV with header `seq_id,X,Y,Z,NX,NY,NZ,TX,TY,TZ,Trigger,speed_mmpm` (no comment lines before the header). `TX/TY/TZ` = TCP X-axis (Noether `createTransform`); empty when normals not computed (BBox mode). Spray passes have `Trigger=ON` with normals, tangent, and speed; connector moves are interleaved with `Trigger=OFF`, blank normals/tangent, and blank speed — preserving the full execution sequence in one file.
 
 #### DELMIA APT
-APT text file. Spray passes use `GOTO/X,Y,Z,I,J,K` where `I,J,K` = tool Z axis = `-spray_normal` (points into the surface). When per-waypoint tangent is available (Conform/Adaptive/Mesh Surface), an inline comment `$$ TX=tx,ty,tz` follows each `GOTO` line, providing the full TCP frame for post-processor use. Connector moves use `RAPID/X,Y,Z`. `FEDRAT/value,MMPM` is written only when speed changes (auto mode) or once per pass (custom mode); spray gun written as `SPINDL/ON` and `SPINDL/OFF`.
+APT text file. Spray passes use `GOTO/X,Y,Z,I,J,K` where `I,J,K` = tool Z axis = `-spray_normal` (points into the surface). When per-waypoint tangent is available (Conform/Adaptive), an inline comment `$$ TX=tx,ty,tz` follows each `GOTO` line, providing the full TCP frame for post-processor use. Connector moves use `RAPID/X,Y,Z`. `FEDRAT/value,MMPM` is written only when speed changes (auto mode) or once per pass (custom mode); spray gun written as `SPINDL/ON` and `SPINDL/OFF`.
 
 #### G-code (CNC / Robot)
 Standard G-code `.nc` file compatible with CNC and open robot controllers:
@@ -1216,6 +1231,10 @@ All internal distances are maintained in millimetres; display/input unit convers
 
 > **Integration note:** SmartGrid is a **toolpath planning system**, not a complete robot controller. JSON/CSV/OLP/G-code output provides an intermediate trajectory representation for downstream robot-controller integration.
 
+### Mesh
+
+A standalone `.stl` file containing only the generated toolpath — no source-part geometry. Every spray pass and travel connection is swept into a thin tube (`trimesh.creation.sweep_polygon`, 2 mm default radius) and merged into one mesh via `app/export/mesh_export.py: export_route_mesh()`. Useful for inspecting or reusing the exact 3D path shape in any CAD/mesh tool — including re-opening it in SmartGrid itself the same way a part mesh is loaded.
+
 ---
 
 ## File Formats
@@ -1231,6 +1250,7 @@ All internal distances are maintained in millimetres; display/input unit convers
 | CSV (Visual Components) | — | ✓ |
 | APT (DELMIA) | — | ✓ |
 | G-code `.nc` (CNC / Robot) | — | ✓ |
+| STL (toolpath tube mesh, Export Mesh mode) | — | ✓ |
 
 Multi-body OBJ files are merged at load via `trimesh.load(force='mesh')`. STEP files are tessellated via gmsh at load time.
 
@@ -1284,7 +1304,7 @@ Multi-body OBJ files are merged at load via `trimesh.load(force='mesh')`. STEP f
 - **STEP / CAD import** — direct CAD file support via gmsh tessellation
 - **G-code export** — paths usable on any CNC or open robot controller
 - **3D path visualization and validation**
-- **JSON / CSV / OLP / G-code robot-path export**
+- **JSON / CSV / OLP / G-code robot-path export, plus a path-only Mesh (.stl) export**
 - **Modular architecture**
 
 ---
@@ -1301,7 +1321,7 @@ SmartGrid currently focuses on **geometric toolpath generation**. It does not it
 - Paint-flow modelling
 - Complete robot-cell simulation
 
-The Adaptive Face Grid method can float on surfaces with significant curvature along the sweep direction because individual passes are straight. Resampled intermediate waypoints that penetrate the mesh are clipped to the surface via `_clip_inside` (BVH proximity query), but the pass line itself remains straight between grid intersections — it does not follow the surface curvature along the sweep direction.
+The Adaptive method can float on surfaces with significant curvature along the sweep direction because individual passes are straight. Resampled intermediate waypoints that penetrate the mesh are clipped to the surface via `_clip_inside` (BVH proximity query), but the pass line itself remains straight between grid intersections — it does not follow the surface curvature along the sweep direction.
 
 Collision detection uses per-point ray casting (`mesh.contains`) — on very dense meshes with many flagged passes this can be slow. A signed-distance field approach would improve throughput for high-polygon models.
 
@@ -1343,7 +1363,7 @@ SmartGrid/
 │   │   ├── path_model.py      — PaintPass, Connection, PaintRoute, GenerationParams
 │   │   ├── bbox_generator.py
 │   │   ├── face_grid_generator.py — Adaptive, Conform, and _batch_normals_tangents
-│   │   ├── generator.py       — Mesh Surface: thin delegation to generate_conform_route
+│   │   ├── generator.py       — generate_route(): regression baseline only, not exposed in the UI
 │   │   ├── local_normals.py   — interpolate_normals, build_tcp_frames (Noether createTransform)
 │   │   ├── slicer.py
 │   │   ├── stitcher.py        — segment-graph polyline stitcher; StopIteration guard
@@ -1353,7 +1373,7 @@ SmartGrid/
 │   ├── meshflow/              — Mesh Flow (beta) parallel pipeline
 │   │   ├── core_generator.py  — per-component scan frame, adaptive pitch, outward filter
 │   │   ├── lane_planner.py    — curvature-adaptive lane planes (F11/F12)
-│   │   ├── region_manager.py  — significant-component filter, cover_all bypass
+│   │   ├── region_manager.py  — significant-component filter, cover_all param (no UI toggle)
 │   │   ├── direction_estimator.py
 │   │   ├── surface_intersector.py
 │   │   ├── transition_planner.py
@@ -1362,7 +1382,8 @@ SmartGrid/
 │   └── export/
 │       ├── json_export.py
 │       ├── csv_export.py
-│       └── olp_export.py      — RoboDK, Visual Components, DELMIA APT, G-code
+│       ├── olp_export.py      — RoboDK, Visual Components, DELMIA APT, G-code
+│       └── mesh_export.py     — Export Mesh: path-only tube geometry → .stl
 └── models/
     └── mesh_model.py
 ```

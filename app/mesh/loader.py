@@ -13,7 +13,9 @@ def _load_step(filepath: str, mesh_size_factor: float = 0.05) -> trimesh.Trimesh
     """
     import gmsh
     import numpy as np
-    gmsh.initialize()
+    # interruptible=False: skip gmsh's SIGINT handler install, which only
+    # works on the main thread — load_mesh runs in a background QThread.
+    gmsh.initialize(interruptible=False)
     gmsh.option.setNumber('General.Verbosity', 0)
     gmsh.model.occ.importShapes(filepath)
     gmsh.model.occ.synchronize()

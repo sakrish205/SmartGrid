@@ -28,6 +28,7 @@ from app.ui.ribbon import SmartRibbon
 from app.export.json_export import export_route_json
 from app.robot.robot_profile import get_active_profile, load_profiles
 from app.export.csv_export import export_route_csv
+from app.export.mesh_export import export_route_mesh
 from app.export.olp_export import (
     export_robodk, export_vc, export_delmia_apt, export_gcode,
     export_abb_rapid, export_fanuc_ls, export_durr, export_cad_dxf,
@@ -38,22 +39,6 @@ from app.ui.view_settings_dialog import ViewSettingsDialog, DEFAULTS as _COLOR_D
 _SIDE_REGIONS = frozenset({'FRONT', 'REAR', 'LEFT', 'RIGHT'})
 _TB_REGIONS   = frozenset({'TOP', 'BOTTOM'})
 _ALL_REGIONS  = _SIDE_REGIONS | _TB_REGIONS
-
-
-def _group_for_mesh(selected_regions, model):
-    """Combine side regions into one group and top/bottom into another."""
-    groups = []
-    for bucket in (_SIDE_REGIONS, _TB_REGIONS):
-        members = sorted(selected_regions & bucket)
-        if not members:
-            continue
-        arrays = [np.asarray(model.get_region_faces(r), dtype=np.int64) for r in members]
-        arrays = [a for a in arrays if len(a) > 0]
-        if not arrays:
-            continue
-        name = '+'.join(members) if len(members) > 1 else members[0]
-        groups.append((name, np.unique(np.concatenate(arrays))))
-    return groups
 
 
 def _group_for_face_grid(selected_regions, model):
@@ -369,71 +354,9 @@ class _LoadWorker(QThread):
             self.error.emit(f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
 
 
-class _PathWorker(QThread):
-    finished = Signal(object)
-    error    = Signal(str)
-
-    def __init__(
-        self,
-        mesh_data,
-        pairs: list,
-        spray_mm: float,
-        waypoint_spacing_mm: float = 0.0,
-        standoff_mm: float = 0.0,
-        direction: str = 'horizontal',
-        robot_profile=None,   # RobotProfile | None — triggers geodesic when set
-    ) -> None:
-        super().__init__()
-        self._mesh_data        = mesh_data
-        self._pairs            = pairs
-        self._spray_mm         = spray_mm
-        self._waypoint_spacing = waypoint_spacing_mm
-        self._standoff_mm      = standoff_mm
-        self._direction        = direction
-        self._robot_profile    = robot_profile
-
-    def run(self) -> None:
-        try:
-            mesh = self._mesh_data.trimesh_mesh
-            routes = []
-            if self._robot_profile is not None:
-                from app.path.geodesic_generator import generate_geodesic_route
-                for region_id, face_indices in self._pairs:
-                    route = generate_geodesic_route(
-                        self._mesh_data,
-                        region_face_indices=face_indices,
-                        region_id=region_id,
-                        spray_width_mm=self._spray_mm,
-                        robot_profile=self._robot_profile,
-                        waypoint_spacing_mm=self._waypoint_spacing,
-                        direction=self._direction,
-                    )
-                    if self._standoff_mm > 0.0:
-                        route = _offset_route_by_standoff(route, mesh, self._standoff_mm)
-                    routes.append(route)
-            else:
-                from app.path import generator as _gen
-                for region_id, face_indices in self._pairs:
-                    route = _gen.generate_route(
-                        self._mesh_data,
-                        region_id=region_id,
-                        region_face_indices=face_indices,
-                        spray_width_mm=self._spray_mm,
-                        waypoint_spacing_mm=self._waypoint_spacing,
-                        direction=self._direction,
-                    )
-                    if self._standoff_mm > 0.0:
-                        route = _offset_route_by_standoff(route, mesh, self._standoff_mm)
-                    routes.append(route)
-            self.finished.emit(routes)
-        except Exception as exc:
-            self.error.emit(f'{type(exc).__name__}: {exc}\n{traceback.format_exc()}')
-
-
 class _MeshFlowWorker(QThread):
-    """Mesh Flow (Phase 3) — region-local, surface-adaptive raster. Modeled on
-    _PathWorker above but fully parallel to Mesh Surface's generate_route(), never
-    calling into it."""
+    """Mesh Flow (Phase 3) — region-local, surface-adaptive raster, fully
+    parallel to generator.py's generate_route(), never calling into it."""
     finished = Signal(object)
     error    = Signal(str)
 
@@ -675,6 +598,7 @@ class MainWindow(QMainWindow):
         self._ribbon.export_json.connect(self._export_json)
         self._ribbon.export_csv.connect(self._export_csv)
         self._ribbon.export_olp.connect(self._export_olp)
+        self._ribbon.export_mesh.connect(self._export_mesh)
         self._ribbon.view_settings_req.connect(self._open_view_settings)
         self._ribbon.path_mode_changed.connect(self._auto_set_direction)
 
@@ -756,6 +680,7 @@ class MainWindow(QMainWindow):
         export_menu.addAction('Export JSON...', self._export_json)
         export_menu.addAction('Export CSV...',  self._export_csv)
         export_menu.addAction('Export OLP...',  self._export_olp)
+        export_menu.addAction('Export Mesh...', self._export_mesh)
 
         self._robots_menu = mb.addMenu('Robots')
         self._robots_menu.addAction('Manage Robots…', self._open_robot_manager)
@@ -1013,17 +938,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _auto_set_direction(self) -> None:
-        """Set H/V radio based on selection; lock non-applicable radio in Mesh Surface mode."""
-        if self._ribbon.get_path_target() != 'mesh':
-            self._ribbon.set_direction(self._ribbon.get_direction(), lock=False)
-            return
-        sel = self._selected_regions
-        if sel and sel.issubset(_SIDE_REGIONS):
-            self._ribbon.set_direction('vertical', lock=True)
-        elif sel & _TB_REGIONS:
-            self._ribbon.set_direction('horizontal', lock=True)
-        else:
-            self._ribbon.set_direction(self._ribbon.get_direction(), lock=False)
+        """Set H/V radio without locking (direction locking was Mesh Surface-only)."""
+        self._ribbon.set_direction(self._ribbon.get_direction(), lock=False)
 
     def _is_mesh_flow_mode(self) -> bool:
         return self._ribbon.get_path_target() == 'mesh_flow'
@@ -1077,17 +993,12 @@ class MainWindow(QMainWindow):
 
     def _build_params(self, path_target: str, spray_mm: float) -> GenerationParams:
         """Snapshot all UI settings into a GenerationParams for export metadata."""
-        submode = self._ribbon.get_face_grid_submode()
-        if path_target == 'bbox':
-            mode = 'Boundary Box'
-        elif path_target == 'face_grid' and submode == 'shadow':
-            mode = 'Face Grid / Adaptive'
-        elif path_target == 'face_grid' and submode == 'mesh_standoff':
-            mode = 'Face Grid / Conform'
-        elif path_target == 'mesh_flow':
-            mode = 'Mesh Flow'
-        else:
-            mode = 'Mesh Surface'
+        mode = {
+            'bbox':      'Boundary Box',
+            'adaptive':  'Adaptive',
+            'conform':   'Conform',
+            'mesh_flow': 'Mesh Flow',
+        }[path_target]
 
         up_labels = {0: 'X', 1: 'Y', 2: 'Z'}
         src = ''
@@ -1120,12 +1031,12 @@ class MainWindow(QMainWindow):
         self._last_params = self._build_params(path_target, spray_mm)
         if path_target == 'bbox':
             self._generate_bbox(spray_mm)
-        elif path_target == 'face_grid':
-            self._generate_face_grid(spray_mm)
-        elif path_target == 'mesh_flow':
-            self._generate_mesh_flow(spray_mm)
+        elif path_target == 'adaptive':
+            self._generate_face_grid_flat(spray_mm)
+        elif path_target == 'conform':
+            self._generate_face_grid_mesh(spray_mm)
         else:
-            self._generate_mesh(spray_mm)
+            self._generate_mesh_flow(spray_mm)
 
     def _generate_bbox(self, spray_mm: float) -> None:
         if not self._selected_regions:
@@ -1163,19 +1074,12 @@ class MainWindow(QMainWindow):
         self._viewer.show_bbox(True)
         self._on_route_ready(routes)
 
-    def _generate_face_grid(self, spray_mm: float) -> None:
-        """Face Grid: shadow projection or mesh-surface standoff."""
+    def _generate_face_grid_flat(self, spray_mm: float) -> None:
+        """Adaptive: H×V intersection-grid passes (background worker)."""
         if not self._selected_regions:
             QMessageBox.warning(self, 'No selection',
                 'Select a face region first, then generate.')
             return
-        if self._ribbon.get_face_grid_submode() == 'mesh_standoff':
-            self._generate_face_grid_mesh(spray_mm)
-        else:
-            self._generate_face_grid_flat(spray_mm)
-
-    def _generate_face_grid_flat(self, spray_mm: float) -> None:
-        """Depth-Adaptive: H×V intersection-grid passes (background worker)."""
         from app.path import face_grid_generator as _fg_gen
         data     = self._model.data
         mesh     = data.trimesh_mesh
@@ -1248,6 +1152,10 @@ class MainWindow(QMainWindow):
 
     def _generate_face_grid_mesh(self, spray_mm: float) -> None:
         """Conform: tilted-basis cutting planes + trimesh intersection + uniform standoff."""
+        if not self._selected_regions:
+            QMessageBox.warning(self, 'No selection',
+                'Select a face region first, then generate.')
+            return
         from app.path import face_grid_generator as _fg_gen
         data     = self._model.data
         mesh     = data.trimesh_mesh
@@ -1324,32 +1232,9 @@ class MainWindow(QMainWindow):
         self._worker = worker
         worker.start()
 
-    def _generate_mesh(self, spray_mm: float) -> None:
-        pairs = _group_for_mesh(self._selected_regions, self._model)
-        if not pairs:
-            QMessageBox.warning(self, 'No selection',
-                'Select bounding box regions first.')
-            return
-        wpt_mm = self._ribbon.get_waypoint_spacing_mm()
-        self._ribbon.set_generating(True)
-        self.statusBar().showMessage('Generating mesh surface paths…')
-        worker = _PathWorker(self._model.data, pairs, spray_mm,
-                             waypoint_spacing_mm=wpt_mm,
-                             standoff_mm=self._ribbon.get_standoff_mm(),
-                             direction=self._ribbon.get_direction(),
-                             robot_profile=None)   # always slice+stitch, never geodesic
-        self._face_grid_planes_cache = None
-        self._adaptive_grid_cache    = None
-        self._viewer.clear_face_grid_planes()
-        self._viewer.show_bbox(True)
-        worker.finished.connect(self._on_route_ready)
-        worker.error.connect(self._on_route_error)
-        self._worker = worker
-        worker.start()
-
     def _generate_mesh_flow(self, spray_mm: float) -> None:
         """Mesh Flow (Phase 3, beta — see convertmdfiles' Mesh Flow implementation
-        plan). Selection is INVERTED relative to Boundary Box/Face Grid: the
+        plan). Selection is INVERTED relative to Boundary Box/Adaptive/Conform: the
         face(s) the user clicks are excluded (e.g. a hanger/mount point), and
         generation runs on the complement — every other region, merged into one
         path by _on_route_ready's existing merge_routes call. Regions the region
@@ -1372,7 +1257,6 @@ class MainWindow(QMainWindow):
             self._model.data, positive_regions, spray_mm,
             waypoint_spacing_mm=wpt_mm,
             standoff_mm=self._ribbon.get_standoff_mm(),
-            cover_all=self._ribbon.get_cover_all(),
         )
         self._face_grid_planes_cache = None
         self._adaptive_grid_cache    = None
@@ -1492,7 +1376,7 @@ class MainWindow(QMainWindow):
                 "Try reducing the spray width or check that the correct up-axis was selected.",
             )
         is_face_grid = (self._last_params is not None and
-                        'Face Grid' in self._last_params.path_mode)
+                        self._last_params.path_mode in ('Adaptive', 'Conform'))
         # final status message emitted by _prog_tick when animation finishes
         self._update_grid()
 
@@ -1710,14 +1594,10 @@ checkboxes in the ribbon. Multiple regions may be selected simultaneously.</p>
       Best for curved or multi-face selections.</li>
   <li><b>Conform</b> – tilted cutting planes follow the surface normal; paths
       hug the mesh. Use with a standoff distance.</li>
-  <li><b>Mesh Surface</b> – axis-aligned slices through the mesh. Good for
-      organic shapes with complex topology.</li>
   <li><b>Mesh Flow (beta)</b> – selection is <em>inverted</em>: the region(s) you
       click are excluded (e.g. a hanger/jig mount); every other region is painted
       as one route. Interior faces are filtered automatically; lane spacing adapts
-      to surface curvature; all panels share a consistent sweep angle.<br>
-      <b>Cover All Regions</b> checkbox: bypass the noise filters when you want
-      every surface patch painted regardless of size. Best for real multi-part meshes.
+      to surface curvature; all panels share a consistent sweep angle.
       See <b>Help › Path Generation Formulas…</b> for the full algorithm.</li>
 </ul>
 
@@ -1797,7 +1677,7 @@ returned — <code>_significant_polylines</code> then keeps every chain &ge; 10%
 spaced <code>step_min + pitch/2 … step_max</code> at interval <code>pitch</code>; passes
 alternate direction (boustrophedon, even index = forward).</p>
 
-<h3>Face Grid — Adaptive</h3>
+<h3>Adaptive</h3>
 <p><code>mean_n</code> = mean normal of forward-facing faces. Orthonormal basis
 <code>pass_vec = normalize(mean_n &times; up)</code>,
 <code>step_vec = normalize(pass_vec &times; mean_n)</code>. Per step position, the outermost
@@ -1805,7 +1685,7 @@ depth of a &plusmn;<code>pitch&times;0.65</code> vertex band sets that row's spr
 (<code>mean_n</code>-tilted, not world-axis). Each pass is a straight polyline through the
 H&times;V grid intersections.</p>
 
-<h3>Face Grid — Conform</h3>
+<h3>Conform</h3>
 <p>Same <code>mean_n</code>/<code>pass_vec</code>/<code>step_vec</code> basis as Adaptive, but
 cutting planes (<code>plane_normal = step_vec</code>) are intersected against the actual mesh
 via <code>trimesh.intersections.mesh_plane</code> — paths lie exactly on the surface. Segments
@@ -1814,18 +1694,13 @@ region classifier) so boundary/transition faces are included, then are stitched 
 and RDP-simplified (&epsilon; = 0.3&nbsp;mm). Standoff is a uniform shift
 <code>pts += standoff_mm &times; mean_n</code>.</p>
 
-<h3>Mesh Surface</h3>
-<p>Delegates to Face Grid — Conform with <code>standoff_mm = 0</code>. Identical algorithm,
-zero offset — every waypoint lies on the mesh surface.</p>
-
 <h3>Mesh Flow (beta)</h3>
 <p>A fully parallel pipeline (not a variant of the other three). <b>Selection is inverted</b> —
 clicked region(s) are excluded; everything else is painted as one route.</p>
 <ol>
 <li><b>Region membership.</b> Each face scored by normal alignment (60%) + bbox-side position
 (40%). Restricted to every connected surface patch whose area is &ge; 2% of the region's largest
-patch — real panels survive, decoy slivers are dropped. <b>Cover All Regions</b> toggle bypasses
-this filter.</li>
+patch — real panels survive, decoy slivers are dropped.</li>
 <li><b>Outward-hemisphere filter.</b> Faces with
 <code>face_normal &middot; spray_normal &lt; &minus;0.5</code> are dropped — interior cavity walls
 and underside panels are excluded. <code>spray_normal</code> is derived from the largest component
@@ -1844,8 +1719,7 @@ where <code>&phi;</code> is the angle between the spacing direction and the loca
 F12 floor is preserved: <code>n_min = max(1, floor(span/pitch) + 1)</code>.</li>
 <li><b>Intersection.</b> Strict region-face-membership plane cut, segments stitched into
 polylines. Every chain &ge; 10% of that plane's own longest chain is kept (not just the longest)
-so a plane crossing two real panels covers both. <b>Cover All Regions</b> also bypasses this
-chain filter.</li>
+so a plane crossing two real panels covers both.</li>
 <li><b>Alternation (F41).</b> Same <code>visible_count</code>-parity boustrophedon rule as every
 other mode. Passes are reordered by greedy nearest-neighbour walk before connector planning.</li>
 <li><b>Standoff (F59/C1).</b> Each point offset along its own interpolated normal, looked up
@@ -1886,10 +1760,10 @@ boustrophedon decomposition; Ramer-Douglas-Peucker simplification; Trimesh plane
         tb.setFrameShape(QFrame.Shape.NoFrame)
         tb.setStyleSheet('font-family:"Segoe UI",Arial;font-size:12px;background:transparent;')
         tb.setHtml('''
-<h2 style="margin:0 0 4px 0">SmartGrid  <span style="font-weight:normal;font-size:13px;color:#555">v1.9</span></h2>
+<h2 style="margin:0 0 4px 0">SmartGrid  <span style="font-weight:normal;font-size:13px;color:#555">v1.10</span></h2>
 <p style="margin:0 0 12px 0;color:#555">3D Surface Grid &amp; Pitch Mapper</p>
 <p>Robotic spray-paint toolpath planner for STL, OBJ and STEP meshes.<br>
-Supports Boundary Box, Adaptive, Conform, Mesh Surface and Mesh Flow (beta) path modes
+Supports Boundary Box, Adaptive, Conform and Mesh Flow (beta) path modes
 with JSON / CSV / OLP export.</p>
 <p><a href="https://github.com/sakrish205/SmartGrid">github.com/sakrish205/SmartGrid</a></p>
 ''')
@@ -1940,6 +1814,23 @@ with JSON / CSV / OLP export.</p>
                 self._current_routes, path,
                 params=self._last_params,
             )
+            self.statusBar().showMessage(f'Exported: {path}')
+        except Exception as exc:
+            QMessageBox.critical(self, 'Export error', str(exc))
+            self.statusBar().showMessage('Export failed.')
+
+    def _export_mesh(self) -> None:
+        if not self._current_routes:
+            QMessageBox.warning(self, 'Nothing to export', 'Generate a path first.')
+            return
+        path, _ = QFileDialog.getSaveFileName(self, 'Export Mesh', '', 'STL (*.stl)')
+        if not path:
+            return
+        if not path.lower().endswith('.stl'):
+            path += '.stl'
+        self.statusBar().showMessage('Exporting toolpath...')
+        try:
+            export_route_mesh(self._current_routes, path)
             self.statusBar().showMessage(f'Exported: {path}')
         except Exception as exc:
             QMessageBox.critical(self, 'Export error', str(exc))

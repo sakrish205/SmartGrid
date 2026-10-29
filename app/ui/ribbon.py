@@ -327,6 +327,7 @@ class SmartRibbon(QWidget):
     export_json         = Signal()
     export_csv          = Signal()
     export_olp          = Signal()
+    export_mesh         = Signal()
     view_settings_req   = Signal()
     path_mode_changed   = Signal()
 
@@ -493,87 +494,44 @@ class SmartRibbon(QWidget):
     def _build_path_mode(self) -> _Group:
         g = _Group('Path Mode')
 
-        hl = QHBoxLayout()
-        hl.setSpacing(8)
-        hl.setContentsMargins(0, 0, 0, 0)
-
         target_vl = QVBoxLayout()
         target_vl.setSpacing(2)
         target_vl.setContentsMargins(0, 0, 0, 0)
         self._bbox_radio      = QRadioButton('Boundary Box')
-        self._face_grid_radio = QRadioButton('Face Grid')
-        self._mesh_radio      = QRadioButton('Mesh Surface')
+        self._fg_shadow_radio = QRadioButton('Adaptive')
+        self._fg_mesh_radio   = QRadioButton('Conform')
         self._mesh_flow_radio = QRadioButton('Mesh Flow (beta)')
         self._bbox_radio.setChecked(True)
         self._bbox_radio.setToolTip(
             'Generates parallel passes across the full bounding-box face.\n'
             'Fast — best for flat or near-flat panels.')
-        self._face_grid_radio.setToolTip(
-            'Generates passes confined to the selected mesh region.\n'
-            'Depth follows the actual mesh surface (no paths inside recesses).')
-        self._mesh_radio.setToolTip(
-            'Slices directly through the mesh triangles.\n'
-            'Accurate on complex curved surfaces.')
-        self._mesh_flow_radio.setToolTip(
-            'Region-local, surface-adaptive raster planner (in development).\n'
-            'Several production decisions are still unresolved — see the Mesh Flow spec.')
-        for r in (self._bbox_radio, self._face_grid_radio, self._mesh_radio, self._mesh_flow_radio):
-            r.setStyleSheet(_RADIO_CSS)
-        self._target_grp = QButtonGroup(self)
-        self._target_grp.addButton(self._bbox_radio,      0)
-        self._target_grp.addButton(self._face_grid_radio, 2)
-        self._target_grp.addButton(self._mesh_radio,      1)
-        self._target_grp.addButton(self._mesh_flow_radio, 3)
-        target_vl.addWidget(self._bbox_radio)
-        target_vl.addWidget(self._face_grid_radio)
-        target_vl.addWidget(self._mesh_radio)
-        target_vl.addWidget(self._mesh_flow_radio)
-        self._mesh_flow_radio.setVisible(MESH_FLOW_UI_ENABLED)
-        self._cover_all_check = QCheckBox('Cover All Regions')
-        self._cover_all_check.setToolTip(
-            'When on, bypasses the area and chain-length noise filters.\n'
-            'Every surface patch and intersection chain is painted regardless of size.\n'
-            'Use on simple single-body parts or when coverage gaps appear.')
-        self._cover_all_check.setVisible(MESH_FLOW_UI_ENABLED)
-        target_vl.addWidget(self._cover_all_check)
-        target_w = QWidget()
-        target_w.setLayout(target_vl)
-        target_w.setMinimumWidth(100)
-        hl.addWidget(target_w)
-
-        # Face Grid sub-panel — shown only when Face Grid is selected
-        fg_vl = QVBoxLayout()
-        fg_vl.setSpacing(2)
-        fg_vl.setContentsMargins(2, 0, 0, 0)
-
-        # Sub-mode: Depth-Adaptive vs Surface Conform
-        self._fg_shadow_radio = QRadioButton('Adaptive')
-        self._fg_mesh_radio   = QRadioButton('Conform')
-        self._fg_shadow_radio.setChecked(True)
         self._fg_shadow_radio.setToolTip(
             'Shadow projection — depth follows outermost surface vertex per band.\n'
             'Fast and accurate for most surfaces.')
         self._fg_mesh_radio.setToolTip(
             'Slices the actual 3D mesh surface.\n'
             'Use for highly curved surfaces with complex contours.')
-        for r in (self._fg_shadow_radio, self._fg_mesh_radio):
+        self._mesh_flow_radio.setToolTip(
+            'Region-local, surface-adaptive raster planner (in development).\n'
+            'Several production decisions are still unresolved — see the Mesh Flow spec.')
+        for r in (self._bbox_radio, self._fg_shadow_radio, self._fg_mesh_radio, self._mesh_flow_radio):
             r.setStyleSheet(_RADIO_CSS)
-        self._fg_sub_grp = QButtonGroup(self)
-        self._fg_sub_grp.addButton(self._fg_shadow_radio, 0)
-        self._fg_sub_grp.addButton(self._fg_mesh_radio,   1)
-        fg_vl.addWidget(self._fg_shadow_radio)
-        fg_vl.addWidget(self._fg_mesh_radio)
+        self._target_grp = QButtonGroup(self)
+        self._target_grp.addButton(self._bbox_radio,      0)
+        self._target_grp.addButton(self._fg_shadow_radio, 1)
+        self._target_grp.addButton(self._fg_mesh_radio,   2)
+        self._target_grp.addButton(self._mesh_flow_radio, 3)
+        target_vl.addWidget(self._bbox_radio)
+        target_vl.addWidget(self._fg_shadow_radio)
+        target_vl.addWidget(self._fg_mesh_radio)
+        target_vl.addWidget(self._mesh_flow_radio)
+        self._mesh_flow_radio.setVisible(MESH_FLOW_UI_ENABLED)
+        target_w = QWidget()
+        target_w.setLayout(target_vl)
+        target_w.setMinimumWidth(100)
 
-        # Hide until Face Grid is selected
-        self._fg_subpanel = QWidget()
-        self._fg_subpanel.setLayout(fg_vl)
-        self._fg_subpanel.setMinimumWidth(130)
-        self._fg_subpanel.setVisible(False)
-        hl.addWidget(self._fg_subpanel)
-
-        self._face_grid_radio.toggled.connect(self._on_target_changed)
         self._target_grp.idClicked.connect(lambda _: self.path_mode_changed.emit())
-        g.add_layout(hl)
+        g.add(target_w)
         return g
 
     # ── Sweep ─────────────────────────────────────────────────────────────
@@ -728,12 +686,14 @@ class SmartRibbon(QWidget):
         self._exp_json_btn = _small_btn('Export\nJSON', _make_icon('export', 16))
         self._exp_csv_btn  = _small_btn('Export\nCSV',  _make_icon('export', 16))
         self._exp_olp_btn  = _small_btn('Export\nOLP',  _make_icon('export', 16))
-        for b in (self._exp_json_btn, self._exp_csv_btn, self._exp_olp_btn):
+        self._exp_mesh_btn = _small_btn('Export\nMesh', _make_icon('export', 16))
+        for b in (self._exp_json_btn, self._exp_csv_btn, self._exp_olp_btn, self._exp_mesh_btn):
             b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             b.setFixedWidth(46)
         g.add(self._exp_json_btn)
         g.add(self._exp_csv_btn)
         g.add(self._exp_olp_btn)
+        g.add(self._exp_mesh_btn)
         return g
 
     # ------------------------------------------------------------------
@@ -784,6 +744,7 @@ class SmartRibbon(QWidget):
         self._exp_json_btn.clicked.connect(self.export_json)
         self._exp_csv_btn.clicked.connect(self.export_csv)
         self._exp_olp_btn.clicked.connect(self.export_olp)
+        self._exp_mesh_btn.clicked.connect(self.export_mesh)
 
     def _on_pitch_changed(self, _value: float) -> None:
         """Spray pitch changed — update grid display and trigger regeneration."""
@@ -875,14 +836,11 @@ class SmartRibbon(QWidget):
     def get_path_target(self) -> str:
         if self._bbox_radio.isChecked():
             return 'bbox'
-        if self._face_grid_radio.isChecked():
-            return 'face_grid'
+        if self._fg_mesh_radio.isChecked():
+            return 'conform'
         if self._mesh_flow_radio.isChecked():
             return 'mesh_flow'
-        return 'mesh'
-
-    def get_cover_all(self) -> bool:
-        return self._cover_all_check.isChecked()
+        return 'adaptive'
 
     def get_standoff_mm(self) -> float:
         return self._standoff_spin.value() * UNIT_TO_MM.get(self._current_unit, 1.0)
@@ -923,14 +881,6 @@ class SmartRibbon(QWidget):
             'Check Custom to override.'
         )
 
-    def get_face_grid_submode(self) -> str:
-        """'shadow' | 'mesh_standoff'"""
-        return 'mesh_standoff' if self._fg_mesh_radio.isChecked() else 'shadow'
-
-    def _on_target_changed(self) -> None:
-        self._fg_subpanel.setVisible(self._face_grid_radio.isChecked())
-        self.updateGeometry()
-
     def is_direction_flipped(self) -> bool:
         return self._ccw_radio.isChecked()
 
@@ -961,7 +911,7 @@ class SmartRibbon(QWidget):
         for w in (self._all_btn, self._none_btn, self._select_btn,
                   self._unit_combo, self._pitch_spin,
                   self._cw_radio, self._ccw_radio,
-                  self._bbox_radio, self._face_grid_radio, self._mesh_radio,
+                  self._bbox_radio,
                   self._fg_shadow_radio, self._fg_mesh_radio,
                   self._standoff_custom_check,
                   self._custom_check, self._wpt_interval_spin,
@@ -976,6 +926,7 @@ class SmartRibbon(QWidget):
         self._exp_json_btn.setEnabled(False)
         self._exp_csv_btn.setEnabled(False)
         self._exp_olp_btn.setEnabled(False)
+        self._exp_mesh_btn.setEnabled(False)
 
     def set_generating(self, generating: bool) -> None:
         self._gen_btn.setText('Generating…' if generating else 'Generate\nPath')
@@ -985,7 +936,7 @@ class SmartRibbon(QWidget):
         for w in (self._all_btn, self._none_btn, self._select_btn,
                   self._unit_combo, self._pitch_spin,
                   self._cw_radio, self._ccw_radio,
-                  self._bbox_radio, self._face_grid_radio, self._mesh_radio,
+                  self._bbox_radio,
                   self._fg_shadow_radio, self._fg_mesh_radio,
                   self._standoff_custom_check,
                   self._custom_check, self._wpt_interval_spin,
@@ -993,7 +944,7 @@ class SmartRibbon(QWidget):
                   self._clear_btn):
             w.setEnabled(enabled)
         if generating:  # lock exports during generation; set_path_exists re-enables on finish
-            for w in (self._exp_json_btn, self._exp_csv_btn, self._exp_olp_btn):
+            for w in (self._exp_json_btn, self._exp_csv_btn, self._exp_olp_btn, self._exp_mesh_btn):
                 w.setEnabled(False)
         # restore correct states once generation ends
         if not generating:
@@ -1005,6 +956,7 @@ class SmartRibbon(QWidget):
         self._exp_json_btn.setEnabled(exists)
         self._exp_csv_btn.setEnabled(exists)
         self._exp_olp_btn.setEnabled(exists)
+        self._exp_mesh_btn.setEnabled(exists)
 
     def set_unit(self, unit: str) -> None:
         if unit in _UNITS and unit != self._current_unit:

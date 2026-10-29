@@ -1,0 +1,662 @@
+{
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\.agents\\skills\\embedded-captions\\scripts\\fixtures\\heroless\\transcript.json": {
+    "mtime": 1789615512.8747275,
+    "seen": 1793283629.3451157,
+    "ast_hash": "9542229b12eb174d16305f995da3fd98",
+    "semantic_hash": "9542229b12eb174d16305f995da3fd98"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\.claude\\skills\\embedded-captions\\scripts\\fixtures\\heroless\\transcript.json": {
+    "mtime": 1789615512.8747275,
+    "seen": 1793283629.3451157,
+    "ast_hash": "9542229b12eb174d16305f995da3fd98",
+    "semantic_hash": "9542229b12eb174d16305f995da3fd98"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\.graphify_analysis.json": {
+    "mtime": 1793283598.1413784,
+    "seen": 1793283629.3451157,
+    "ast_hash": "5dbfffe23bb520cb7186eb4ae7c93a61",
+    "semantic_hash": "5dbfffe23bb520cb7186eb4ae7c93a61"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\.graphify_ast.json": {
+    "mtime": 1793283478.6932955,
+    "seen": 1793283629.3451157,
+    "ast_hash": "982280b4b157a77e3a4e1ecf76bf3b52",
+    "semantic_hash": "982280b4b157a77e3a4e1ecf76bf3b52"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\.graphify_detect.json": {
+    "mtime": 1793280983.6354277,
+    "seen": 1793283629.3451157,
+    "ast_hash": "82a9123f4c23684e4fe92cab0ee3c6ed",
+    "semantic_hash": "82a9123f4c23684e4fe92cab0ee3c6ed"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\.graphify_extract.json": {
+    "mtime": 1793283575.1934645,
+    "seen": 1793283629.3451157,
+    "ast_hash": "0b7216a2b452e81421a241e879a5ee9d",
+    "semantic_hash": "0b7216a2b452e81421a241e879a5ee9d"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\.graphify_labels.json": {
+    "mtime": 1793281331.9342039,
+    "seen": 1793283629.3451157,
+    "ast_hash": "1ef94fba4a1eba3cdfa1e038de79ab86",
+    "semantic_hash": "1ef94fba4a1eba3cdfa1e038de79ab86"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\.graphify_semantic.json": {
+    "mtime": 1793281280.0278046,
+    "seen": 1793283629.3451157,
+    "ast_hash": "fb34bb7a2805a6a69c60d1da6130bd69",
+    "semantic_hash": "fb34bb7a2805a6a69c60d1da6130bd69"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\__init__.py": {
+    "mtime": 1788191320.2385826,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\export\\__init__.py": {
+    "mtime": 1788191329.3594897,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\export\\csv_export.py": {
+    "mtime": 1791185472.9751267,
+    "seen": 1793283629.3451157,
+    "ast_hash": "54c4f5b8dab62d402bcc573e736fd33f",
+    "semantic_hash": "54c4f5b8dab62d402bcc573e736fd33f"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\export\\json_export.py": {
+    "mtime": 1791185487.8467145,
+    "seen": 1793283629.3451157,
+    "ast_hash": "83122da5d2248808052cd9b7171f730c",
+    "semantic_hash": "83122da5d2248808052cd9b7171f730c"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\export\\mesh_export.py": {
+    "mtime": 1793282610.0878007,
+    "seen": 1793283629.3451157,
+    "ast_hash": "eddb070e8dbdc20cc96643f41410ab96",
+    "semantic_hash": "eddb070e8dbdc20cc96643f41410ab96"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\export\\olp_export.py": {
+    "mtime": 1793183898.9312057,
+    "seen": 1793283629.3451157,
+    "ast_hash": "c3892a3c5867979726a7e033c5e999c8",
+    "semantic_hash": "c3892a3c5867979726a7e033c5e999c8"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\main_window.py": {
+    "mtime": 1793283416.2472837,
+    "seen": 1793283629.3451157,
+    "ast_hash": "5565a6070847991830574b75bdd5ae94",
+    "semantic_hash": "5565a6070847991830574b75bdd5ae94"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\mesh\\__init__.py": {
+    "mtime": 1788191329.3594897,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\mesh\\loader.py": {
+    "mtime": 1793282069.594604,
+    "seen": 1793283629.3451157,
+    "ast_hash": "659c19c2bca3dc66b43d363e7a43da2d",
+    "semantic_hash": "659c19c2bca3dc66b43d363e7a43da2d"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\mesh\\preprocessor.py": {
+    "mtime": 1790616473.7287865,
+    "seen": 1793283629.3451157,
+    "ast_hash": "17f03f6c557d934599867b557d7faa76",
+    "semantic_hash": "17f03f6c557d934599867b557d7faa76"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\mesh\\regions.py": {
+    "mtime": 1793077904.0793264,
+    "seen": 1793283629.3451157,
+    "ast_hash": "89013bb5b0c06ca8402f72521738ed63",
+    "semantic_hash": "89013bb5b0c06ca8402f72521738ed63"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\__init__.py": {
+    "mtime": 1793077857.596949,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\comparison.py": {
+    "mtime": 1793079491.3529205,
+    "seen": 1793283629.3451157,
+    "ast_hash": "932fd3c9183f5fe5c9112043488a8a59",
+    "semantic_hash": "932fd3c9183f5fe5c9112043488a8a59"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\core_generator.py": {
+    "mtime": 1793209172.4930487,
+    "seen": 1793283629.3451157,
+    "ast_hash": "79ed3e32ebc59a24a776b0e2d524f623",
+    "semantic_hash": "79ed3e32ebc59a24a776b0e2d524f623"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\curve_conditioner.py": {
+    "mtime": 1793078622.1587243,
+    "seen": 1793283629.3451157,
+    "ast_hash": "4cee43476c493a601f904b5c2f967aa5",
+    "semantic_hash": "4cee43476c493a601f904b5c2f967aa5"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\direction_estimator.py": {
+    "mtime": 1793077945.7519763,
+    "seen": 1793283629.3451157,
+    "ast_hash": "2d2e3640b5a7433fdb735a47595b54c7",
+    "semantic_hash": "2d2e3640b5a7433fdb735a47595b54c7"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\export_gate.py": {
+    "mtime": 1793079309.64272,
+    "seen": 1793283629.3451157,
+    "ast_hash": "3f59e6d0b95afab0218088cff05e80f0",
+    "semantic_hash": "3f59e6d0b95afab0218088cff05e80f0"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\lane_planner.py": {
+    "mtime": 1793209172.4950504,
+    "seen": 1793283629.3451157,
+    "ast_hash": "92c00889f48e4f94282a62337920de0e",
+    "semantic_hash": "92c00889f48e4f94282a62337920de0e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\legacy_aliases.py": {
+    "mtime": 1793079646.0698183,
+    "seen": 1793283629.3451157,
+    "ast_hash": "7cac7a0fc87a505f99620a7f4e5f886f",
+    "semantic_hash": "7cac7a0fc87a505f99620a7f4e5f886f"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\open_decisions.py": {
+    "mtime": 1793077878.4805088,
+    "seen": 1793283629.3451157,
+    "ast_hash": "dfaaaf37527d0e7b325e5eeca5e5694a",
+    "semantic_hash": "dfaaaf37527d0e7b325e5eeca5e5694a"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\process_state_planner.py": {
+    "mtime": 1793079072.1953142,
+    "seen": 1793283629.3451157,
+    "ast_hash": "9d17eae540da8efaaf838808d98e7aec",
+    "semantic_hash": "9d17eae540da8efaaf838808d98e7aec"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\region_manager.py": {
+    "mtime": 1793209172.4970503,
+    "seen": 1793283629.3451157,
+    "ast_hash": "b93967564ceb6466dca6596d7b5669e1",
+    "semantic_hash": "b93967564ceb6466dca6596d7b5669e1"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\safety_validator.py": {
+    "mtime": 1793079293.9006455,
+    "seen": 1793283629.3451157,
+    "ast_hash": "b48e8a56f3dd09132aeacbfd7a631446",
+    "semantic_hash": "b48e8a56f3dd09132aeacbfd7a631446"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\surface_intersector.py": {
+    "mtime": 1793077991.9288816,
+    "seen": 1793283629.3451157,
+    "ast_hash": "58fde72cb3e4a2d2291f3adc367c8527",
+    "semantic_hash": "58fde72cb3e4a2d2291f3adc367c8527"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\meshflow\\transition_planner.py": {
+    "mtime": 1793079014.1525462,
+    "seen": 1793283629.3451157,
+    "ast_hash": "c23879c60d5dda3985c2cd8a15ccafa0",
+    "semantic_hash": "c23879c60d5dda3985c2cd8a15ccafa0"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\__init__.py": {
+    "mtime": 1788191329.3594897,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\bbox_generator.py": {
+    "mtime": 1793035309.699634,
+    "seen": 1793283629.3451157,
+    "ast_hash": "578e9f1d8fe42e2c6b58455ebdb6f68d",
+    "semantic_hash": "578e9f1d8fe42e2c6b58455ebdb6f68d"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\collision.py": {
+    "mtime": 1790423924.6240978,
+    "seen": 1793283629.3451157,
+    "ast_hash": "c06c48844246b042b84842a3ee7c5e11",
+    "semantic_hash": "c06c48844246b042b84842a3ee7c5e11"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\connector.py": {
+    "mtime": 1793202038.0258613,
+    "seen": 1793283629.3451157,
+    "ast_hash": "38220893ec02b423c0c30f6502434c96",
+    "semantic_hash": "38220893ec02b423c0c30f6502434c96"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\curvature_metrics.py": {
+    "mtime": 1793078279.407547,
+    "seen": 1793283629.3451157,
+    "ast_hash": "ca6ebf729184e14fc314fcf2f50ff40c",
+    "semantic_hash": "ca6ebf729184e14fc314fcf2f50ff40c"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\face_grid_generator.py": {
+    "mtime": 1792011539.699414,
+    "seen": 1793283629.3451157,
+    "ast_hash": "549f795b57b7f2d163b0039f816f9bf1",
+    "semantic_hash": "549f795b57b7f2d163b0039f816f9bf1"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\generator.py": {
+    "mtime": 1791902354.6865914,
+    "seen": 1793283629.3451157,
+    "ast_hash": "3c9dc931f35af6e558074664f9b8d07d",
+    "semantic_hash": "3c9dc931f35af6e558074664f9b8d07d"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\geodesic_generator.py": {
+    "mtime": 1790617564.045576,
+    "seen": 1793283629.3451157,
+    "ast_hash": "5317d65dfe41b69e9c9d182528edbf12",
+    "semantic_hash": "5317d65dfe41b69e9c9d182528edbf12"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\local_normals.py": {
+    "mtime": 1791880874.843625,
+    "seen": 1793283629.3451157,
+    "ast_hash": "eb141c38a66b01ce0e6c8b07543d4767",
+    "semantic_hash": "eb141c38a66b01ce0e6c8b07543d4767"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\mesh_quality.py": {
+    "mtime": 1793078751.724998,
+    "seen": 1793283629.3451157,
+    "ast_hash": "be3d4a4633a6458a8088a01ecad26464",
+    "semantic_hash": "be3d4a4633a6458a8088a01ecad26464"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\orientation_frames.py": {
+    "mtime": 1793078336.3026152,
+    "seen": 1793283629.3451157,
+    "ast_hash": "1dffd64a17ded3f5ebb2d4c562301a39",
+    "semantic_hash": "1dffd64a17ded3f5ebb2d4c562301a39"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\path_model.py": {
+    "mtime": 1793079231.3815613,
+    "seen": 1793283629.3451157,
+    "ast_hash": "59dfb74dadcec9c17cdc98f0de2ae6be",
+    "semantic_hash": "59dfb74dadcec9c17cdc98f0de2ae6be"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\resampler.py": {
+    "mtime": 1791459104.0125947,
+    "seen": 1793283629.3451157,
+    "ast_hash": "caa566bbdb68a7a866bc9ed859e810b2",
+    "semantic_hash": "caa566bbdb68a7a866bc9ed859e810b2"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\segment_runs.py": {
+    "mtime": 1793078961.2448268,
+    "seen": 1793283629.3451157,
+    "ast_hash": "fc4f667926787d52036e6d2262176713",
+    "semantic_hash": "fc4f667926787d52036e6d2262176713"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\slicer.py": {
+    "mtime": 1791895234.6203723,
+    "seen": 1793283629.3451157,
+    "ast_hash": "299a72a084f1bfcfa278544ad422fdcf",
+    "semantic_hash": "299a72a084f1bfcfa278544ad422fdcf"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\standoff_pass.py": {
+    "mtime": 1791108049.1101477,
+    "seen": 1793283629.3451157,
+    "ast_hash": "7a17453021ae0c03b783f5081cba280c",
+    "semantic_hash": "7a17453021ae0c03b783f5081cba280c"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\stitcher.py": {
+    "mtime": 1793204775.6124022,
+    "seen": 1793283629.3451157,
+    "ast_hash": "2837b8c24cb88606ed0067675a5c8777",
+    "semantic_hash": "2837b8c24cb88606ed0067675a5c8777"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\surface_safety.py": {
+    "mtime": 1793079180.3821993,
+    "seen": 1793283629.3451157,
+    "ast_hash": "b208b4a1b2003d5eff99e54646eeec5d",
+    "semantic_hash": "b208b4a1b2003d5eff99e54646eeec5d"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\path\\validator.py": {
+    "mtime": 1791108570.8865469,
+    "seen": 1793283629.3451157,
+    "ast_hash": "46c1f20050feca4405a99d334d757eab",
+    "semantic_hash": "46c1f20050feca4405a99d334d757eab"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\reference\\__init__.py": {
+    "mtime": 1793039618.6620786,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\reference\\parsers\\__init__.py": {
+    "mtime": 1793039618.79664,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\reference\\parsers\\abb_parser.py": {
+    "mtime": 1793039775.921942,
+    "seen": 1793283629.3451157,
+    "ast_hash": "55260255351479915a3ea494d020cecb",
+    "semantic_hash": "55260255351479915a3ea494d020cecb"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\reference\\parsers\\durr_parser.py": {
+    "mtime": 1793039721.432703,
+    "seen": 1793283629.3451157,
+    "ast_hash": "22d97ac8f30d83cf55ef3c9aa865e0a6",
+    "semantic_hash": "22d97ac8f30d83cf55ef3c9aa865e0a6"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\reference\\parsers\\fanuc_parser.py": {
+    "mtime": 1793039793.8716133,
+    "seen": 1793283629.3451157,
+    "ast_hash": "fb7843aa59746332e4b2830cd8a5b95c",
+    "semantic_hash": "fb7843aa59746332e4b2830cd8a5b95c"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\reference\\reference_metrics.py": {
+    "mtime": 1793078988.7781007,
+    "seen": 1793283629.3451157,
+    "ast_hash": "7bc73797ed831446df8e58d9cad5e482",
+    "semantic_hash": "7bc73797ed831446df8e58d9cad5e482"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\reference\\reference_model.py": {
+    "mtime": 1793039614.933223,
+    "seen": 1793283629.3451157,
+    "ast_hash": "6900ca889c401492e17be6f9c9501c87",
+    "semantic_hash": "6900ca889c401492e17be6f9c9501c87"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\robot\\__init__.py": {
+    "mtime": 1790423696.7181726,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\robot\\robot_manager_dialog.py": {
+    "mtime": 1790428777.0444822,
+    "seen": 1793283629.3451157,
+    "ast_hash": "238bb6115310c0f08952b0a477f23905",
+    "semantic_hash": "238bb6115310c0f08952b0a477f23905"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\robot\\robot_profile.py": {
+    "mtime": 1790423710.2726588,
+    "seen": 1793283629.3451157,
+    "ast_hash": "abf9a61bbedc5a773423728ad6f5d9bc",
+    "semantic_hash": "abf9a61bbedc5a773423728ad6f5d9bc"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\ui\\__init__.py": {
+    "mtime": 1788191329.3594897,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\ui\\ribbon.py": {
+    "mtime": 1793282654.254503,
+    "seen": 1793283629.3451157,
+    "ast_hash": "070b93633c620fb65e73ac3a7e0a9c66",
+    "semantic_hash": "070b93633c620fb65e73ac3a7e0a9c66"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\ui\\view_settings_dialog.py": {
+    "mtime": 1793096924.4829297,
+    "seen": 1793283629.3451157,
+    "ast_hash": "48cb3a10e74544726caa97e8def17308",
+    "semantic_hash": "48cb3a10e74544726caa97e8def17308"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\ui\\viewer.py": {
+    "mtime": 1793096912.0629377,
+    "seen": 1793283629.3451157,
+    "ast_hash": "b688f78019034d0069dd4fb59f350f7f",
+    "semantic_hash": "b688f78019034d0069dd4fb59f350f7f"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\main.py": {
+    "mtime": 1791881802.3852563,
+    "seen": 1793283629.3451157,
+    "ast_hash": "df8ca0dd9beb0e5cf7ac3503fadc78bc",
+    "semantic_hash": "df8ca0dd9beb0e5cf7ac3503fadc78bc"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\models\\__init__.py": {
+    "mtime": 1791104724.7249002,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\models\\mesh_model.py": {
+    "mtime": 1791104724.7249002,
+    "seen": 1793283629.3451157,
+    "ast_hash": "b577d81f2c8d27abfdd6e836d82e108c",
+    "semantic_hash": "b577d81f2c8d27abfdd6e836d82e108c"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\__init__.py": {
+    "mtime": 1788191329.3594897,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\conftest.py": {
+    "mtime": 1788191510.0787852,
+    "seen": 1793283629.3451157,
+    "ast_hash": "36bc252c757f60c89923bea047b0db2d",
+    "semantic_hash": "36bc252c757f60c89923bea047b0db2d"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\fixtures\\mesh_surface_baseline.json": {
+    "mtime": 1793039512.9119647,
+    "seen": 1793283629.3451157,
+    "ast_hash": "59ef87140a1c5f5f9ca435da3f4f245c",
+    "semantic_hash": "59ef87140a1c5f5f9ca435da3f4f245c"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_curve_conditioner.py": {
+    "mtime": 1793078857.5139763,
+    "seen": 1793283629.3451157,
+    "ast_hash": "ee131578cc88da05abc3074f9d6dd536",
+    "semantic_hash": "ee131578cc88da05abc3074f9d6dd536"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_export_gate.py": {
+    "mtime": 1793079425.8965528,
+    "seen": 1793283629.3451157,
+    "ast_hash": "bfd667b587a72172502d29fd8d432e95",
+    "semantic_hash": "bfd667b587a72172502d29fd8d432e95"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_generator.py": {
+    "mtime": 1792653515.9997234,
+    "seen": 1793283629.3451157,
+    "ast_hash": "786f367814a6b3a2621535f4a4f2d820",
+    "semantic_hash": "786f367814a6b3a2621535f4a4f2d820"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_legacy_aliases.py": {
+    "mtime": 1793079660.1705894,
+    "seen": 1793283629.3451157,
+    "ast_hash": "6c26b1726fec02f6217a1363c35ad8ad",
+    "semantic_hash": "6c26b1726fec02f6217a1363c35ad8ad"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_mesh_export.py": {
+    "mtime": 1793282683.777713,
+    "seen": 1793283629.3451157,
+    "ast_hash": "7308f1d93a9773cd50cb78805afd382c",
+    "semantic_hash": "7308f1d93a9773cd50cb78805afd382c"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_mesh_flow_selection.py": {
+    "mtime": 1793209172.5028367,
+    "seen": 1793283629.3451157,
+    "ast_hash": "aeb63819267dd12eb25a77b4c5396b93",
+    "semantic_hash": "aeb63819267dd12eb25a77b4c5396b93"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_mesh_loader.py": {
+    "mtime": 1793110726.3519711,
+    "seen": 1793283629.3451157,
+    "ast_hash": "50dcf56ec0c4ea327732ca267b510e8d",
+    "semantic_hash": "50dcf56ec0c4ea327732ca267b510e8d"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_mesh_quality.py": {
+    "mtime": 1793078811.1190896,
+    "seen": 1793283629.3451157,
+    "ast_hash": "9d724af6ae327b14bbe368a19f64df3f",
+    "semantic_hash": "9d724af6ae327b14bbe368a19f64df3f"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_mesh_surface_baseline.py": {
+    "mtime": 1793039523.1849644,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d923cdf9a39abde52a558d1b5996b900",
+    "semantic_hash": "d923cdf9a39abde52a558d1b5996b900"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_meshflow_comparison.py": {
+    "mtime": 1793079575.8209713,
+    "seen": 1793283629.3451157,
+    "ast_hash": "93eb59e47f3fd61cda312d1cc3a91258",
+    "semantic_hash": "93eb59e47f3fd61cda312d1cc3a91258"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_meshflow_core.py": {
+    "mtime": 1793209172.5048456,
+    "seen": 1793283629.3451157,
+    "ast_hash": "6a5926be0a54031239596283787277d9",
+    "semantic_hash": "6a5926be0a54031239596283787277d9"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_olp_export.py": {
+    "mtime": 1793183256.1061683,
+    "seen": 1793283629.3451157,
+    "ast_hash": "7b8ea2d25bf355990c4c3c13a525e3ee",
+    "semantic_hash": "7b8ea2d25bf355990c4c3c13a525e3ee"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_orientation_frames.py": {
+    "mtime": 1793078844.5457017,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d2aed61100645b764f573f15a0a345a5",
+    "semantic_hash": "d2aed61100645b764f573f15a0a345a5"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_reference_metrics.py": {
+    "mtime": 1793039978.301017,
+    "seen": 1793283629.3451157,
+    "ast_hash": "579f75c46c538eb800a2d7aa01a65d8c",
+    "semantic_hash": "579f75c46c538eb800a2d7aa01a65d8c"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_reference_parsers.py": {
+    "mtime": 1793039857.245621,
+    "seen": 1793283629.3451157,
+    "ast_hash": "82458da15b4030b861affb4032b3b395",
+    "semantic_hash": "82458da15b4030b861affb4032b3b395"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_regions.py": {
+    "mtime": 1788191524.9789386,
+    "seen": 1793283629.3451157,
+    "ast_hash": "b7f7b67135110bc8cf983c049d989897",
+    "semantic_hash": "b7f7b67135110bc8cf983c049d989897"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_ribbon_meshflow_flag.py": {
+    "mtime": 1793078206.126076,
+    "seen": 1793283629.3451157,
+    "ast_hash": "f516801f682dc46505ab00ebb362ecd7",
+    "semantic_hash": "f516801f682dc46505ab00ebb362ecd7"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_safety_validator.py": {
+    "mtime": 1793079402.5666082,
+    "seen": 1793283629.3451157,
+    "ast_hash": "4bd4adb634663b176af03a9ac96a32d5",
+    "semantic_hash": "4bd4adb634663b176af03a9ac96a32d5"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_slicer.py": {
+    "mtime": 1789056238.1184883,
+    "seen": 1793283629.3451157,
+    "ast_hash": "a63c1c2d817c95043e058cec5b5b9fbd",
+    "semantic_hash": "a63c1c2d817c95043e058cec5b5b9fbd"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_stitcher.py": {
+    "mtime": 1788191540.0190718,
+    "seen": 1793283629.3451157,
+    "ast_hash": "17a14d7e28a6e800108d444f126b35a3",
+    "semantic_hash": "17a14d7e28a6e800108d444f126b35a3"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_surface_safety.py": {
+    "mtime": 1793079385.2945564,
+    "seen": 1793283629.3451157,
+    "ast_hash": "1f57fec3afb1c503e2e525c330fb1791",
+    "semantic_hash": "1f57fec3afb1c503e2e525c330fb1791"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_transition_planner.py": {
+    "mtime": 1793079090.7474997,
+    "seen": 1793283629.3451157,
+    "ast_hash": "d963d5869f859cec1cbb4d3072d82e75",
+    "semantic_hash": "d963d5869f859cec1cbb4d3072d82e75"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\tests\\test_validator.py": {
+    "mtime": 1791108773.7785833,
+    "seen": 1793283629.3451157,
+    "ast_hash": "3d92ec0ecbf97a30230f6c10655f3519",
+    "semantic_hash": "3d92ec0ecbf97a30230f6c10655f3519"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\.claude\\PRPs\\plans\\export-mesh-mode.plan.md": {
+    "mtime": 1793282516.072822,
+    "seen": 1793283629.3451157,
+    "ast_hash": "515a07b907ebe6f6e666ff162c982a5f",
+    "semantic_hash": "515a07b907ebe6f6e666ff162c982a5f"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\.graphify_uncached.txt": {
+    "mtime": 1793281032.3376722,
+    "seen": 1793283629.3451157,
+    "ast_hash": "2488cdfe9aa0b928d891761aebdf6ad2",
+    "semantic_hash": "2488cdfe9aa0b928d891761aebdf6ad2"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\README.md": {
+    "mtime": 1793283431.9314554,
+    "seen": 1793283629.3451157,
+    "ast_hash": "251264b26a964415716f4f6a44b019fb",
+    "semantic_hash": "251264b26a964415716f4f6a44b019fb"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\convertmdfiles\\AGENT_HANDOFF.md": {
+    "mtime": 1793205104.5349867,
+    "seen": 1793283629.3451157,
+    "ast_hash": "5de0f410d4e058945c81130e9001d847",
+    "semantic_hash": "5de0f410d4e058945c81130e9001d847"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\convertmdfiles\\BRANCH_ARCHITECTURE.md": {
+    "mtime": 1792604249.3275883,
+    "seen": 1793283629.3451157,
+    "ast_hash": "9ca6d8e1bc9008c662987bd8c633c954",
+    "semantic_hash": "9ca6d8e1bc9008c662987bd8c633c954"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\convertmdfiles\\DECISIONS_AND_RULES.md": {
+    "mtime": 1792604111.7371142,
+    "seen": 1793283629.3451157,
+    "ast_hash": "fcdc7f9303879da49a6b9e8c309122bf",
+    "semantic_hash": "fcdc7f9303879da49a6b9e8c309122bf"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\convertmdfiles\\MeshFlow_Phase0_Rename_Audit.md": {
+    "mtime": 1793039558.3577542,
+    "seen": 1793283629.3451157,
+    "ast_hash": "ddf3d03bb4a1d2781564013dacd47cbe",
+    "semantic_hash": "ddf3d03bb4a1d2781564013dacd47cbe"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\convertmdfiles\\OPEN_QUESTIONS.md": {
+    "mtime": 1792604213.3705418,
+    "seen": 1793283629.3451157,
+    "ast_hash": "30551ac00a328d176686b9a7aa39282e",
+    "semantic_hash": "30551ac00a328d176686b9a7aa39282e"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\convertmdfiles\\SESSION_INDEX.md": {
+    "mtime": 1793205168.1601748,
+    "seen": 1793283629.3451157,
+    "ast_hash": "f6b33afa213f50b0ab430fbb6bb5c7b4",
+    "semantic_hash": "f6b33afa213f50b0ab430fbb6bb5c7b4"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\convertmdfiles\\SmartGrid_Mesh_Flow_Specification_v4_Bundle\\SmartGrid_Mesh_Flow_Engineering_Specification_v4.md": {
+    "mtime": 1793038614.5341845,
+    "seen": 1793283629.3451157,
+    "ast_hash": "e75496c85b5db644909f3d268e13ada6",
+    "semantic_hash": "e75496c85b5db644909f3d268e13ada6"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\convertmdfiles\\WHERE_WE_LEFT_OFF_AND_PENDING_WORK.md": {
+    "mtime": 1793205144.0332885,
+    "seen": 1793283629.3451157,
+    "ast_hash": "8dba29dc5839c01c484793d26bfc3a3d",
+    "semantic_hash": "8dba29dc5839c01c484793d26bfc3a3d"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\olp review details\\EXPORT_STANDARD_REVIEW.md": {
+    "mtime": 1793184082.0438626,
+    "seen": 1793283629.3451157,
+    "ast_hash": "2919f23a7f55d9d1d1148fe7e116b4ea",
+    "semantic_hash": "2919f23a7f55d9d1d1148fe7e116b4ea"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\requirements.txt": {
+    "mtime": 1790427184.4689784,
+    "seen": 1793283629.3451157,
+    "ast_hash": "af8880601dd8465f6f028bc0517b5cc5",
+    "semantic_hash": "af8880601dd8465f6f028bc0517b5cc5"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\ui\\icons\\icon.png": {
+    "mtime": 1789383642.0934417,
+    "seen": 1793283629.3451157,
+    "ast_hash": "4db60b794ac6644f5016ced682db2b7f",
+    "semantic_hash": "4db60b794ac6644f5016ced682db2b7f"
+  },
+  "C:\\Users\\sakee\\Desktop\\projects\\SmartGrid\\app\\ui\\icons\\logo.png": {
+    "mtime": 1789383787.6423552,
+    "seen": 1793283629.3451157,
+    "ast_hash": "17254a28cd4346c19d0d6196c4543d10",
+    "semantic_hash": "17254a28cd4346c19d0d6196c4543d10"
+  }
+}
