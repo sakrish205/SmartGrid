@@ -1,4 +1,4 @@
-"""Mesh Flow Phase 3 — lane planner (R4).
+﻿"""Mesh Flow Phase 3 ΓÇö lane planner (R4).
 
 Formulas (quoted exactly from the spec, per the plan's formula-review gate):
   F11. Scan-plane equation: s_hat . (x - p0) = k*Delta
@@ -18,7 +18,7 @@ def resolve_lane_pitch(
     width_overlap: tuple[float, float] | None = None,
     reference_pitch_mm: float | None = None,
 ) -> float:
-    """R4 — only EXPLICIT_SETTING is implemented (decision #1)."""
+    """R4 ΓÇö only EXPLICIT_SETTING is implemented (decision #1)."""
     if strategy is LanePitchStrategy.EXPLICIT_SETTING:
         if explicit_mm is None or explicit_mm <= 0:
             raise ValueError("LanePitchStrategy.EXPLICIT_SETTING requires a positive explicit_mm value")
@@ -35,14 +35,12 @@ def generate_lane_planes(
     mesh: trimesh.Trimesh,
     pitch_mm: float,
 ) -> list[tuple[np.ndarray, np.ndarray, float]]:
-    """F11/F12 — a family of parallel planes spaced uniformly at pitch_mm along the
-    region's own spacing direction (s_hat), spanning the region's extent along that
-    direction. Spacing is constant across the region — no curvature adaptation —
-    so the generated path always follows the configured spray width.
+    """F11/F12 ΓÇö a family of parallel planes spaced pitch_mm apart along the region's
+    own spacing direction (s_hat), spanning the region's extent along that direction.
 
     Same plane-family math as app.path.generator._build_planes_combined (lines 59-95),
     generalized from a fixed world axis to the region's own (possibly non-axis-aligned)
-    direction from direction_estimator.local_scan_frame — a new function, since the
+    direction from direction_estimator.local_scan_frame ΓÇö a new function, since the
     existing one stays axis-locked and untouched.
     """
     if region.spacing_direction is None or region.primary_direction is None:
@@ -54,10 +52,10 @@ def generate_lane_planes(
         raise ValueError("pitch_mm must be positive")
 
     s_hat = region.spacing_direction
-    face_centroids = mesh.triangles_center[region.face_indices]
-    p0 = face_centroids.mean(axis=0)
+    verts = mesh.vertices[mesh.faces[region.face_indices].ravel()]
+    p0 = verts.mean(axis=0)
 
-    s_coords = (face_centroids - p0) @ s_hat
+    s_coords = (verts - p0) @ s_hat
     s_min = float(s_coords.min())
     s_max = float(s_coords.max())
     span = s_max - s_min
@@ -72,5 +70,4 @@ def generate_lane_planes(
         pos = first + k * step
         origin = p0 + pos * s_hat
         planes.append((s_hat.copy(), origin, pos))
-
     return planes

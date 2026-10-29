@@ -1,4 +1,4 @@
-"""Top-level window — ribbon layout, no sidebar."""
+﻿"""Top-level window â€” ribbon layout, no sidebar."""
 from __future__ import annotations
 import json
 import math
@@ -61,13 +61,13 @@ def _detect_unit(max_extent: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Dynamic speed — one place to tune all auto-speed behaviour
+# Dynamic speed â€” one place to tune all auto-speed behaviour
 # ---------------------------------------------------------------------------
 
 _SPEED_CURVE = {
     'max_mmpm':        2000.0,   # speed on perfectly straight segments
     'min_mmpm':         300.0,   # floor at maximum curvature
-    'angle_threshold':   30.0,   # degrees — at or above this angle → min speed
+    'angle_threshold':   30.0,   # degrees â€” at or above this angle â†’ min speed
 }
 
 
@@ -81,8 +81,8 @@ def _compute_dynamic_speeds(points: np.ndarray) -> np.ndarray:
 
     threshold_rad = np.radians(_SPEED_CURVE['angle_threshold'])
 
-    v1 = points[1:-1] - points[:-2]     # (n-2, 3) — incoming vectors
-    v2 = points[2:]   - points[1:-1]    # (n-2, 3) — outgoing vectors
+    v1 = points[1:-1] - points[:-2]     # (n-2, 3) â€” incoming vectors
+    v2 = points[2:]   - points[1:-1]    # (n-2, 3) â€” outgoing vectors
 
     n1 = np.linalg.norm(v1, axis=1, keepdims=True)
     n2 = np.linalg.norm(v2, axis=1, keepdims=True)
@@ -127,7 +127,7 @@ class _OlpExportDialog(QDialog):
         max_s = int(_SPEED_CURVE['max_mmpm'])
         min_s = int(_SPEED_CURVE['min_mmpm'])
         self._auto_radio    = QRadioButton(
-            f'Auto  ({min_s}–{max_s} mm/min)  — varies with path curvature')
+            f'Auto  ({min_s}â€“{max_s} mm/min)  â€” varies with path curvature')
         self._profile_radio = QRadioButton(
             f'From robot profile  ({int(profile_speed_mmpm)} mm/min)'
             if profile_speed_mmpm else 'From robot profile  (no profile active)')
@@ -234,13 +234,13 @@ class OrientationReportDialog(QDialog):
 
         summary = (
             f"<b>{report['total_exceeded']}</b> waypoint(s) exceed the orientation limit "
-            f"({report['limit_deg']}°).  "
-            f"Max deviation: <b>{report['max_deviation_deg']}°</b>."
+            f"({report['limit_deg']}Â°).  "
+            f"Max deviation: <b>{report['max_deviation_deg']}Â°</b>."
         )
         vl.addWidget(QLabel(summary))
 
         table = QTableWidget(len(report['passes_with_issues']), 4)
-        table.setHorizontalHeaderLabels(['Pass ID', 'Region', 'Exceeded', 'Max Δ (°)'])
+        table.setHorizontalHeaderLabels(['Pass ID', 'Region', 'Exceeded', 'Max Î” (Â°)'])
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         table.setEditTriggers(QTableWidget.NoEditTriggers)
         for row, (pid, region, count, max_d) in enumerate(report['passes_with_issues']):
@@ -341,11 +341,11 @@ class _LoadWorker(QThread):
             from app.mesh.preprocessor import preprocess
             from app.mesh.regions import classify_regions
             name = os.path.basename(self._filepath)
-            self.progress.emit(f'Reading {name}…')
+            self.progress.emit(f'Reading {name}â€¦')
             mesh = load_mesh(self._filepath)
-            self.progress.emit(f'Preprocessing {len(mesh.faces):,} faces…')
+            self.progress.emit(f'Preprocessing {len(mesh.faces):,} facesâ€¦')
             data = preprocess(mesh, self._filepath, up_axis=self._up_axis)
-            self.progress.emit('Classifying regions…')
+            self.progress.emit('Classifying regionsâ€¦')
             model = _MM()
             model._data    = data
             model._regions = classify_regions(data)
@@ -355,7 +355,7 @@ class _LoadWorker(QThread):
 
 
 class _MeshFlowWorker(QThread):
-    """Mesh Flow (Phase 3) — region-local, surface-adaptive raster, fully
+    """Mesh Flow (Phase 3) â€” region-local, surface-adaptive raster, fully
     parallel to generator.py's generate_route(), never calling into it."""
     finished = Signal(object)
     error    = Signal(str)
@@ -367,7 +367,6 @@ class _MeshFlowWorker(QThread):
         spray_mm: float,
         waypoint_spacing_mm: float = 0.0,
         standoff_mm: float = 0.0,
-        cover_all: bool = False,
     ) -> None:
         super().__init__()
         self._mesh_data           = mesh_data
@@ -375,7 +374,6 @@ class _MeshFlowWorker(QThread):
         self._spray_mm            = spray_mm
         self._waypoint_spacing    = waypoint_spacing_mm
         self._standoff_mm         = standoff_mm
-        self._cover_all           = cover_all
 
     def run(self) -> None:
         try:
@@ -384,7 +382,7 @@ class _MeshFlowWorker(QThread):
             from app.meshflow.open_decisions import LanePitchStrategy
             from app.path.path_model import RegionConfidence
 
-            regions = build_regions(self._mesh_data, self._selected_region_ids, cover_all=self._cover_all)
+            regions = build_regions(self._mesh_data, self._selected_region_ids)
             routes = []
             dropped: list[str] = []
             for region in regions:
@@ -397,7 +395,6 @@ class _MeshFlowWorker(QThread):
                     explicit_pitch_mm=self._spray_mm,
                     waypoint_spacing_mm=self._waypoint_spacing,
                     standoff_mm=self._standoff_mm,
-                    cover_all=self._cover_all,
                 )
                 if route.total_passes == 0:
                     dropped.append(region.region_id)
@@ -451,7 +448,7 @@ class _UpAxisDialog(QDialog):
         layout.addWidget(QLabel('Which axis is UP in this file?'))
         self._group = QButtonGroup(self)
         self._btns: list[QRadioButton] = []
-        for i, label in enumerate(['X  (axis 0)', 'Y  (axis 1)', 'Z  (axis 2)  —  default']):
+        for i, label in enumerate(['X  (axis 0)', 'Y  (axis 1)', 'Z  (axis 2)  â€”  default']):
             btn = QRadioButton(label)
             self._group.addButton(btn, i)
             layout.addWidget(btn)
@@ -472,7 +469,7 @@ class _UpAxisDialog(QDialog):
 class _ViewerImportWorker(QThread):
     """Warm pyvista/VTK and trimesh in a background thread.
 
-    Imports are pure Python/VTK — no Qt objects created — so this is
+    Imports are pure Python/VTK â€” no Qt objects created â€” so this is
     safe off the main thread. Only QtInteractor instantiation (widget
     creation) must remain on the main thread.
     """
@@ -517,7 +514,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle('SmartGrid  —  3D Surface Grid & Pitch Mapper')
+        self.setWindowTitle('SmartGrid  â€”  3D Surface Grid & Pitch Mapper')
         self.resize(1600, 860)
         self.setAcceptDrops(True)
         self.setStyleSheet(
@@ -576,7 +573,7 @@ class MainWindow(QMainWindow):
         vl.addWidget(ribbon_scroll)
 
         # Placeholder shown while heavy imports load in the background
-        self._viewer_placeholder = QLabel('Loading viewer…')
+        self._viewer_placeholder = QLabel('Loading viewerâ€¦')
         self._viewer_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._viewer_placeholder.setStyleSheet(
             'color:#666;font-size:13px;font-family:"Segoe UI",Arial;'
@@ -584,11 +581,11 @@ class MainWindow(QMainWindow):
         self._viewer_vl = vl                  # saved so _init_viewer can splice in
         vl.addWidget(self._viewer_placeholder, stretch=1)
 
-        # Initial state — ribbon enabled after viewer is ready
+        # Initial state â€” ribbon enabled after viewer is ready
         self._ribbon.set_model_loaded(False)
-        self.statusBar().showMessage('Starting up…')
+        self.statusBar().showMessage('Starting upâ€¦')
 
-        # Signals that do not touch the viewer — safe to wire now
+        # Signals that do not touch the viewer â€” safe to wire now
         self._ribbon.open_requested.connect(self._open_file)
         self._ribbon.region_toggled.connect(self._on_region_shortcut)
         self._ribbon.select_mode_changed.connect(self._on_select_mode_changed)
@@ -612,13 +609,13 @@ class MainWindow(QMainWindow):
         self._import_worker.start()
 
     def _create_viewer(self) -> None:
-        """Main-thread only: imports already warm — only QtInteractor blocks (~1-2 s)."""
-        from app.ui.viewer import MeshViewer    # instant — already in sys.modules
-        from models.mesh_model import MeshModel # instant — already in sys.modules
+        """Main-thread only: imports already warm â€” only QtInteractor blocks (~1-2 s)."""
+        from app.ui.viewer import MeshViewer    # instant â€” already in sys.modules
+        from models.mesh_model import MeshModel # instant â€” already in sys.modules
         # Only create a blank model if no file was loaded while viewer was initialising
         if self._model is None:
             self._model = MeshModel()
-        self._viewer = MeshViewer()             # QtInteractor OpenGL init — main thread required
+        self._viewer = MeshViewer()             # QtInteractor OpenGL init â€” main thread required
 
         # Replace placeholder with the real viewer
         idx = self._viewer_vl.indexOf(self._viewer_placeholder)
@@ -637,10 +634,10 @@ class MainWindow(QMainWindow):
         self._on_colors_changed(self._current_colors)
 
         if self._model.data is not None:
-            # File was loaded before the viewer finished initialising — apply it now
+            # File was loaded before the viewer finished initialising â€” apply it now
             self._apply_loaded_model()
         else:
-            self.statusBar().showMessage('Ready — open an STL or OBJ file to begin.')
+            self.statusBar().showMessage('Ready â€” open an STL or OBJ file to begin.')
 
     def _build_menus(self) -> None:
         mb = self.menuBar()
@@ -683,7 +680,7 @@ class MainWindow(QMainWindow):
         export_menu.addAction('Export Mesh...', self._export_mesh)
 
         self._robots_menu = mb.addMenu('Robots')
-        self._robots_menu.addAction('Manage Robots…', self._open_robot_manager)
+        self._robots_menu.addAction('Manage Robotsâ€¦', self._open_robot_manager)
         self._robots_menu.addSeparator()
         self._refresh_robots_menu()
 
@@ -702,7 +699,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_robots_menu(self) -> None:
         """Repopulate the Robots menu with current profiles (called after manager closes)."""
-        # Remove old profile actions (keep 'Manage Robots…' + separator = first 2 actions)
+        # Remove old profile actions (keep 'Manage Robotsâ€¦' + separator = first 2 actions)
         actions = self._robots_menu.actions()
         for act in actions[2:]:
             self._robots_menu.removeAction(act)
@@ -757,9 +754,9 @@ class MainWindow(QMainWindow):
         self._viewer.set_select_mode(active)
         if active:
             self.statusBar().showMessage(
-                'Select Faces — click a bounding box face. Camera rotation suspended.')
+                'Select Faces â€” click a bounding box face. Camera rotation suspended.')
         else:
-            self.statusBar().showMessage('Navigate — drag to rotate, scroll to zoom.')
+            self.statusBar().showMessage('Navigate â€” drag to rotate, scroll to zoom.')
 
     def eventFilter(self, obj, event) -> bool:
         return super().eventFilter(obj, event)
@@ -811,7 +808,7 @@ class MainWindow(QMainWindow):
             self._current_colors = dlg.colors
             self._save_view_settings()
         # On cancel: ViewSettingsDialog emits colors_changed with the original
-        # colors, which _on_colors_changed already handles — no extra call needed.
+        # colors, which _on_colors_changed already handles â€” no extra call needed.
 
     def _on_colors_changed(self, colors: dict[str, str]) -> None:
         if self._viewer is None:
@@ -923,7 +920,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f'Loaded: {os.path.basename(model.data.source_path)}'
             f'  |  {n_faces:,} triangles  |  Unit: {detected} (auto-detected)'
-            f'  —  click a bounding box face to select a region.'
+            f'  â€”  click a bounding box face to select a region.'
         )
 
     def _on_load_error(self, message: str) -> None:
@@ -946,7 +943,7 @@ class MainWindow(QMainWindow):
 
     def _region_selection_status(self) -> str:
         """Mesh Flow's selection is inverted (clicked = excluded), so the status
-        bar must say so — everywhere else it's a normal inclusive selection."""
+        bar must say so â€” everywhere else it's a normal inclusive selection."""
         n = len(self._selected_regions)
         verb, empty_msg = (
             ('excluded', 'Click a bounding box face to exclude it (e.g. a hanger/mount point).')
@@ -1075,7 +1072,7 @@ class MainWindow(QMainWindow):
         self._on_route_ready(routes)
 
     def _generate_face_grid_flat(self, spray_mm: float) -> None:
-        """Adaptive: H×V intersection-grid passes (background worker)."""
+        """Adaptive: HÃ—V intersection-grid passes (background worker)."""
         if not self._selected_regions:
             QMessageBox.warning(self, 'No selection',
                 'Select a face region first, then generate.')
@@ -1146,7 +1143,7 @@ class MainWindow(QMainWindow):
         worker.error.connect(self._on_route_error)
         self._viewer.show_bbox(False)
         self._ribbon.set_generating(True)
-        self.statusBar().showMessage('Generating adaptive paths…')
+        self.statusBar().showMessage('Generating adaptive pathsâ€¦')
         self._worker = worker
         worker.start()
 
@@ -1196,7 +1193,7 @@ class MainWindow(QMainWindow):
         self._viewer.show_bbox(False)
 
         self._ribbon.set_generating(True)
-        self.statusBar().showMessage('Generating conform paths…')
+        self.statusBar().showMessage('Generating conform pathsâ€¦')
 
         class _ConformWorker(QThread):
             finished = Signal(object)
@@ -1233,10 +1230,10 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _generate_mesh_flow(self, spray_mm: float) -> None:
-        """Mesh Flow (Phase 3, beta — see convertmdfiles' Mesh Flow implementation
+        """Mesh Flow (Phase 3, beta â€” see convertmdfiles' Mesh Flow implementation
         plan). Selection is INVERTED relative to Boundary Box/Adaptive/Conform: the
         face(s) the user clicks are excluded (e.g. a hanger/mount point), and
-        generation runs on the complement — every other region, merged into one
+        generation runs on the complement â€” every other region, merged into one
         path by _on_route_ready's existing merge_routes call. Regions the region
         manager rejects, or that produce zero passes, are reported by
         _on_mesh_flow_route_ready rather than silently dropped."""
@@ -1248,11 +1245,11 @@ class MainWindow(QMainWindow):
         positive_regions = sorted(_ALL_REGIONS - self._selected_regions)
         if not positive_regions:
             QMessageBox.warning(self, 'Nothing to generate',
-                'All regions are excluded — nothing remains to generate a path on.')
+                'All regions are excluded â€” nothing remains to generate a path on.')
             return
         wpt_mm = self._ribbon.get_waypoint_spacing_mm()
         self._ribbon.set_generating(True)
-        self.statusBar().showMessage('Generating Mesh Flow paths…')
+        self.statusBar().showMessage('Generating Mesh Flow pathsâ€¦')
         worker = _MeshFlowWorker(
             self._model.data, positive_regions, spray_mm,
             waypoint_spacing_mm=wpt_mm,
@@ -1269,9 +1266,9 @@ class MainWindow(QMainWindow):
 
     def _on_mesh_flow_route_ready(self, result: tuple[list[PaintRoute], list[str]]) -> None:
         """Mesh Flow's own completion slot: reports regions the worker dropped
-        (no faces classified, or zero passes generated) — invisible to
+        (no faces classified, or zero passes generated) â€” invisible to
         _on_route_ready's own empty_regions check once merge_routes has already
-        collapsed multiple regions into one — then defers to the normal shared
+        collapsed multiple regions into one â€” then defers to the normal shared
         completion path for everything else (merge/stats/collision)."""
         routes, dropped = result
         if dropped:
@@ -1308,14 +1305,14 @@ class MainWindow(QMainWindow):
             )
             total_conns = sum(len(r.connections) for r in routes)
             self.statusBar().showMessage(
-                f'Path generation complete  —  {total} passes, {total_conns} connections.'
-                + ('' if is_face_grid else '  Checking collisions…'))
+                f'Path generation complete  â€”  {total} passes, {total_conns} connections.'
+                + ('' if is_face_grid else '  Checking collisionsâ€¦'))
             return
         partial = self._truncate_routes(routes, self._prog_idx)
         self._viewer.show_route(partial, show_arrows=False,
                                 show_waypoints=False, collision_ids={})
         self.statusBar().showMessage(
-            f'Generating… pass {self._prog_idx} / {total}')
+            f'Generatingâ€¦ pass {self._prog_idx} / {total}')
         self._prog_idx += 1
 
     def _on_route_ready(self, routes: list[PaintRoute]) -> None:
@@ -1380,7 +1377,7 @@ class MainWindow(QMainWindow):
         # final status message emitted by _prog_tick when animation finishes
         self._update_grid()
 
-        # Spawn background collision check (skip for face grid — standoff is built-in)
+        # Spawn background collision check (skip for face grid â€” standoff is built-in)
         if self._model and self._model.data and not is_face_grid:
             if self._coll_worker:
                 try:
@@ -1415,12 +1412,12 @@ class MainWindow(QMainWindow):
         total_passes = sum(r.total_passes for r in self._current_routes)
         total_conns  = sum(len(r.connections) for r in self._current_routes)
         if n_coll or n_near:
-            coll_suffix = (f'  ⚠ {n_coll} collision(s), {n_near} near-miss(es)'
-                           f' — shown red/orange  |  Suggested standoff: {suggested:.0f} mm')
+            coll_suffix = (f'  âš  {n_coll} collision(s), {n_near} near-miss(es)'
+                           f' â€” shown red/orange  |  Suggested standoff: {suggested:.0f} mm')
         else:
-            coll_suffix = '  ✓ No collisions'
+            coll_suffix = '  âœ“ No collisions'
         self.statusBar().showMessage(
-            f'Path generation complete  —  {total_passes} passes, {total_conns} connections.{coll_suffix}')
+            f'Path generation complete  â€”  {total_passes} passes, {total_conns} connections.{coll_suffix}')
 
     def _on_collision_error(self, msg: str) -> None:
         self._zombie_workers = [w for w in self._zombie_workers if w.isRunning()]
@@ -1430,10 +1427,10 @@ class MainWindow(QMainWindow):
         total_passes = sum(r.total_passes for r in self._current_routes) if self._current_routes else 0
         total_conns  = sum(len(r.connections) for r in self._current_routes) if self._current_routes else 0
         self.statusBar().showMessage(
-            f'Path generation complete  —  {total_passes} passes, {total_conns} connections.'
-            '  ⚠ Collision check failed (see details).')
+            f'Path generation complete  â€”  {total_passes} passes, {total_conns} connections.'
+            '  âš  Collision check failed (see details).')
         QMessageBox.warning(self, 'Collision check failed',
-            'The collision check could not complete — the path has been generated '
+            'The collision check could not complete â€” the path has been generated '
             'but collisions have not been verified.\n\n'
             f'Reason: {msg.splitlines()[0]}')
 
@@ -1450,7 +1447,7 @@ class MainWindow(QMainWindow):
             )
         )
         if needs_normals and self._norm_worker is None:
-            self.statusBar().showMessage('Computing orientations…')
+            self.statusBar().showMessage('Computing orientationsâ€¦')
             self._norm_worker = _NormalsWorker(
                 self._current_routes, self._model.data.trimesh_mesh)
             self._norm_worker.done.connect(self._on_normals_ready)
@@ -1572,51 +1569,51 @@ class MainWindow(QMainWindow):
         tb.setOpenExternalLinks(True)
         tb.setStyleSheet('font-family:"Segoe UI",Arial;font-size:12px;')
         tb.setHtml('''
-<h2 style="margin-top:0">SmartGrid — Quick Start</h2>
+<h2 style="margin-top:0">SmartGrid â€” Quick Start</h2>
 
-<h3>1 · Open a mesh</h3>
+<h3>1 Â· Open a mesh</h3>
 <p>Drag an <b>STL / OBJ / STEP</b> file onto the window, or use
-<b>File › Open STL / OBJ / STEP…</b> (Ctrl+O).<br>
+<b>File â€º Open STL / OBJ / STEPâ€¦</b> (Ctrl+O).<br>
 When prompted, pick the axis that points <em>up</em> in your file (Z is the
 most common default).</p>
 
-<h3>2 · Select a region</h3>
+<h3>2 Â· Select a region</h3>
 <p>After loading, a transparent bounding-box cage appears around the mesh.
 <b>Click any face of the cage</b> to select that surface region
 (Top, Bottom, Front, Rear, Left, Right). You can also toggle regions using the
 checkboxes in the ribbon. Multiple regions may be selected simultaneously.</p>
 
-<h3>3 · Choose a path mode</h3>
+<h3>3 Â· Choose a path mode</h3>
 <ul>
-  <li><b>Boundary Box</b> – flat parallel passes projected from the bounding box.
+  <li><b>Boundary Box</b> â€“ flat parallel passes projected from the bounding box.
       Fast, useful for roughly flat surfaces.</li>
-  <li><b>Adaptive</b> – a single H×V grid fitted to the actual surface geometry.
+  <li><b>Adaptive</b> â€“ a single HÃ—V grid fitted to the actual surface geometry.
       Best for curved or multi-face selections.</li>
-  <li><b>Conform</b> – tilted cutting planes follow the surface normal; paths
+  <li><b>Conform</b> â€“ tilted cutting planes follow the surface normal; paths
       hug the mesh. Use with a standoff distance.</li>
-  <li><b>Mesh Flow (beta)</b> – selection is <em>inverted</em>: the region(s) you
+  <li><b>Mesh Flow (beta)</b> â€“ selection is <em>inverted</em>: the region(s) you
       click are excluded (e.g. a hanger/jig mount); every other region is painted
       as one route. Interior faces are filtered automatically; lane spacing adapts
       to surface curvature; all panels share a consistent sweep angle.
-      See <b>Help › Path Generation Formulas…</b> for the full algorithm.</li>
+      See <b>Help â€º Path Generation Formulasâ€¦</b> for the full algorithm.</li>
 </ul>
 
-<h3>4 · Tune parameters</h3>
+<h3>4 Â· Tune parameters</h3>
 <p>Adjust <b>Spray Width</b>, <b>Standoff</b>, <b>Direction</b> (H / V / Both), and
 <b>Sweep</b> direction in the ribbon. Press <b>Generate</b> (Ctrl+G / F5) to compute
 the toolpath.</p>
 <p><b>Waypoint spacing:</b> by default every pass is resampled at
-<code>spray_width / 5</code> — evenly-spaced waypoints scaled to the current pitch.
+<code>spray_width / 5</code> â€” evenly-spaced waypoints scaled to the current pitch.
 Tick <b>Custom</b> and enter an explicit interval (mm) to override. Set to 0 to keep
 the raw mesh-intersection point spacing.</p>
 
-<h3>5 · Inspect the result</h3>
+<h3>5 Â· Inspect the result</h3>
 <p><b>Blue</b> passes = forward; <b>Green</b> passes = reverse;
 <b>Red</b> = collision with mesh; <b>Orange</b> = near-miss.<br>
 Toggle <b>Show Grid</b>, <b>Arrows</b>, and <b>Waypoints</b> in the ribbon for
 additional visual feedback.</p>
 
-<h3>6 · Export</h3>
+<h3>6 Â· Export</h3>
 <p>Use the <b>Export</b> menu (or ribbon buttons) to save the toolpath as
 <b>JSON</b>, <b>CSV</b>, or one of the supported OLP formats
 (RoboDK, Visual Components, DELMIA APT, G-code).</p>
@@ -1648,7 +1645,7 @@ For updates and full documentation visit the
         tb.setOpenExternalLinks(True)
         tb.setStyleSheet('font-family:"Segoe UI",Arial;font-size:12px;')
         tb.setHtml('''
-<h2 style="margin-top:0">Path Generation — Formulas &amp; Logic</h2>
+<h2 style="margin-top:0">Path Generation â€” Formulas &amp; Logic</h2>
 <p style="color:#555">Per-mode algorithm summary. Full derivations and code excerpts are in
 <code>README.md</code> &rarr; <b>Path Generation</b>.</p>
 
@@ -1670,11 +1667,11 @@ Stitcher builds a graph: endpoints are quantized to a 0.1&nbsp;&micro;m grid (to
 are open endpoints (chain starts); degree-2 nodes are interior; degree-0 or empty graph returns
 <code>[]</code> immediately (degenerate plane, no crash). A depth-first walk visits every edge once
 and collects ordered polylines. Multiple chains per plane (holes, disconnected panels) are all
-returned — <code>_significant_polylines</code> then keeps every chain &ge; 10% of the longest.</p>
+returned â€” <code>_significant_polylines</code> then keeps every chain &ge; 10% of the longest.</p>
 
 <h3>Boundary Box</h3>
 <p>Flat plane fixed at <code>bbox_max[face_axis] + standoff_mm</code>. Pass positions evenly
-spaced <code>step_min + pitch/2 … step_max</code> at interval <code>pitch</code>; passes
+spaced <code>step_min + pitch/2 â€¦ step_max</code> at interval <code>pitch</code>; passes
 alternate direction (boustrophedon, even index = forward).</p>
 
 <h3>Adaptive</h3>
@@ -1688,21 +1685,21 @@ H&times;V grid intersections.</p>
 <h3>Conform</h3>
 <p>Same <code>mean_n</code>/<code>pass_vec</code>/<code>step_vec</code> basis as Adaptive, but
 cutting planes (<code>plane_normal = step_vec</code>) are intersected against the actual mesh
-via <code>trimesh.intersections.mesh_plane</code> — paths lie exactly on the surface. Segments
+via <code>trimesh.intersections.mesh_plane</code> â€” paths lie exactly on the surface. Segments
 pass a forward-hemisphere filter (<code>face_normals &middot; mean_n &ge; 0</code>, not the
 region classifier) so boundary/transition faces are included, then are stitched into polylines
 and RDP-simplified (&epsilon; = 0.3&nbsp;mm). Standoff is a uniform shift
 <code>pts += standoff_mm &times; mean_n</code>.</p>
 
 <h3>Mesh Flow (beta)</h3>
-<p>A fully parallel pipeline (not a variant of the other three). <b>Selection is inverted</b> —
+<p>A fully parallel pipeline (not a variant of the other three). <b>Selection is inverted</b> â€”
 clicked region(s) are excluded; everything else is painted as one route.</p>
 <ol>
 <li><b>Region membership.</b> Each face scored by normal alignment (60%) + bbox-side position
 (40%). Restricted to every connected surface patch whose area is &ge; 2% of the region's largest
-patch — real panels survive, decoy slivers are dropped.</li>
+patch â€” real panels survive, decoy slivers are dropped.</li>
 <li><b>Outward-hemisphere filter.</b> Faces with
-<code>face_normal &middot; spray_normal &lt; &minus;0.5</code> are dropped — interior cavity walls
+<code>face_normal &middot; spray_normal &lt; &minus;0.5</code> are dropped â€” interior cavity walls
 and underside panels are excluded. <code>spray_normal</code> is derived from the largest component
 only (never all region faces) so interior faces cannot contaminate and flip the reference.</li>
 <li><b>Scan direction &amp; unified frame (F06/F07).</b> Scan frame derived from the largest
@@ -1711,7 +1708,7 @@ component: <code>n0</code> = mean normal; <code>d0</code> = PCA principal axis o
 <code>d&prime; = d0 &minus; (d0&middot;n0)n0</code>,
 <code>d_hat = normalize(d&prime;)</code>,
 <code>s_hat = normalize(n0 &times; d_hat)</code>.
-All components in the region share this frame — parallel passes, consistent angle. Per-component
+All components in the region share this frame â€” parallel passes, consistent angle. Per-component
 frames caused visible angle drift and have been removed.</li>
 <li><b>Curvature-adaptive lane pitch (F11/F12).</b> Lane spacing adapts to local curvature:
 <code>pitch(s) = base_pitch &times; |s_hat &times; n(s)| = base_pitch &times; sin(&phi;)</code>
@@ -1839,7 +1836,7 @@ with JSON / CSV / OLP export.</p>
     _OLP_FORMATS = {
         'ABB RAPID (.mod)':          ('abb_rapid', 'ABB RAPID (*.mod)',      '.mod'),
         'Fanuc TP / Karel (.LS)':    ('fanuc_ls',  'Fanuc LS (*.ls)',        '.ls'),
-        'Dürr EcoScreen (.tid/.tip)': ('durr',      'Dürr EcoScreen (*.tid)', '.tid'),
+        'DÃ¼rr EcoScreen (.tid/.tip)': ('durr',      'DÃ¼rr EcoScreen (*.tid)', '.tid'),
         'CAD 3D Curve (.dxf)':        ('cad_dxf',   'AutoCAD DXF (*.dxf)',    '.dxf'),
         'RoboDK (6-col curve CSV)':  ('robodk',    'CSV (*.csv)',            '.csv'),
         'Visual Components (CSV)':   ('vc',        'CSV (*.csv)',            '.csv'),
@@ -1874,7 +1871,7 @@ with JSON / CSV / OLP export.</p>
         if not path.lower().endswith(ext):
             path += ext
 
-        # Build per-pass speeds map (auto) or None (custom → fixed)
+        # Build per-pass speeds map (auto) or None (custom â†’ fixed)
         if speed_mode == 'auto':
             speeds_map: dict[int, np.ndarray] = {
                 p.id: _compute_dynamic_speeds(p.points)
@@ -1882,7 +1879,7 @@ with JSON / CSV / OLP export.</p>
                 for p in route.passes
             }
         else:
-            speeds_map = None   # fixed speed — resolved per-pass in exporters via params
+            speeds_map = None   # fixed speed â€” resolved per-pass in exporters via params
 
         # Params with correct fixed speed for metadata / custom mode
         params = self._last_params
@@ -1914,10 +1911,10 @@ with JSON / CSV / OLP export.</p>
             self.statusBar().showMessage('Export failed.')
 
     def _export_olp_mesh_flow(self) -> None:
-        """Mesh Flow (beta) export — a sibling to _export_olp; Mesh Surface's
+        """Mesh Flow (beta) export â€” a sibling to _export_olp; Mesh Surface's
         export path above is untouched. Every Mesh Flow route must pass
         app.meshflow.export_gate.enforce_export_gate before any exporter
-        function is called — there is no code path from a mesh_flow route to
+        function is called â€” there is no code path from a mesh_flow route to
         a written robot-executable file that skips this gate."""
         if not self._current_routes:
             QMessageBox.warning(self, 'Nothing to export', 'Generate a Mesh Flow path first.')
@@ -1943,7 +1940,7 @@ with JSON / CSV / OLP export.</p>
                 QMessageBox.warning(self, 'Export blocked', str(exc))
                 return
         else:
-            # No defined controller for this format (generic/CAD) — unverified
+            # No defined controller for this format (generic/CAD) â€” unverified
             # by construction; only matters for ROBOT_EXECUTABLE formats.
             convention = ToolAxisConvention(controller=fmt_key.upper(), verified=False)
 
@@ -1980,3 +1977,4 @@ with JSON / CSV / OLP export.</p>
         except Exception as exc:
             QMessageBox.critical(self, 'Export error', str(exc))
             self.statusBar().showMessage('Export failed.')
+
